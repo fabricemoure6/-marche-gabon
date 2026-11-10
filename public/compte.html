@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Mon compte</title><link rel="stylesheet" href="/styles.css"></head>
+<body><header id="top"></header>
+<main style="max-width:560px">
+  <div id="view"></div>
+</main>
+<script src="/common.js"></script>
+<script>
+(async () => {
+  await MG.ready;
+  const view = MG.$('#view'), next = MG.param('next');
+  const dest = () => (next && next.startsWith('/') && !next.startsWith('//') ? next : '/');
+  const go = u => { location.href = u; };
+
+  if (MG.param('reset')) return resetView(MG.param('reset'));
+  if (MG.param('setup')) return setupView();
+  if (MG.user) return profileView();
+  authView(MG.param('role') === 'seller' || MG.param('role') === 'courier' ? 'register' : 'login', MG.param('role') || 'customer');
+
+  function profileView() {
+    const u = MG.user, roles = { customer: 'Client', seller: 'Gestionnaire de boutique', courier: 'Livreur', admin: 'Administrateur' };
+    view.innerHTML = `<div class="card"><h1>${MG.esc(u.name)}</h1><p>${MG.esc(u.email)}<br>${MG.esc(u.phone || '')}<br><span class="tag">${roles[u.role]}</span></p>
+      <p><a class="btn" href="/commandes.html">Mes commandes</a> <button class="btn alt" id="out">Se déconnecter</button></p></div>`;
+    MG.$('#out').onclick = async () => { await MG.api('/api/auth/logout', { method: 'POST', body: {} }); go('/'); };
+  }
+
+  function authView(mode, role) {
+    view.innerHTML = `<div class="tabs"><button data-m="login" class="${mode === 'login' ? 'on' : ''}">Connexion</button><button data-m="register" class="${mode === 'register' ? 'on' : ''}">Créer un compte</button></div>
+      <form class="card" id="f"></form>`;
+    view.querySelector('.tabs').onclick = e => { const b = e.target.closest('[data-m]'); if (b) authView(b.dataset.m, role); };
+    const f = MG.$('#f');
+    if (mode === 'login') {
+      f.innerHTML = `<label for="email">E-mail</label><input id="email" type="email" required autocomplete="username">
+        <label for="pw">Mot de passe</label><input id="pw" type="password" required autocomplete="current-password">
+        <p class="err" id="err"></p><button class="btn">Se connecter</button>
+        <p class="muted">Mot de passe oublié ? Contactez l'administrateur : il vous enverra un lien de réinitialisation.</p>`;
+      f.onsubmit = async e => {
+        e.preventDefault();
+        try { await MG.api('/api/auth/login', { method: 'POST', body: { email: MG.$('#email').value, password: MG.$('#pw').value } }); go(dest()); }
+        catch (er) { MG.$('#err').textContent = er.message; }
+      };
+    } else {
+      f.innerHTML = `<label for="role">Je suis</label>
+        <select id="role"><option value="customer">Client (j'achète)</option><option value="seller">Gestionnaire de boutique (je vends)</option><option value="courier">Livreur</option></select>
+        <label for="name">Nom complet</label><input id="name" required maxlength="80" autocomplete="name">
+        <label for="email">E-mail</label><input id="email" type="email" required autocomplete="username">
+        <label for="phone">Téléphone (WhatsApp si possible)</label><input id="phone" type="tel" required maxlength="30" autocomplete="tel">
+        <div id="sellerBox" hidden>
+          <label for="shopName">Nom de la boutique</label><input id="shopName" maxlength="80">
+          <label for="category">Catégorie</label><select id="category">${MG.config.categories.map(c => `<option value="${c[0]}">${MG.esc(c[1])}</option>`).join('')}</select>
+          <label for="address">Adresse de la boutique</label><input id="address" maxlength="200">
+          <p class="muted">Votre boutique sera visible après validation par l'administrateur.</p>
+        </div>
+        <label for="pw">Mot de passe (8 caractères minimum)</label><input id="pw" type="password" required minlength="8" autocomplete="new-password">
+        <p class="err" id="err"></p><button class="btn">Créer mon compte</button>`;
+      const sel = MG.$('#role'); sel.value = role;
+      const sync = () => (MG.$('#sellerBox').hidden = sel.value !== 'seller');
+      sel.onchange = sync; sync();
+      f.onsubmit = async e => {
+        e.preventDefault();
+        const body = { role: sel.value, name: MG.$('#name').value, email: MG.$('#email').value, phone: MG.$('#phone').value, password: MG.$('#pw').value,
+          shopName: MG.$('#shopName').value, category: MG.$('#category').value, address: MG.$('#address').value };
+        try {
+          await MG.api('/api/auth/register', { method: 'POST', body });
+          go(body.role === 'seller' ? '/vendeur.html' : body.role === 'courier' ? '/livreur.html' : dest());
+        } catch (er) { MG.$('#err').textContent = er.message; }
+      };
+    }
+  }
+
+  function resetView(token) {
+    view.innerHTML = `<form class="card" id="f"><h1>Nouveau mot de passe</h1><label for="pw">Nouveau mot de passe (8 caractères minimum)</label>
+      <input id="pw" type="password" required minlength="8" autocomplete="new-password"><p class="err" id="err"></p><button class="btn">Enregistrer</button></form>`;
+    MG.$('#f').onsubmit = async e => {
+      e.preventDefault();
+      try { await MG.api('/api/auth/reset', { method: 'POST', body: { token, password: MG.$('#pw').value } }); MG.toast('Mot de passe modifié'); setTimeout(() => go('/compte.html'), 1000); }
+      catch (er) { MG.$('#err').textContent = er.message; }
+    };
+  }
+
+  async function setupView() {
+    const s = await MG.api('/api/admin/setup');
+    if (!s.needed) { view.innerHTML = '<div class="card"><p>Un administrateur existe déjà.</p><a class="btn" href="/compte.html">Connexion</a></div>'; return; }
+    view.innerHTML = `<form class="card" id="f"><h1>Créer l'administrateur</h1>
+      ${s.configured ? '' : '<div class="notice">Le secret ADMIN_SETUP_CODE n\'est pas encore défini dans Cloudflare (Settings → Variables and Secrets).</div>'}
+      <label for="code">Code d'installation (secret Cloudflare)</label><input id="code" type="password" required autocomplete="off">
+      <label for="name">Nom</label><input id="name" required>
+      <label for="email">E-mail</label><input id="email" type="email" required>
+      <label for="pw">Mot de passe (10 caractères minimum)</label><input id="pw" type="password" required minlength="10" autocomplete="new-password">
+      <p class="err" id="err"></p><button class="btn">Créer</button></form>`;
+    MG.$('#f').onsubmit = async e => {
+      e.preventDefault();
+      try { await MG.api('/api/admin/setup', { method: 'POST', body: { code: MG.$('#code').value, name: MG.$('#name').value, email: MG.$('#email').value, password: MG.$('#pw').value } }); go('/admin.html'); }
+      catch (er) { MG.$('#err').textContent = er.message; }
+    };
+  }
+})();
+</script></body></html>

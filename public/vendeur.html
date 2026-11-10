@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Ma boutique</title><link rel="stylesheet" href="/styles.css"></head>
+<body><header id="top"></header>
+<main>
+  <div id="state"></div>
+  <div class="tabs" id="tabs"><button data-t="orders" class="on">Commandes</button><button data-t="products">Produits</button><button data-t="shop">Ma boutique</button></div>
+  <div id="pane"></div>
+  <div id="detail"></div>
+</main>
+<script src="/common.js"></script>
+<script>
+(async () => {
+  if (!(await MG.require(['seller']))) return;
+  let tab = 'orders', shop = null, timer = null;
+  const S = id => MG.$('#' + id);
+  async function init() {
+    const d = await MG.api('/api/seller/shop'); shop = d.shop;
+    S('state').innerHTML = shop.status === 'active' ? '' : `<div class="notice">Votre boutique est <b>${shop.status === 'pending' ? 'en attente de validation' : 'suspendue'}</b>. ${shop.status === 'pending' ? 'Complétez-la : elle sera visible des clients dès sa validation.' : 'Contactez l\'administrateur.'}</div>`;
+    show();
+  }
+  S('tabs').onclick = e => { const b = e.target.closest('[data-t]'); if (!b) return; tab = b.dataset.t; [...S('tabs').children].forEach(x => x.classList.toggle('on', x === b)); show(); };
+  function show() { clearInterval(timer); S('detail').innerHTML = ''; ({ orders, products, shop: shopTab })[tab](); }
+
+  async function orders() {
+    async function draw() {
+      const list = await MG.api('/api/seller/orders');
+      S('pane').innerHTML = list.length ? list.map(o => `<div class="card"><div class="split"><div><b>${MG.esc(o.ref)}</b> · ${MG.esc(o.customer_name)}<br><span class="muted">${MG.date(o.created_at)} · ${MG.esc(o.address)}</span></div>
+        <span class="tag ${o.status}">${MG.esc(o.statusLabel)}</span></div>
+        <ul>${o.items.map(i => `<li>${i.qty} × ${MG.esc(i.name)}</li>`).join('')}</ul>
+        ${o.note ? `<p class="muted">Note : ${MG.esc(o.note)}</p>` : ''}
+        <div class="split"><b>${MG.fcfa(o.subtotal)} <span class="muted">(+ livraison ${MG.fcfa(o.delivery_fee)})</span></b>
+        <div class="row">
+          ${o.status === 'paid' ? `<button class="btn small" data-st="preparing" data-r="${o.ref}">Préparer</button>` : ''}
+          ${o.status === 'preparing' ? `<button class="btn small green" data-st="ready" data-r="${o.ref}">Prête : appeler un livreur</button>` : ''}
+          ${['paid', 'preparing'].includes(o.status) ? `<button class="btn small red" data-st="cancelled" data-r="${o.ref}">Annuler</button>` : ''}
+          <button class="btn small alt" data-chat="${o.ref}">Discuter</button></div></div></div>`).join('') : '<div class="card"><p>Aucune commande payée pour le moment. Vous serez notifié dès qu\'un client paie.</p></div>';
+    }
+    await draw(); timer = setInterval(draw, 20000);
+    S('pane').onclick = async e => {
+      const st = e.target.closest('[data-st]'), ch = e.target.closest('[data-chat]');
+      if (st) {
+        if (st.dataset.st === 'cancelled' && !confirm('Annuler cette commande ?')) return;
+        try { await MG.api('/api/seller/orders/' + st.dataset.r + '/status', { method: 'POST', body: { status: st.dataset.st } }); draw(); } catch (er) { MG.fail(er); }
+      }
+      if (ch) {
+        const { order: o } = await MG.api('/api/orders/' + ch.dataset.chat);
+        S('detail').innerHTML = `<div class="card"><h3>Discussion ${MG.esc(o.ref)}</h3>
+          <p>${o.customer.phone ? `Client : <a href="tel:${MG.esc(o.customer.phone)}">${MG.esc(o.customer.phone)}</a> · <a target="_blank" rel="noopener" href="${MG.waLink(o.waCustomer, 'Bonjour, à propos de votre commande ' + o.ref)}">WhatsApp</a>` : ''}</p><div id="chat"></div></div>`;
+        MG.chat(S('chat'), o.ref); S('detail').scrollIntoView({ behavior: 'smooth' });
+      }
+    };
+  }
+
+  async function products() {
+    const list = await MG.api('/api/seller/products');
+    S('pane').innerHTML = `<form class="card" id="pf"><h3>Ajouter un produit</h3>
+      <div class="row"><input id="pn" placeholder="Nom du produit" required maxlength="100"><input id="pp" type="number" min="50" step="50" placeholder="Prix (FCFA)" required style="max-width:150px"><input id="ps" type="number" min="0" placeholder="Stock" required style="max-width:100px"></div>
+      <label for="pd">Description (facultatif)</label><input id="pd" maxlength="500">
+      <label for="pi">Photo</label><input id="pi" type="file" accept="image/*">
+      <p><button class="btn">Ajouter</button></p></form>
+      <div class="card scroll"><table><thead><tr><th></th><th>Produit</th><th>Prix</th><th>Stock</th><th></th></tr></thead><tbody>${list.filter(p => p.active).map(p => `<tr>
+        <td>${p.photo_id ? `<img class="thumb" src="${MG.photo(p.photo_id)}" alt="">` : ''}</td><td>${MG.esc(p.name)}</td>
+        <td><input type="number" value="${p.price}" min="50" step="50" data-f="price" data-id="${p.id}" style="width:110px"></td>
+        <td><input type="number" value="${p.stock}" min="0" data-f="stock" data-id="${p.id}" style="width:80px"></td>
+        <td><button class="btn small red" data-del="${p.id}">Retirer</button></td></tr>`).join('')}</tbody></table></div>`;
+    S('pf').onsubmit = async e => {
+      e.preventDefault();
+      try {
+        const f = S('pi').files[0];
+        const photo_id = f ? await MG.uploadPhoto(f) : null;
+        await MG.api('/api/seller/products', { method: 'POST', body: { name: S('pn').value, price: S('pp').value, stock: S('ps').value, description: S('pd').value, photo_id } });
+        MG.toast('Produit ajouté'); products();
+      } catch (er) { MG.fail(er); }
+    };
+    S('pane').onchange = async e => {
+      const i = e.target.closest('[data-f]'); if (!i) return;
+      try { await MG.api('/api/seller/products/' + i.dataset.id, { method: 'PUT', body: { [i.dataset.f]: i.value } }); MG.toast('Enregistré'); } catch (er) { MG.fail(er); products(); }
+    };
+    S('pane').onclick = async e => {
+      const b = e.target.closest('[data-del]'); if (!b || !confirm('Retirer ce produit de la boutique ?')) return;
+      try { await MG.api('/api/seller/products/' + b.dataset.del, { method: 'DELETE', body: {} }); products(); } catch (er) { MG.fail(er); }
+    };
+  }
+
+  async function shopTab() {
+    const { shop: s } = await MG.api('/api/seller/shop'); shop = s;
+    S('pane').innerHTML = `<form class="card" id="sf"><h3>Informations de la boutique</h3>
+      <label for="n">Nom</label><input id="n" required value="${MG.esc(s.name)}" maxlength="80">
+      <label for="c">Catégorie</label><select id="c">${MG.config.categories.map(c => `<option value="${c[0]}"${c[0] === s.category ? ' selected' : ''}>${MG.esc(c[1])}</option>`).join('')}</select>
+      <label for="d">Description</label><textarea id="d" maxlength="600">${MG.esc(s.description || '')}</textarea>
+      <label for="a">Adresse</label><input id="a" value="${MG.esc(s.address || '')}" maxlength="200">
+      <label for="p">Téléphone</label><input id="p" value="${MG.esc(s.phone || '')}" maxlength="30">
+      <label for="w">Numéro WhatsApp (avec l'indicatif, ex. 241…)</label><input id="w" value="${MG.esc(s.whatsapp || '')}" maxlength="30">
+      <label>Photo de la boutique</label>${s.photo_id ? `<img class="thumb" src="${MG.photo(s.photo_id)}" alt="">` : ''}<input id="ph" type="file" accept="image/*">
+      <div class="row" style="margin-top:.8rem"><button type="button" class="btn alt small" id="gp">📍 Enregistrer la position de la boutique</button><span class="muted" id="gs">${s.lat != null ? '✅ Position enregistrée' : 'Nécessaire pour calculer la livraison et trouver les livreurs proches.'}</span></div>
+      <p><button class="btn">Enregistrer</button></p></form>`;
+    let pos = null;
+    S('gp').onclick = async () => { try { pos = await MG.getPosition(); S('gs').textContent = '✅ Position prise, pensez à enregistrer'; } catch (er) { MG.fail(er); } };
+    S('sf').onsubmit = async e => {
+      e.preventDefault();
+      try {
+        const f = S('ph').files[0];
+        const body = { name: S('n').value, category: S('c').value, description: S('d').value, address: S('a').value, phone: S('p').value, whatsapp: S('w').value, lat: pos && pos.lat, lng: pos && pos.lng };
+        if (f) body.photo_id = await MG.uploadPhoto(f);
+        await MG.api('/api/seller/shop', { method: 'PUT', body }); MG.toast('Boutique enregistrée'); shopTab();
+      } catch (er) { MG.fail(er); }
+    };
+  }
+  init();
+})();
+</script></body></html>

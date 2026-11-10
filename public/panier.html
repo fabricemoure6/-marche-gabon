@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Panier</title><link rel="stylesheet" href="/styles.css"></head>
+<body><header id="top"></header>
+<main>
+  <h1>Mon panier</h1>
+  <div id="cart"></div>
+  <form id="order" class="card" hidden>
+    <h2>Livraison et paiement</h2>
+    <label for="address">Adresse de livraison (quartier, repère)</label>
+    <input id="address" required minlength="5" maxlength="250" placeholder="Ex. : Akanda, derrière la pharmacie">
+    <div class="row" style="margin-top:.5rem"><button type="button" class="btn alt small" id="geo">📍 Utiliser ma position</button><span class="muted" id="geoState">Position non partagée : frais de base uniquement.</span></div>
+    <label for="phone">Téléphone</label>
+    <input id="phone" type="tel" required minlength="8" maxlength="30">
+    <label for="note">Précision pour le livreur (facultatif)</label>
+    <input id="note" maxlength="300">
+    <label for="method">Moyen de paiement</label>
+    <select id="method"><option value="airtel_money">Airtel Money</option><option value="moov_money">Moov Money</option><option value="card">Carte bancaire</option></select>
+    <div class="total big"><span>Total à payer</span><span id="grand"></span></div>
+    <p class="muted" id="feeNote"></p>
+    <button class="btn" id="go">Valider et payer</button>
+    <p class="err" id="err"></p>
+  </form>
+  <div id="pay" class="card" hidden></div>
+</main>
+<script src="/common.js"></script>
+<script>
+(async () => {
+  if (!(await MG.require(['customer']))) return;
+  MG.$('#phone').value = MG.user.phone || '';
+  let pos = null, items = [];
+  async function load() {
+    items = (await MG.api('/api/cart')).items;
+    const box = MG.$('#cart');
+    if (!items.length) { box.innerHTML = '<div class="card"><p>Votre panier est vide.</p><a class="btn" href="/">Voir les boutiques</a></div>'; MG.$('#order').hidden = true; return; }
+    const shops = {};
+    for (const i of items) (shops[i.shop_id] = shops[i.shop_id] || { name: i.shop_name, lines: [] }).lines.push(i);
+    let sum = 0;
+    box.innerHTML = Object.values(shops).map(s => `<div class="card"><h3>${MG.esc(s.name)}</h3>` + s.lines.map(i => {
+      sum += i.price * i.qty;
+      return `<div class="split" style="padding:.4rem 0;border-bottom:1px solid var(--line)"><div>${MG.esc(i.name)}<br><span class="muted">${MG.fcfa(i.price)}</span>${!i.active || i.shop_status !== 'active' ? ' <span class="err">indisponible</span>' : ''}</div>
+      <div class="qty"><button data-q="${i.product_id}" data-d="-1">−</button><b>${i.qty}</b><button data-q="${i.product_id}" data-d="1">+</button><button data-q="${i.product_id}" data-d="x" title="Retirer">🗑</button></div></div>`;
+    }).join('') + '</div>').join('') + `<div class="total"><span>Sous-total produits</span><b>${MG.fcfa(sum)}</b></div>`;
+    MG.$('#order').hidden = false;
+    MG.$('#grand').textContent = MG.fcfa(sum) + ' + livraison';
+    MG.$('#feeNote').textContent = `Livraison : ${MG.fcfa(MG.config.delivery_base)} + ${MG.fcfa(MG.config.delivery_per_km)} par km, par boutique (calculée à la validation si vous partagez votre position).`;
+    MG.refreshCartBadge();
+  }
+  MG.$('#cart').onclick = async e => {
+    const b = e.target.closest('[data-q]'); if (!b) return;
+    const it = items.find(i => i.product_id === b.dataset.q);
+    const qty = b.dataset.d === 'x' ? 0 : it.qty + Number(b.dataset.d);
+    try { await MG.api('/api/cart', { method: 'PUT', body: { productId: it.product_id, qty: Math.max(0, qty) } }); load(); } catch (er) { MG.fail(er); }
+  };
+  MG.$('#geo').onclick = async () => {
+    try { pos = await MG.getPosition(); MG.$('#geoState').textContent = '✅ Position enregistrée : livraison calculée selon la distance.'; } catch (er) { MG.fail(er); }
+  };
+  MG.$('#order').onsubmit = async e => {
+    e.preventDefault(); MG.$('#err').textContent = '';
+    const btn = MG.$('#go'); btn.disabled = true;
+    try {
+      const r = await MG.api('/api/checkout', { method: 'POST', body: {
+        address: MG.$('#address').value, phone: MG.$('#phone').value, note: MG.$('#note').value, method: MG.$('#method').value,
+        lat: pos && pos.lat, lng: pos && pos.lng } });
+      if (r.redirectUrl) { location.href = r.redirectUrl; return; }
+      showManual(r);
+    } catch (er) { MG.$('#err').textContent = er.message; btn.disabled = false; }
+  };
+  function showManual(r) {
+    MG.$('#cart').hidden = true; MG.$('#order').hidden = true;
+    const p = MG.$('#pay'); p.hidden = false;
+    p.innerHTML = `<h2>Paiement de ${MG.fcfa(r.amount)}</h2>
+      <p>Commande${r.orders.length > 1 ? 's' : ''} : <b>${r.orders.map(MG.esc).join(', ')}</b> · Référence de paiement : <b>${MG.esc(r.ref)}</b></p>
+      <div class="notice">${MG.esc(r.instructions)}<br>${r.airtelNumber ? `Numéro à payer : <b>${MG.esc(r.airtelNumber)}</b> (${MG.esc(r.merchantName)})` : '<b>Le numéro de paiement n\'est pas encore renseigné par l\'administrateur.</b>'}<br>Motif / référence : <b>${MG.esc(r.ref)}</b></div>
+      <label for="txn">Référence de la transaction (SMS de confirmation)</label>
+      <div class="row"><input id="txn" maxlength="60" placeholder="Ex. : MP240101.1234.A12345"><button class="btn" id="sendTxn">J'ai payé</button></div>
+      <p class="muted">La boutique est prévenue dès que le paiement est vérifié. Suivez l'état dans « Mes commandes ».</p>
+      <a class="btn alt" href="/commandes.html">Mes commandes</a>`;
+    MG.$('#sendTxn').onclick = async () => {
+      try { await MG.api('/api/my/checkouts/' + r.id + '/proof', { method: 'POST', body: { txnRef: MG.$('#txn').value } }); MG.toast('Merci, paiement en cours de vérification'); setTimeout(() => (location.href = '/commandes.html'), 1200); }
+      catch (er) { MG.fail(er); }
+    };
+  }
+  load();
+})();
+</script></body></html>

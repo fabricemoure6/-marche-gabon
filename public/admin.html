@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Administration</title><link rel="stylesheet" href="/styles.css"></head>
+<body><header id="top"></header>
+<main>
+  <h1>Administration</h1>
+  <div class="tabs" id="tabs">
+    <button data-t="overview" class="on">Vue d'ensemble</button><button data-t="payments">Paiements</button><button data-t="shops">Boutiques</button>
+    <button data-t="orders">Commandes</button><button data-t="users">Utilisateurs</button><button data-t="settings">Réglages</button></div>
+  <div id="pane"></div>
+</main>
+<script src="/common.js"></script>
+<script>
+(async () => {
+  if (!(await MG.require(['admin']))) return;
+  const S = id => MG.$('#' + id), pane = S('pane');
+  let tab = 'overview';
+  S('tabs').onclick = e => { const b = e.target.closest('[data-t]'); if (!b) return; tab = b.dataset.t; [...S('tabs').children].forEach(x => x.classList.toggle('on', x === b)); show(); };
+  const T = { overview, payments, shops, orders, users, settings };
+  const show = () => T[tab]().catch(MG.fail);
+
+  async function overview() {
+    const o = await MG.api('/api/admin/overview');
+    const cell = (v, l) => `<div class="card"><div style="font-size:1.8rem;font-weight:800">${v}</div><div class="muted">${l}</div></div>`;
+    pane.innerHTML = `<div class="grid">${cell(o.users, 'Utilisateurs')}${cell(o.shopsActive, 'Boutiques actives')}${cell(o.shopsPending, 'Boutiques à valider')}${cell(o.paymentsToCheck, 'Paiements à vérifier')}${cell(o.orders, 'Commandes')}${cell(MG.fcfa(o.revenue), 'Ventes payées')}</div>`;
+  }
+
+  async function payments() {
+    const list = await MG.api('/api/admin/payments');
+    pane.innerHTML = `<div class="card scroll"><table><thead><tr><th>Réf.</th><th>Client</th><th>Montant</th><th>Moyen</th><th>Transaction</th><th>État</th><th></th></tr></thead><tbody>${list.map(c => `<tr>
+      <td>${MG.esc(c.ref)}<br><small class="muted">${MG.date(c.created_at)}</small></td><td>${MG.esc(c.customer)}</td><td>${MG.fcfa(c.amount)}</td><td>${MG.esc(c.method || '')} <small>${MG.esc(c.provider || '')}</small></td>
+      <td>${MG.esc(c.txn_ref || '—')}</td><td><span class="tag ${c.status}">${MG.esc(c.status)}</span></td>
+      <td>${['pending', 'submitted'].includes(c.status) ? `<button class="btn small green" data-a="confirm" data-id="${c.id}">Valider</button> <button class="btn small red" data-a="reject" data-id="${c.id}">Refuser</button>` : ''}</td></tr>`).join('')}</tbody></table></div>`;
+    pane.onclick = async e => {
+      const b = e.target.closest('[data-a]'); if (!b) return;
+      if (!confirm(b.dataset.a === 'confirm' ? 'Confirmer que vous avez bien reçu cet argent ?' : 'Refuser ce paiement (le stock sera remis) ?')) return;
+      try { await MG.api('/api/admin/payments/' + b.dataset.id + '/' + b.dataset.a, { method: 'POST', body: {} }); payments(); } catch (er) { MG.fail(er); }
+    };
+  }
+
+  async function shops() {
+    const list = await MG.api('/api/admin/shops');
+    pane.innerHTML = `<div class="card scroll"><table><thead><tr><th>Boutique</th><th>Gestionnaire</th><th>Catégorie</th><th>État</th><th></th></tr></thead><tbody>${list.map(s => `<tr>
+      <td>${MG.esc(s.name)}<br><small class="muted">${MG.esc(s.address || '')}</small></td><td>${MG.esc(s.owner)}<br><small>${MG.esc(s.phone || '')}</small></td><td>${MG.esc(MG.catName(s.category))}</td>
+      <td><span class="tag ${s.status}">${s.status}</span></td>
+      <td>${s.status !== 'active' ? `<button class="btn small green" data-s="active" data-id="${s.id}">Activer</button>` : `<button class="btn small red" data-s="suspended" data-id="${s.id}">Suspendre</button>`}</td></tr>`).join('')}</tbody></table></div>`;
+    pane.onclick = async e => {
+      const b = e.target.closest('[data-s]'); if (!b) return;
+      try { await MG.api('/api/admin/shops/' + b.dataset.id + '/status', { method: 'POST', body: { status: b.dataset.s } }); shops(); } catch (er) { MG.fail(er); }
+    };
+  }
+
+  async function orders() {
+    const list = await MG.api('/api/admin/orders');
+    pane.innerHTML = `<div class="card scroll"><table><thead><tr><th>Réf.</th><th>Boutique</th><th>Client</th><th>Total</th><th>État</th></tr></thead><tbody>${list.map(o => `<tr>
+      <td>${MG.esc(o.ref)}<br><small class="muted">${MG.date(o.created_at)}</small></td><td>${MG.esc(o.shop)}</td><td>${MG.esc(o.customer)}</td><td>${MG.fcfa(o.total)}</td><td><span class="tag ${o.status}">${MG.esc(o.statusLabel)}</span></td></tr>`).join('')}</tbody></table></div>`;
+  }
+
+  async function users() {
+    const list = await MG.api('/api/admin/users');
+    const R = { customer: 'Client', seller: 'Boutique', courier: 'Livreur', admin: 'Admin' };
+    pane.innerHTML = `<div id="link"></div><div class="card scroll"><table><thead><tr><th>Nom</th><th>Contact</th><th>Rôle</th><th>État</th><th></th></tr></thead><tbody>${list.map(u => `<tr>
+      <td>${MG.esc(u.name)}</td><td>${MG.esc(u.email)}<br><small>${MG.esc(u.phone || '')}</small></td><td>${R[u.role]}</td><td><span class="tag ${u.status}">${u.status}</span></td>
+      <td>${u.role === 'admin' ? '' : `<button class="btn small alt" data-r="${u.id}">Lien de réinitialisation</button> <button class="btn small ${u.status === 'active' ? 'red' : 'green'}" data-u="${u.status === 'active' ? 'suspended' : 'active'}" data-id="${u.id}">${u.status === 'active' ? 'Suspendre' : 'Réactiver'}</button>`}</td></tr>`).join('')}</tbody></table></div>`;
+    pane.onclick = async e => {
+      const r = e.target.closest('[data-r]'), s = e.target.closest('[data-u]');
+      try {
+        if (r) { const d = await MG.api('/api/admin/users/' + r.dataset.r + '/reset', { method: 'POST', body: {} }); S('link').innerHTML = `<div class="notice">Lien valable 1 heure, à transmettre à l'utilisateur (WhatsApp) :<br><input readonly value="${MG.esc(location.origin + d.path)}" onclick="this.select()"></div>`; }
+        if (s) { await MG.api('/api/admin/users/' + s.dataset.id + '/status', { method: 'POST', body: { status: s.dataset.u } }); users(); }
+      } catch (er) { MG.fail(er); }
+    };
+  }
+
+  async function settings() {
+    const s = await MG.api('/api/admin/settings');
+    const f = (id, label, v, type = 'text') => `<label for="${id}">${label}</label><input id="${id}" type="${type}" value="${MG.esc(v)}">`;
+    pane.innerHTML = `<form class="card" id="sf" style="max-width:600px"><h3>Réglages du site</h3>
+      ${f('site_name', 'Nom du site', s.site_name)}${f('tagline', 'Slogan', s.tagline)}
+      <h3 style="margin-top:1rem">Paiement manuel (Airtel Money)</h3>
+      ${f('airtel_number', 'Numéro Airtel Money qui reçoit les paiements', s.airtel_number, 'tel')}${f('merchant_name', 'Nom affiché du bénéficiaire', s.merchant_name)}
+      <label for="payment_instructions">Instructions montrées au client</label><textarea id="payment_instructions">${MG.esc(s.payment_instructions)}</textarea>
+      <h3 style="margin-top:1rem">Livraison <small class="muted">(valeurs de départ à ajuster)</small></h3>
+      ${f('delivery_base', 'Frais de base par boutique (FCFA)', s.delivery_base, 'number')}${f('delivery_per_km', 'Prix par km (FCFA)', s.delivery_per_km, 'number')}${f('courier_radius_km', 'Rayon de recherche des livreurs (km)', s.courier_radius_km, 'number')}
+      <p><button class="btn">Enregistrer</button></p></form>
+      <div class="card"><h3>Paiement en ligne SingPay</h3><button class="btn alt small" id="chk">Tester la configuration</button><pre id="chkOut" class="muted" style="white-space:pre-wrap"></pre></div>`;
+    S('sf').onsubmit = async e => {
+      e.preventDefault();
+      const body = {}; ['site_name', 'tagline', 'airtel_number', 'merchant_name', 'payment_instructions', 'delivery_base', 'delivery_per_km', 'courier_radius_km'].forEach(k => (body[k] = S(k).value));
+      try { await MG.api('/api/admin/settings', { method: 'PUT', body }); MG.toast('Réglages enregistrés'); } catch (er) { MG.fail(er); }
+    };
+    S('chk').onclick = async () => { try { S('chkOut').textContent = JSON.stringify(await MG.api('/api/admin/singpay-check'), null, 2); } catch (er) { MG.fail(er); } };
+  }
+  show();
+})();
+</script></body></html>

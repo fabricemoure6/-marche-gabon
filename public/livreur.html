@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Mes livraisons</title><link rel="stylesheet" href="/styles.css"></head>
+<body><header id="top"></header>
+<main>
+  <h1>Espace livreur</h1>
+  <div class="card split"><div><b id="avail">…</b><br><span class="muted" id="posState">Position inconnue</span></div>
+    <div class="row"><button class="btn" id="toggle">Se mettre disponible</button></div></div>
+  <h2>Courses disponibles près de vous</h2>
+  <div id="jobs"></div>
+  <h2>Mes courses</h2>
+  <div id="mine"></div>
+  <div id="detail"></div>
+</main>
+<script src="/common.js"></script>
+<script>
+(async () => {
+  if (!(await MG.require(['courier']))) return;
+  let available = false, watchId = null, lastSent = 0;
+  const S = id => MG.$('#' + id);
+
+  function startWatch() {
+    if (watchId !== null || !navigator.geolocation) return;
+    watchId = navigator.geolocation.watchPosition(async p => {
+      S('posState').textContent = '📍 Position partagée (précision ' + Math.round(p.coords.accuracy) + ' m)';
+      if (Date.now() - lastSent < 15000) return;
+      lastSent = Date.now();
+      try { await MG.api('/api/courier/location', { method: 'POST', body: { lat: p.coords.latitude, lng: p.coords.longitude } }); } catch { /* ignoré */ }
+    }, () => (S('posState').textContent = '⚠️ Position refusée : autorisez la localisation pour recevoir des courses.'), { enableHighAccuracy: true, maximumAge: 10000 });
+  }
+
+  async function jobs() {
+    const d = await MG.api('/api/courier/jobs');
+    available = d.available;
+    S('avail').textContent = available ? '🟢 Vous êtes disponible' : '⚪ Vous êtes indisponible';
+    S('toggle').textContent = available ? 'Me mettre indisponible' : 'Me mettre disponible';
+    if (available) startWatch();
+    S('jobs').innerHTML = !available ? '<p class="muted">Activez votre disponibilité pour recevoir des courses.</p>'
+      : d.jobs.length ? d.jobs.map(j => `<div class="card"><div class="split"><div><b>${MG.esc(j.shop)}</b> → ${MG.esc(j.address)}<br>
+        <span class="muted">Boutique : ${MG.esc(j.shopAddress || '—')}${j.toShopKm != null ? ' · à ' + j.toShopKm + ' km de vous' : ''}${j.tripKm ? ' · trajet ' + j.tripKm + ' km' : ''}</span></div>
+        <div><b>${MG.fcfa(j.fee)}</b> <button class="btn small green" data-acc="${j.ref}">Accepter</button></div></div></div>`).join('')
+      : '<p class="muted">Aucune course pour le moment.' + (d.hasPosition ? '' : ' Votre position n\'est pas encore connue.') + '</p>';
+  }
+
+  async function mine() {
+    const list = await MG.api('/api/courier/orders');
+    S('mine').innerHTML = list.length ? list.map(o => `<div class="card"><div class="split"><div><b>${MG.esc(o.ref)}</b> · ${MG.esc(o.shop_name)}<br>
+      <span class="muted">Récupérer : ${MG.esc(o.shop_address || '—')}${o.shop_phone ? ' · ' + MG.esc(o.shop_phone) : ''}<br>Livrer : ${MG.esc(o.address)}</span></div>
+      <span class="tag ${o.status}">${MG.esc(o.statusLabel)}</span></div>
+      <div class="row" style="margin-top:.5rem">
+        ${o.slat != null ? `<a class="btn small alt" target="_blank" rel="noopener" href="https://www.openstreetmap.org/?mlat=${o.slat}&mlon=${o.slng}#map=16/${o.slat}/${o.slng}">Itinéraire boutique</a>` : ''}
+        ${o.lat != null ? `<a class="btn small alt" target="_blank" rel="noopener" href="https://www.openstreetmap.org/?mlat=${o.lat}&mlon=${o.lng}#map=16/${o.lat}/${o.lng}">Position client</a>` : ''}
+        ${o.status === 'ready' ? `<button class="btn small" data-do="pickup" data-r="${o.ref}">J'ai récupéré le colis</button>` : ''}
+        ${o.status === 'delivering' ? `<button class="btn small green" data-do="deliver" data-r="${o.ref}">Livré</button>` : ''}
+        <button class="btn small alt" data-chat="${o.ref}">Discuter</button></div></div>`).join('') : '<p class="muted">Aucune course acceptée.</p>';
+  }
+
+  S('toggle').onclick = async () => {
+    try {
+      await MG.api('/api/courier/availability', { method: 'POST', body: { available: !available } });
+      if (!available) startWatch();
+      jobs();
+    } catch (er) { MG.fail(er); }
+  };
+  S('jobs').onclick = async e => {
+    const b = e.target.closest('[data-acc]'); if (!b) return;
+    try { await MG.api('/api/courier/jobs/' + b.dataset.acc + '/accept', { method: 'POST', body: {} }); MG.toast('Course acceptée'); jobs(); mine(); } catch (er) { MG.fail(er); jobs(); }
+  };
+  S('mine').onclick = async e => {
+    const a = e.target.closest('[data-do]'), c = e.target.closest('[data-chat]');
+    if (a) { try { await MG.api('/api/courier/orders/' + a.dataset.r + '/' + a.dataset.do, { method: 'POST', body: {} }); mine(); } catch (er) { MG.fail(er); } }
+    if (c) {
+      const { order: o } = await MG.api('/api/orders/' + c.dataset.chat);
+      S('detail').innerHTML = `<div class="card"><h3>Discussion ${MG.esc(o.ref)}</h3>
+        <p>${o.shop.phone ? `Boutique : <a href="tel:${MG.esc(o.shop.phone)}">${MG.esc(o.shop.phone)}</a> · <a target="_blank" rel="noopener" href="${MG.waLink(o.waShop)}">WhatsApp</a>` : ''}
+        ${o.customer.phone ? `<br>Client : <a href="tel:${MG.esc(o.customer.phone)}">${MG.esc(o.customer.phone)}</a> · <a target="_blank" rel="noopener" href="${MG.waLink(o.waCustomer)}">WhatsApp</a>` : '<br><span class="muted">Le numéro du client apparaît quand vous avez récupéré le colis.</span>'}</p><div id="chat"></div></div>`;
+      MG.chat(S('chat'), o.ref); S('detail').scrollIntoView({ behavior: 'smooth' });
+    }
+  };
+  await jobs(); await mine();
+  setInterval(() => { jobs(); mine(); }, 20000);
+})();
+</script></body></html>

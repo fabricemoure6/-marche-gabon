@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Boutique</title><link rel="stylesheet" href="/styles.css"></head>
+<body><header id="top"></header>
+<main>
+  <div id="head"></div>
+  <div class="grid" id="products"></div>
+  <p class="muted" id="empty" hidden>Cette boutique n'a pas encore de produits.</p>
+</main>
+<script src="/common.js"></script>
+<script>
+(async () => {
+  await MG.ready;
+  let data;
+  try { data = await MG.api('/api/shops/' + encodeURIComponent(MG.param('s') || '')); }
+  catch { MG.$('#head').innerHTML = '<div class="card"><p>Boutique introuvable.</p><a class="btn" href="/">Retour</a></div>'; return; }
+  const { shop, products } = data;
+  document.title = shop.name + ' · ' + MG.config.site_name;
+  MG.$('#head').innerHTML = `<div class="card"><a href="/">← Toutes les boutiques</a>
+    <div class="row" style="margin-top:.6rem">${shop.photo_id ? `<img class="thumb" src="${MG.photo(shop.photo_id)}" alt="">` : ''}
+    <div><h1 style="margin:0">${MG.esc(shop.name)}</h1><span class="tag">${MG.esc(MG.catName(shop.category))}</span></div></div>
+    ${shop.description ? `<p>${MG.esc(shop.description)}</p>` : ''}${shop.address ? `<p class="muted">📍 ${MG.esc(shop.address)}</p>` : ''}</div>`;
+  MG.$('#empty').hidden = products.length > 0;
+  MG.$('#products').innerHTML = products.map(p => `<div class="tile">
+    <div class="img" style="${p.photo_id ? `background-image:url('${MG.photo(p.photo_id)}')` : ''}">${p.photo_id ? '' : '📦'}</div>
+    <div class="body"><h3>${MG.esc(p.name)}</h3>${p.description ? `<p class="muted" style="margin:0 0 .4rem">${MG.esc(p.description)}</p>` : ''}
+    <div class="split"><span class="price">${MG.fcfa(p.price)}</span>
+    ${p.stock > 0 ? `<button class="btn small" data-add="${p.id}">Ajouter</button>` : '<span class="tag cancelled">Épuisé</span>'}</div></div></div>`).join('');
+  MG.$('#products').onclick = async e => {
+    const b = e.target.closest('[data-add]'); if (!b) return;
+    if (!MG.user) { location.href = '/compte.html?next=' + encodeURIComponent(location.pathname + location.search); return; }
+    if (MG.user.role !== 'customer') return MG.toast('Utilisez un compte client pour acheter', true);
+    try {
+      const { items } = await MG.api('/api/cart');
+      const cur = (items.find(i => i.product_id === b.dataset.add) || {}).qty || 0;
+      await MG.api('/api/cart', { method: 'PUT', body: { productId: b.dataset.add, qty: cur + 1 } });
+      MG.toast('Ajouté au panier'); MG.refreshCartBadge();
+    } catch (er) { MG.fail(er); }
+  };
+})();
+</script></body></html>

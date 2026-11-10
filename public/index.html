@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Boutiques</title><link rel="stylesheet" href="/styles.css"></head>
+<body><header id="top"></header>
+<main>
+  <section class="hero">
+    <h1 id="siteName"></h1>
+    <p id="tagline"></p>
+    <form id="search"><input id="q" placeholder="Rechercher une boutique ou une marque…" aria-label="Recherche"><button class="btn">Chercher</button></form>
+  </section>
+  <div class="chips" id="chips"></div>
+  <div class="grid" id="shops"></div>
+  <p class="muted" id="empty" hidden>Aucune boutique pour le moment.</p>
+  <div class="card" style="margin-top:1.5rem">
+    <h2>Vous vendez ou livrez ?</h2>
+    <p>Ouvrez votre boutique en ligne ou devenez livreur partenaire.</p>
+    <a class="btn alt" href="/compte.html?role=seller">Ouvrir ma boutique</a>
+    <a class="btn alt" href="/compte.html?role=courier">Devenir livreur</a>
+  </div>
+</main>
+<script src="/common.js"></script>
+<script>
+(async () => {
+  await MG.ready;
+  MG.$('#siteName').textContent = MG.config.site_name;
+  MG.$('#tagline').textContent = MG.config.tagline;
+  let cat = MG.param('cat') || '';
+  const chips = MG.$('#chips');
+  const drawChips = () => {
+    chips.innerHTML = '<button class="chip' + (!cat ? ' on' : '') + '" data-c="">Toutes</button>' +
+      MG.config.categories.map(c => `<button class="chip${cat === c[0] ? ' on' : ''}" data-c="${MG.esc(c[0])}">${MG.esc(c[1])}</button>`).join('');
+  };
+  async function load() {
+    drawChips();
+    try {
+      const list = await MG.api('/api/shops?cat=' + encodeURIComponent(cat) + '&q=' + encodeURIComponent(MG.$('#q').value));
+      MG.$('#empty').hidden = list.length > 0;
+      MG.$('#shops').innerHTML = list.map(s => `<a class="tile" href="/boutique.html?s=${encodeURIComponent(s.slug)}">
+        <div class="img" style="${s.photo_id ? `background-image:url('${MG.photo(s.photo_id)}')` : ''}">${s.photo_id ? '' : '🛍️'}</div>
+        <div class="body"><h3>${MG.esc(s.name)}</h3><span class="tag">${MG.esc(MG.catName(s.category))}</span>
+        <p class="muted" style="margin:.4rem 0 0">${s.products} produit${s.products > 1 ? 's' : ''}${s.address ? ' · ' + MG.esc(s.address) : ''}</p></div></a>`).join('');
+    } catch (e) { MG.fail(e); }
+  }
+  chips.onclick = e => { const b = e.target.closest('[data-c]'); if (b) { cat = b.dataset.c; load(); } };
+  MG.$('#search').onsubmit = e => { e.preventDefault(); load(); };
+  load();
+})();
+</script></body></html>

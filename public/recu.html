@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Reçu</title><link rel="stylesheet" href="/styles.css"></head>
+<body><header id="top"></header>
+<main style="max-width:680px">
+  <div class="card" id="receipt"><p>Chargement…</p></div>
+  <p class="noprint"><button class="btn" onclick="print()">Imprimer / Enregistrer en PDF</button> <a class="btn alt" href="/commandes.html">Retour</a></p>
+</main>
+<script src="/common.js"></script>
+<script>
+(async () => {
+  if (!(await MG.require())) return;
+  try {
+    const { order: o, items } = await MG.api('/api/orders/' + encodeURIComponent(MG.param('ref') || ''));
+    if (['awaiting_payment', 'cancelled'].includes(o.status)) { MG.$('#receipt').innerHTML = '<p>Le reçu est disponible une fois la commande payée.</p>'; return; }
+    MG.$('#receipt').innerHTML = `<div class="split"><h1>Reçu</h1><div style="text-align:right"><b>${MG.esc(MG.config.site_name)}</b><br>N° ${MG.esc(o.ref)}<br>${MG.date(o.created_at)}</div></div>
+      <p><b>Client :</b> ${MG.esc(o.customer.name)}${o.customer.phone ? ' · ' + MG.esc(o.customer.phone) : ''}<br><b>Boutique :</b> ${MG.esc(o.shop.name)}<br><b>Livraison :</b> ${MG.esc(o.address)}</p>
+      <div class="scroll"><table><thead><tr><th>Produit</th><th>Qté</th><th>Prix unitaire</th><th style="text-align:right">Montant</th></tr></thead>
+      <tbody>${items.map(i => `<tr><td>${MG.esc(i.name)}</td><td>${i.qty}</td><td>${MG.fcfa(i.price)}</td><td style="text-align:right">${MG.fcfa(i.price * i.qty)}</td></tr>`).join('')}</tbody></table></div>
+      <div class="total"><span>Sous-total</span><span>${MG.fcfa(o.subtotal)}</span></div>
+      <div class="total"><span>Frais de livraison</span><span>${MG.fcfa(o.delivery_fee)}</span></div>
+      <div class="total big"><span>Total payé</span><span>${MG.fcfa(o.total)}</span></div>
+      <p class="muted">Merci pour votre achat.</p>`;
+  } catch (e) { MG.$('#receipt').innerHTML = '<p>' + MG.esc(e.message) + '</p>'; }
+})();
+</script></body></html>

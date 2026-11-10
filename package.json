@@ -1,0 +1,8 @@
+{
+  "name": "marche-gabon",
+  "version": "1.0.0",
+  "description": "Galerie marchande en ligne : plusieurs boutiques, panier, paiement mobile money, livraison par géolocalisation",
+  "private": true,
+  "scripts": { "dev": "wrangler dev", "deploy": "wrangler deploy" },
+  "devDependencies": { "wrangler": "^4.50.0" }
+}

@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Mes commandes</title><link rel="stylesheet" href="/styles.css"></head>
+<body><header id="top"></header>
+<main>
+  <h1>Mes commandes</h1>
+  <div id="msg"></div>
+  <div id="list"></div>
+  <div id="detail"></div>
+</main>
+<script src="/common.js"></script>
+<script>
+(async () => {
+  if (!(await MG.require())) return;
+  const FLOW = ['paid', 'preparing', 'ready', 'delivering', 'delivered'];
+  let trackTimer = null;
+
+  // Retour de paiement SingPay
+  const payRef = MG.param('ref') && MG.param('ref').startsWith('MG-') ? MG.param('ref') : null;
+  if (payRef) {
+    try {
+      const r = await MG.api('/api/my/checkouts/' + payRef + '/check');
+      MG.$('#msg').innerHTML = r.status === 'confirmed' || r.status === 'paid'
+        ? '<div class="notice" style="background:#D3F9D8">Paiement reçu, merci ! Les boutiques sont prévenues.</div>'
+        : '<div class="notice">Paiement non confirmé pour le moment (' + MG.esc(r.status) + '). Si vous avez payé, patientez quelques instants puis actualisez la page.</div>';
+    } catch { /* ignoré */ }
+  }
+
+  async function list() {
+    const orders = await MG.api('/api/my/orders');
+    MG.$('#list').innerHTML = orders.length ? orders.map(o => `<div class="card split">
+      <div><b>${MG.esc(o.ref)}</b> · ${MG.esc(o.shop_name)}<br><span class="muted">${MG.date(o.created_at)} · ${MG.fcfa(o.total)}</span></div>
+      <div><span class="tag ${o.status}">${MG.esc(o.statusLabel)}</span> <button class="btn small alt" data-ref="${o.ref}">Détails</button></div></div>`).join('')
+      : '<div class="card"><p>Aucune commande pour le moment.</p><a class="btn" href="/">Voir les boutiques</a></div>';
+  }
+  MG.$('#list').onclick = e => { const b = e.target.closest('[data-ref]'); if (b) open(b.dataset.ref); };
+
+  async function open(ref) {
+    clearInterval(trackTimer);
+    const { order: o, items } = await MG.api('/api/orders/' + ref);
+    const idx = FLOW.indexOf(o.status);
+    const d = MG.$('#detail');
+    d.innerHTML = `<div class="card"><div class="split"><h2>Commande ${MG.esc(o.ref)}</h2><span class="tag ${o.status}">${MG.esc(o.statusLabel)}</span></div>
+      <p><b>${MG.esc(o.shop.name)}</b> · ${MG.date(o.created_at)}</p>
+      ${o.status !== 'cancelled' && o.status !== 'awaiting_payment' ? `<ul class="steps">${FLOW.map((s, i) => `<li class="${i <= idx ? 'done' : ''}">${{ paid: 'Payée', preparing: 'Préparation', ready: 'Prête', delivering: 'En livraison', delivered: 'Livrée' }[s]}</li>`).join('')}</ul>` : ''}
+      <table><tbody>${items.map(i => `<tr><td>${MG.esc(i.name)}</td><td>${i.qty} × ${MG.fcfa(i.price)}</td><td style="text-align:right">${MG.fcfa(i.qty * i.price)}</td></tr>`).join('')}</tbody></table>
+      <div class="total"><span>Produits</span><span>${MG.fcfa(o.subtotal)}</span></div>
+      <div class="total"><span>Livraison${o.distance_km ? ' (' + o.distance_km + ' km)' : ''}</span><span>${MG.fcfa(o.delivery_fee)}</span></div>
+      <div class="total big"><span>Total</span><span>${MG.fcfa(o.total)}</span></div>
+      <p class="muted">Livraison : ${MG.esc(o.address)}</p>
+      <div class="row noprint">
+        ${['paid', 'preparing', 'ready', 'delivering', 'delivered'].includes(o.status) ? `<a class="btn small" href="/recu.html?ref=${o.ref}">🧾 Reçu</a>` : ''}
+        ${o.waShop ? `<a class="btn small green" target="_blank" rel="noopener" href="${MG.waLink(o.waShop, 'Bonjour, à propos de ma commande ' + o.ref)}">WhatsApp boutique</a>` : ''}
+        ${o.status === 'awaiting_payment' ? '<button class="btn small red" id="cancel">Annuler</button>' : ''}
+      </div>
+      <div id="track"></div></div>
+      ${o.status !== 'awaiting_payment' && o.status !== 'cancelled' ? '<div class="card"><h3>Discussion avec la boutique et le livreur</h3><div id="chat"></div></div>' : ''}`;
+    d.scrollIntoView({ behavior: 'smooth' });
+    const c = MG.$('#cancel');
+    if (c) c.onclick = async () => { if (!confirm('Annuler cette commande ?')) return; try { await MG.api('/api/orders/' + ref + '/cancel', { method: 'POST', body: {} }); list(); open(ref); } catch (er) { MG.fail(er); } };
+    if (MG.$('#chat')) MG.chat(MG.$('#chat'), ref);
+    if (['ready', 'delivering'].includes(o.status)) { track(ref); trackTimer = setInterval(() => track(ref), 15000); }
+  }
+
+  async function track(ref) {
+    try {
+      const t = await MG.api('/api/orders/' + ref + '/track');
+      const box = MG.$('#track'); if (!box) return;
+      if (!t.courier) { box.innerHTML = '<p class="muted">🔎 Recherche d\'un livreur…</p>'; return; }
+      const c = t.courier;
+      box.innerHTML = `<div class="notice">🛵 Livreur : <b>${MG.esc(c.name)}</b>${c.phone ? ` · <a href="tel:${MG.esc(c.phone)}">${MG.esc(c.phone)}</a> · <a target="_blank" rel="noopener" href="${MG.waLink(c.phone)}">WhatsApp</a>` : ''}
+        ${c.lat != null ? `<br><a target="_blank" rel="noopener" href="https://www.openstreetmap.org/?mlat=${c.lat}&mlon=${c.lng}#map=16/${c.lat}/${c.lng}">Voir sa position sur la carte</a> (mise à jour il y a ${c.ageSec} s)` : ''}</div>`;
+    } catch { /* ignoré */ }
+  }
+
+  await list();
+  const want = MG.param('ref') && MG.param('ref').startsWith('CMD-') ? MG.param('ref') : null;
+  if (want) open(want);
+})();
+</script></body></html>
