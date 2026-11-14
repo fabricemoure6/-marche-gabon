@@ -67,10 +67,11 @@
     try {
       const t = await MG.api('/api/orders/' + ref + '/track');
       const box = MG.$('#track'); if (!box) return;
-      if (!t.courier) { box.innerHTML = '<p class="muted">🔎 Recherche d\'un livreur…</p>'; return; }
+      if (!t.courier) { box.innerHTML = '<p class="muted">Recherche d\'un livreur proche…</p>'; return; }
       const c = t.courier;
-      box.innerHTML = `<div class="notice">🛵 Livreur : <b>${MG.esc(c.name)}</b>${c.phone ? ` · <a href="tel:${MG.esc(c.phone)}">${MG.esc(c.phone)}</a> · <a target="_blank" rel="noopener" href="${MG.waLink(c.phone)}">WhatsApp</a>` : ''}
-        ${c.lat != null ? `<br><a target="_blank" rel="noopener" href="https://www.openstreetmap.org/?mlat=${c.lat}&mlon=${c.lng}#map=16/${c.lat}/${c.lng}">Voir sa position sur la carte</a> (mise à jour il y a ${c.ageSec} s)` : ''}</div>`;
+      box.innerHTML = `<div class="courier-card">${MG.avatar(c, 64)}<div class="tx"><span class="muted" style="font-size:.85rem">Votre livreur</span><br><b style="font:700 1.15rem var(--font-display)">${MG.esc(c.name)}</b>
+        ${c.lat != null ? `<br><a target="_blank" rel="noopener" href="https://www.openstreetmap.org/?mlat=${c.lat}&mlon=${c.lng}#map=16/${c.lat}/${c.lng}">Voir sa position sur la carte</a> <span class="muted">(il y a ${c.ageSec} s)</span>` : ''}</div>
+        ${c.phone ? `<div class="row"><a class="btn small alt" href="tel:${MG.esc(c.phone)}">Appeler</a><a class="btn small green" target="_blank" rel="noopener" href="${MG.waLink(c.phone)}">WhatsApp</a></div>` : ''}</div>`;
     } catch { /* ignoré */ }
   }
 
