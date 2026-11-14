@@ -6,6 +6,7 @@ import {
 } from './lib.js';
 import { notify, confirmCheckout, rejectCheckout, cancelOrders, releaseVoucher, createVoucher, awardLoyalty, startOnlinePayment, singpayVerify, singpayOn, singpayCall, sp } from './pay.js';
 import { botReply, searchProducts } from './bot.js';
+import { seoRoute } from './seo.js';
 
 const cleanText = (v, max) => String(v ?? '').replace(/[\u0000-\u001f\u007f]/g, ' ').trim().slice(0, max);
 const validEmail = e => /^[^\s@]{1,64}@[^\s@]{1,190}\.[^\s@]{2,}$/.test(e) && e.length <= 254;
@@ -232,7 +233,12 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
     const p = url.pathname, method = request.method;
-    if (!p.startsWith('/api/')) return env.ASSETS.fetch(request);
+    if (!p.startsWith('/api/')) {
+      // Pages publiques rendues côté serveur pour les moteurs de recherche et les aperçus de partage
+      try { await ensureSchema(env.DB); const r = await seoRoute(request, env, url); if (r) return r; }
+      catch (e) { console.error('seo', e && e.message); }
+      return env.ASSETS.fetch(request);
+    }
     const secure = url.protocol === 'https:';
     try {
       await ensureSchema(env.DB);
@@ -301,7 +307,7 @@ export default {
       if (method === 'GET' && (m = p.match(/^\/api\/photos\/([a-f0-9]{16})$/))) {
         const ph = await env.DB.prepare('SELECT mime,data FROM photos WHERE id=?1').bind(m[1]).first();
         if (!ph) return bad('Photo introuvable', 404);
-        return new Response(fromBase64(ph.data), { headers: { 'content-type': ph.mime, 'cache-control': 'public, max-age=86400', 'x-content-type-options': 'nosniff' } });
+        return new Response(fromBase64(ph.data), { headers: { 'content-type': ph.mime, 'cache-control': 'public, max-age=31536000, immutable', 'x-content-type-options': 'nosniff' } });
       }
 
       // ===== Authentification =====
@@ -671,7 +677,7 @@ export default {
             .bind(prod.id, name, b && b.description !== undefined ? cleanText(b.description, 500) : prod.description, price, stock, photo, b && b.active === 0 ? 0 : 1, stock !== prod.stock ? Date.now() : prod.stock_updated_at, JSON.stringify(pics)).run();
           if (prod.stock <= 0 && stock > 0) { // de retour en stock : on prévient les clients qui attendaient
             const { results: wait } = await env.DB.prepare('SELECT user_id FROM stock_alerts WHERE product_id=?1').bind(prod.id).all();
-            for (const w of wait) await notify(env, w.user_id, 'De retour en stock', `« ${name} » est de nouveau disponible chez ${shop.name}. Faites vite !`, `/boutique.html?s=${shop.slug}`);
+            for (const w of wait) await notify(env, w.user_id, 'De retour en stock', `« ${name} » est de nouveau disponible chez ${shop.name}. Faites vite !`, `/boutique/${shop.slug}`);
             await env.DB.prepare('DELETE FROM stock_alerts WHERE product_id=?1').bind(prod.id).run();
           }
           return json({ ok: true });
