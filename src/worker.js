@@ -2,7 +2,7 @@
 import {
   json, bad, rand, uid, now, sha256, safeEqual, hashPassword, createSession, clearCookie, currentUser, destroySession,
   CATEGORIES, ORDER_STATUS, ensureSchema, loadSettings, saveSettings, toBase64, fromBase64, sniffImage,
-  validCoord, distanceKm, slugify, EFFECTIVE_PRICE, promoActive, publicProduct, voucherDiscount, loyaltyProgram, LOW_STOCK, photoList
+  validCoord, distanceKm, slugify, EFFECTIVE_PRICE, promoActive, publicProduct, voucherDiscount, loyaltyProgram, LOW_STOCK, photoList, SOLD, EXPENSE_CATS, period
 } from './lib.js';
 import { notify, confirmCheckout, rejectCheckout, cancelOrders, releaseVoucher, createVoucher, awardLoyalty, startOnlinePayment, singpayVerify, singpayOn, singpayCall, sp } from './pay.js';
 import { botReply, searchProducts } from './bot.js';
@@ -25,6 +25,47 @@ async function ownPhotos(env, user, list) {
   const { results } = await env.DB.prepare(`SELECT id FROM photos WHERE owner_id=?1 AND id IN (${ids.map((_, i) => '?' + (i + 2)).join(',')})`).bind(user.id, ...ids).all();
   const ok = new Set(results.map(r => r.id));
   return ids.filter(x => ok.has(x));
+}
+
+
+// ---------- Comptabilité d'une boutique ----------
+async function shopAccounting(env, shopId, per) {
+  const S = (q, ...a) => env.DB.prepare(q).bind(...a);
+  const sum = await S(`SELECT COUNT(*) AS orders, COALESCE(SUM(subtotal),0) AS gross, COALESCE(SUM(discount),0) AS discounts,
+      COALESCE(SUM(commission),0) AS commission, COALESCE(SUM(delivery_fee),0) AS delivery,
+      COALESCE(SUM(CASE WHEN status='delivered' THEN subtotal-discount-commission ELSE 0 END),0) AS net_delivered,
+      COALESCE(SUM(CASE WHEN status!='delivered' THEN subtotal-discount-commission ELSE 0 END),0) AS net_pending
+    FROM orders WHERE shop_id=?1 AND status IN ${SOLD} AND created_at BETWEEN ?2 AND ?3`, shopId, per.fromIso, per.toIso).first();
+  const cancelled = await S(`SELECT COUNT(*) AS n, COALESCE(SUM(subtotal),0) AS v FROM orders WHERE shop_id=?1 AND status='cancelled' AND created_at BETWEEN ?2 AND ?3`, shopId, per.fromIso, per.toIso).first();
+  const exp = await S(`SELECT COALESCE(SUM(amount),0) AS v FROM expenses WHERE shop_id=?1 AND day BETWEEN ?2 AND ?3`, shopId, per.from, per.to).first();
+  const { results: daily } = await S(`SELECT substr(created_at,1,10) AS day, SUM(subtotal-discount-commission) AS net, COUNT(*) AS n
+    FROM orders WHERE shop_id=?1 AND status IN ${SOLD} AND created_at BETWEEN ?2 AND ?3 GROUP BY day ORDER BY day`, shopId, per.fromIso, per.toIso).all();
+  const { results: top } = await S(`SELECT i.name, SUM(i.qty) AS qty, SUM(i.qty*i.price) AS total FROM order_items i JOIN orders o ON o.id=i.order_id
+    WHERE o.shop_id=?1 AND o.status IN ${SOLD} AND o.created_at BETWEEN ?2 AND ?3 GROUP BY i.name ORDER BY total DESC LIMIT 8`, shopId, per.fromIso, per.toIso).all();
+  const { results: orders } = await S(`SELECT o.ref,o.status,o.created_at,o.subtotal,o.discount,o.commission,o.delivery_fee,u.name AS customer
+    FROM orders o JOIN users u ON u.id=o.customer_id WHERE o.shop_id=?1 AND o.status IN ${SOLD} AND o.created_at BETWEEN ?2 AND ?3 ORDER BY o.created_at DESC LIMIT 500`, shopId, per.fromIso, per.toIso).all();
+  const { results: expenses } = await S(`SELECT id,day,category,label,amount FROM expenses WHERE shop_id=?1 AND day BETWEEN ?2 AND ?3 ORDER BY day DESC, created_at DESC`, shopId, per.from, per.to).all();
+  // Solde depuis l'ouverture : ventes livrées (nettes) moins versements reçus
+  const earned = await S(`SELECT COALESCE(SUM(subtotal-discount-commission),0) AS v FROM orders WHERE shop_id=?1 AND status='delivered'`, shopId).first();
+  const paid = await S(`SELECT COALESCE(SUM(amount),0) AS v FROM payouts WHERE shop_id=?1`, shopId).first();
+  const { results: payouts } = await S(`SELECT amount,method,reference,note,created_at FROM payouts WHERE shop_id=?1 ORDER BY created_at DESC LIMIT 50`, shopId).all();
+  const net = sum.gross - sum.discounts - sum.commission;
+  return {
+    period: { from: per.from, to: per.to },
+    summary: { ...sum, net, expenses: exp.v, profit: net - exp.v, avg: sum.orders ? Math.round((sum.gross - sum.discounts) / sum.orders) : 0, cancelled: cancelled.n, cancelled_value: cancelled.v },
+    daily, top, orders, expenses, payouts, balance: { earned: earned.v, paid: paid.v, due: earned.v - paid.v }
+  };
+}
+const csvCell = v => { const t = String(v ?? ''); return /[;"\n]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t; };
+function accountingCsv(shopName, a) {
+  const rows = [['Date', 'Type', 'Référence / catégorie', 'Libellé', 'Recette (FCFA)', 'Dépense (FCFA)', 'Détail']];
+  for (const o of a.orders) rows.push([o.created_at.slice(0, 10), 'Vente', o.ref, 'Client : ' + o.customer, o.subtotal - o.discount - o.commission, '',
+    `brut ${o.subtotal} - remise ${o.discount} - commission ${o.commission}${o.status === 'delivered' ? '' : ' (non livrée)'}`]);
+  for (const e of a.expenses) rows.push([e.day, 'Dépense', e.category, e.label || '', '', e.amount, '']);
+  rows.sort((x, y) => (x[0] < y[0] ? -1 : x[0] > y[0] ? 1 : 0));
+  const s = a.summary;
+  rows.push([], ['Total', '', '', '', s.net, s.expenses, `Bénéfice : ${s.profit} FCFA`]);
+  return '﻿' + `${shopName} — comptabilité du ${a.period.from} au ${a.period.to}\n` + rows.map(r => r.map(csvCell).join(';')).join('\n') + '\n';
 }
 
 // ---------- Invitations ----------
@@ -420,6 +461,7 @@ export default {
         for (const [shopId, ls] of byShop) {
           const subtotal = ls.reduce((t, l) => t + l.price * l.qty, 0);
           const voucher = useVoucher.get(shopId) || null, discount = voucher ? voucherDiscount(voucher, subtotal) : 0;
+          const commission = Math.round(((subtotal - discount) * (settings.commission_pct || 0)) / 100);
           let km = null, fee = settings.delivery_base;
           if (hasPos && validCoord(ls[0].slat, ls[0].slng)) {
             km = Math.round(distanceKm(lat, lng, ls[0].slat, ls[0].slng) * 10) / 10;
@@ -428,9 +470,9 @@ export default {
           const orderId = orderIds.get(shopId), oref = 'CMD-' + rand(3).toUpperCase();
           orderRefs.push(oref); amount += subtotal - discount + fee;
           stmts.push(env.DB.prepare(
-            `INSERT INTO orders (id,ref,checkout_id,customer_id,shop_id,status,subtotal,delivery_fee,total,address,lat,lng,phone,note,distance_km,created_at,updated_at,discount,voucher_id)
-             VALUES (?1,?2,?3,?4,?5,'awaiting_payment',?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?15,?16,?17)`)
-            .bind(orderId, oref, checkoutId, user.id, shopId, subtotal, fee, subtotal - discount + fee, address, hasPos ? lat : null, hasPos ? lng : null, phone, note, km, now(), discount, voucher ? voucher.id : null));
+            `INSERT INTO orders (id,ref,checkout_id,customer_id,shop_id,status,subtotal,delivery_fee,total,address,lat,lng,phone,note,distance_km,created_at,updated_at,discount,voucher_id,commission)
+             VALUES (?1,?2,?3,?4,?5,'awaiting_payment',?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?15,?16,?17,?18)`)
+            .bind(orderId, oref, checkoutId, user.id, shopId, subtotal, fee, subtotal - discount + fee, address, hasPos ? lat : null, hasPos ? lng : null, phone, note, km, now(), discount, voucher ? voucher.id : null, commission));
           for (const l of ls) {
             stmts.push(env.DB.prepare('INSERT INTO order_items (id,order_id,product_id,name,price,qty) VALUES (?1,?2,?3,?4,?5,?6)').bind(uid(), orderId, l.product_id, l.name, l.price, l.qty));
             stmts.push(env.DB.prepare('UPDATE products SET stock = stock - ?2, stock_updated_at=?3 WHERE id=?1').bind(l.product_id, l.qty, Date.now()));
@@ -681,6 +723,27 @@ export default {
           const v = await createVoucher(env, { userId: uidT, shopId: shop.id, shopName: shop.name, kind, value, minOrder: min, days, origin: 'gift', note: cleanText(b.note, 120) });
           return json(v, 201);
         }
+        if (method === 'GET' && (p === '/api/seller/accounting' || p === '/api/seller/accounting.csv')) {
+          const a = await shopAccounting(env, shop.id, period(url));
+          if (p.endsWith('.csv')) return new Response(accountingCsv(shop.name, a), { headers: { 'content-type': 'text/csv; charset=utf-8',
+            'content-disposition': `attachment; filename="comptabilite-${shop.slug}-${a.period.from}-${a.period.to}.csv"`, 'cache-control': 'no-store' } });
+          return json({ ...a, categories: EXPENSE_CATS, commission_pct: (await loadSettings(env)).commission_pct || 0 });
+        }
+        if (method === 'POST' && p === '/api/seller/expenses') {
+          const b = await readJson(request) || {};
+          const day = /^\d{4}-\d{2}-\d{2}$/.test(b.day || '') ? b.day : now().slice(0, 10), amount = Math.round(num(b.amount));
+          if (!EXPENSE_CATS.includes(b.category)) return bad('Choisissez une catégorie');
+          if (!(amount >= 1 && amount <= 100000000)) return bad('Montant invalide');
+          if (day > now().slice(0, 10)) return bad('La date ne peut pas être dans le futur');
+          const id = uid();
+          await env.DB.prepare('INSERT INTO expenses (id,shop_id,day,category,label,amount,created_at) VALUES (?1,?2,?3,?4,?5,?6,?7)').bind(id, shop.id, day, b.category, cleanText(b.label, 120), amount, now()).run();
+          return json({ id }, 201);
+        }
+        if (method === 'DELETE' && (m = p.match(/^\/api\/seller\/expenses\/([a-f0-9]{16})$/))) {
+          const r = await env.DB.prepare('DELETE FROM expenses WHERE id=?1 AND shop_id=?2').bind(m[1], shop.id).run();
+          if (!r.meta.changes) return bad('Dépense introuvable', 404);
+          return json({ ok: true });
+        }
         if (method === 'GET' && p === '/api/seller/orders') {
           const { results } = await env.DB.prepare(
             `SELECT o.id,o.ref,o.status,o.total,o.subtotal,o.discount,o.delivery_fee,o.address,o.note,o.created_at,u.name AS customer_name
@@ -809,6 +872,36 @@ export default {
           if (b.status === 'suspended') await notify(env, s.owner_id, 'Boutique suspendue', `${s.name} n'est plus visible par les clients. Motif : ${reason}`, '/vendeur.html');
           return json({ ok: true });
         }
+        if (method === 'GET' && p === '/api/admin/accounting') {
+          const per = period(url);
+          const { results } = await env.DB.prepare(`SELECT s.id,s.name,s.status,
+              COALESCE((SELECT COUNT(*) FROM orders o WHERE o.shop_id=s.id AND o.status IN ${SOLD} AND o.created_at BETWEEN ?1 AND ?2),0) AS orders,
+              COALESCE((SELECT SUM(subtotal) FROM orders o WHERE o.shop_id=s.id AND o.status IN ${SOLD} AND o.created_at BETWEEN ?1 AND ?2),0) AS gross,
+              COALESCE((SELECT SUM(discount) FROM orders o WHERE o.shop_id=s.id AND o.status IN ${SOLD} AND o.created_at BETWEEN ?1 AND ?2),0) AS discounts,
+              COALESCE((SELECT SUM(commission) FROM orders o WHERE o.shop_id=s.id AND o.status IN ${SOLD} AND o.created_at BETWEEN ?1 AND ?2),0) AS commission,
+              COALESCE((SELECT SUM(delivery_fee) FROM orders o WHERE o.shop_id=s.id AND o.status IN ${SOLD} AND o.created_at BETWEEN ?1 AND ?2),0) AS delivery,
+              COALESCE((SELECT SUM(subtotal-discount-commission) FROM orders o WHERE o.shop_id=s.id AND o.status='delivered'),0) AS earned,
+              COALESCE((SELECT SUM(amount) FROM payouts p WHERE p.shop_id=s.id),0) AS paid
+            FROM shops s ORDER BY gross DESC, s.name`).bind(per.fromIso, per.toIso).all();
+          const rows = results.map(r => ({ ...r, net: r.gross - r.discounts - r.commission, due: r.earned - r.paid }));
+          const tot = k => rows.reduce((t, r) => t + r[k], 0);
+          const refunds = await env.DB.prepare(`SELECT COUNT(*) AS n, COALESCE(SUM(total),0) AS v FROM orders o JOIN checkouts c ON c.id=o.checkout_id WHERE o.status='cancelled' AND c.status='confirmed' AND o.created_at BETWEEN ?1 AND ?2`).bind(per.fromIso, per.toIso).first();
+          return json({ period: { from: per.from, to: per.to }, rows, totals: { orders: tot('orders'), gross: tot('gross'), discounts: tot('discounts'), commission: tot('commission'), delivery: tot('delivery'), net: tot('net'), due: tot('due') },
+            refunds, commission_pct: (await loadSettings(env)).commission_pct || 0 });
+        }
+        if (method === 'POST' && p === '/api/admin/payouts') {
+          const b = await readJson(request) || {};
+          const s = /^[a-f0-9]{16}$/.test(String(b.shopId || '')) && await env.DB.prepare('SELECT id,name,owner_id FROM shops WHERE id=?1').bind(b.shopId).first();
+          if (!s) return bad('Boutique introuvable', 404);
+          const amount = Math.round(num(b.amount));
+          if (!(amount >= 1 && amount <= 100000000)) return bad('Montant invalide');
+          const method2 = ['airtel_money', 'moov_money', 'virement', 'especes'].includes(b.method) ? b.method : 'airtel_money';
+          await env.DB.prepare('INSERT INTO payouts (id,shop_id,amount,method,reference,note,created_by,created_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8)')
+            .bind(uid(), s.id, amount, method2, cleanText(b.reference, 60), cleanText(b.note, 200), user.id, now()).run();
+          await logAction(env, user, 'Versement à une boutique', 'shop', s.id, s.name, `${amount} FCFA`);
+          await notify(env, s.owner_id, 'Versement reçu', `${amount} FCFA vous ont été versés par ${{ airtel_money: 'Airtel Money', moov_money: 'Moov Money', virement: 'virement', especes: 'espèces' }[method2]}${b.reference ? ' (réf. ' + cleanText(b.reference, 60) + ')' : ''}.`, '/vendeur.html#compta', 'payment');
+          return json({ ok: true }, 201);
+        }
         if (method === 'GET' && p === '/api/admin/actions') {
           const { results } = await env.DB.prepare('SELECT admin_name,action,target_type,target_name,reason,created_at FROM admin_actions ORDER BY created_at DESC LIMIT 50').all();
           return json(results);
@@ -902,7 +995,8 @@ export default {
             courier_radius_km: nn(b.courier_radius_km, cur.courier_radius_km, 1, 200),
             invite_required: ['none', 'pro', 'all'].includes(b.invite_required) ? b.invite_required : cur.invite_required,
             promo_max_pct: nn(b.promo_max_pct, cur.promo_max_pct ?? 70, 5, 90), promo_max_days: nn(b.promo_max_days, cur.promo_max_days ?? 30, 1, 90),
-            loyalty_max_pct: nn(b.loyalty_max_pct, cur.loyalty_max_pct ?? 30, 5, 80)
+            loyalty_max_pct: nn(b.loyalty_max_pct, cur.loyalty_max_pct ?? 30, 5, 80),
+            commission_pct: nn(b.commission_pct, cur.commission_pct ?? 0, 0, 50)
           });
           return json({ ok: true });
         }

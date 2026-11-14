@@ -90,7 +90,7 @@
     search: '<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>', send: '<path d="M4 12 20 4l-6 16-3-7z"/>',
     user: '<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>', menu: '<path d="M4 7h16M4 12h16M4 17h16"/>',
     pin: '<path d="M12 21s-7-6.2-7-11a7 7 0 0 1 14 0c0 4.8-7 11-7 11z"/><circle cx="12" cy="10" r="2.5"/>',
-    chat: '<path d="M4 5h16v11H8l-4 4z"/>', trash: '<path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/>'
+    chat: '<path d="M4 5h16v11H8l-4 4z"/>', download: '<path d="M12 4v11M7 10l5 5 5-5M5 20h14"/>', trash: '<path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/>'
   };
   MG.icon = (n, s = 20) => `<svg class="ico" viewBox="0 0 24 24" width="${s}" height="${s}" aria-hidden="true">${ICONS[n] || ''}</svg>`;
 
@@ -185,6 +185,39 @@
         <span>Code <code>${MG.esc(v.code)}</code>${v.min_order ? ` · dès ${MG.fcfa(v.min_order)} d'achats` : ''}</span>
         <span>${v.used_at ? 'Utilisé' : 'Valable jusqu\'au ' + new Date(v.expires_at).toLocaleDateString('fr-FR')}${v.note ? ' · ' + MG.esc(v.note) : ''}</span></div>
       ${opts.link && v.slug && !v.used_at ? `<a class="btn small" href="/boutique.html?s=${encodeURIComponent(v.slug)}">Utiliser</a>` : ''}</div>`;
+
+  // ---------- Comptabilité : période et graphique ----------
+  const iso = d => new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+  MG.periods = () => {
+    const t = new Date(), y = t.getFullYear(), m = t.getMonth();
+    return [['month', 'Ce mois', iso(new Date(y, m, 1)), iso(t)], ['last', 'Mois dernier', iso(new Date(y, m - 1, 1)), iso(new Date(y, m, 0))],
+      ['d30', '30 derniers jours', iso(new Date(t - 29 * 864e5)), iso(t)], ['year', 'Cette année', iso(new Date(y, 0, 1)), iso(t)]];
+  };
+  MG.fmtDay = d => new Date(d + 'T12:00:00').toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' });
+  const kfmt = v => v >= 1e6 ? (v / 1e6).toLocaleString('fr-FR', { maximumFractionDigits: 1 }) + ' M' : v >= 1e3 ? Math.round(v / 1e3) + ' k' : String(v);
+  // Barres verticales (une série) avec infobulle. points = [{label, value, detail}]
+  MG.barChart = function (box, points, { title = '' } = {}) {
+    const W = 760, H = 240, L = 48, B = 28, T = 12, max = Math.max(1, ...points.map(p => p.value));
+    const step = Math.pow(10, Math.floor(Math.log10(max))), nice = Math.ceil(max / step) * step, ticks = [0, nice / 2, nice];
+    const n = points.length, bw = Math.max(2, Math.min(28, (W - L) / n - 2)), gap = (W - L) / n;
+    const y = v => T + (H - T - B) * (1 - v / nice);
+    const every = Math.ceil(n / 8);
+    box.innerHTML = `<div class="chart" role="img" aria-label="${MG.esc(title)}"><svg viewBox="0 0 ${W} ${H}" class="chart-svg">
+      ${ticks.map(t => `<line x1="${L}" x2="${W}" y1="${y(t)}" y2="${y(t)}" class="grid"/><text x="${L - 8}" y="${y(t) + 4}" class="axis" text-anchor="end">${kfmt(t)}</text>`).join('')}
+      ${points.map((p, i) => { const x = L + i * gap + (gap - bw) / 2, h = Math.max(0, y(0) - y(p.value)), r = Math.min(4, bw / 2, h);
+        return `<g class="bar" data-i="${i}"><rect x="${L + i * gap}" y="${T}" width="${gap}" height="${H - T - B}" class="hit"/>
+          ${h > 0 ? `<path d="M${x},${y(0)} V${y(p.value) + r} Q${x},${y(p.value)} ${x + r},${y(p.value)} H${x + bw - r} Q${x + bw},${y(p.value)} ${x + bw},${y(p.value) + r} V${y(0)} Z" class="mark"/>` : ''}
+          ${i % every === 0 ? `<text x="${x + bw / 2}" y="${H - 8}" class="axis" text-anchor="middle">${MG.esc(p.label)}</text>` : ''}</g>`; }).join('')}
+      <line x1="${L}" x2="${W}" y1="${y(0)}" y2="${y(0)}" class="base"/></svg><div class="chart-tip" hidden></div></div>`;
+    const tip = box.querySelector('.chart-tip'), wrap = box.querySelector('.chart');
+    wrap.addEventListener('pointermove', e => {
+      const g = e.target.closest('.bar'); if (!g) { tip.hidden = true; return; }
+      const p = points[g.dataset.i]; wrap.querySelectorAll('.bar').forEach(b => b.classList.toggle('on', b === g));
+      tip.innerHTML = `<b>${MG.esc(p.full || p.label)}</b><br>${MG.fcfa(p.value)}${p.detail ? '<br><span>' + MG.esc(p.detail) + '</span>' : ''}`; tip.hidden = false;
+      const r = wrap.getBoundingClientRect(); tip.style.left = Math.min(r.width - 170, Math.max(0, e.clientX - r.left + 12)) + 'px'; tip.style.top = Math.max(0, e.clientY - r.top - 60) + 'px';
+    });
+    wrap.addEventListener('pointerleave', () => { tip.hidden = true; wrap.querySelectorAll('.bar').forEach(b => b.classList.remove('on')); });
+  };
 
   // Fenêtre modale simple. Renvoie { el, close }. html = contenu du formulaire.
   MG.modal = function (html, { wide } = {}) {

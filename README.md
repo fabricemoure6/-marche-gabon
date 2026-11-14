@@ -33,6 +33,19 @@ SMS ; l'administrateur valide dans l'onglet Paiements.
   et les boutiques concernées portent un ruban « Promo ». Le panier et le paiement appliquent le prix promo.
 - Accueil : les boutiques sont rangées par rayon ; les produits se voient dans chaque boutique (et dans la recherche).
 
+## Comptabilité
+- Vendeur (Ma boutique → Comptabilité) : période (ce mois, mois dernier, 30 jours, année, dates libres), ventes brutes,
+  bons fidélité, commission du marché, recettes nettes, dépenses, bénéfice ; graphique des recettes par jour ou par mois ;
+  solde (gagné sur les ventes livrées, déjà versé, reste à recevoir) ; meilleures ventes ; journal recettes / dépenses ;
+  saisie des dépenses par catégorie ; export CSV pour Excel.
+- Admin (Comptabilité) : ventes par boutique, commissions, frais de livraison, bons accordés, remboursements à faire,
+  solde à verser par boutique et enregistrement des versements (la boutique est notifiée).
+- Commission du marché réglable dans Admin → Réglages (0 % par défaut), enregistrée sur chaque commande au moment du paiement.
+
+## Sons des notifications
+- Mon compte → Sons des notifications : une sonnerie par événement (balafon, clochette, carillon, tam-tam, klaxon,
+  sifflet, bip ou silencieux), volume, notifications du téléphone. Réglage gardé sur l'appareil.
+
 ## Stock et disponibilité
 - Chaque produit affiche « En stock », « Plus que N en stock » (5 ou moins) ou « Épuisé ».
 - Panier : quantité limitée au stock (ajustée avec un message), avertissement si le stock a baissé depuis l'ajout

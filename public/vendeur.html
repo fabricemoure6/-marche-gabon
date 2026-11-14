@@ -5,7 +5,7 @@
 <body><header id="top"></header>
 <main>
   <div id="state"></div>
-  <div class="tabs" id="tabs"><button data-t="orders" class="on">Commandes</button><button data-t="products">Produits</button><button data-t="loyalty">Fidélité</button><button data-t="shop">Ma boutique</button></div>
+  <div class="tabs" id="tabs"><button data-t="orders" class="on">Commandes</button><button data-t="products">Produits</button><button data-t="loyalty">Fidélité</button><button data-t="compta">Comptabilité</button><button data-t="shop">Ma boutique</button></div>
   <div id="pane"></div>
   <div id="detail"></div>
 </main>
@@ -21,8 +21,9 @@
     show();
   }
   S('tabs').onclick = e => { const b = e.target.closest('[data-t]'); if (!b) return; tab = b.dataset.t; [...S('tabs').children].forEach(x => x.classList.toggle('on', x === b)); show(); };
+  if (location.hash === '#compta') { tab = 'compta'; [...S('tabs').children].forEach(x => x.classList.toggle('on', x.dataset.t === 'compta')); }
   if (location.hash === '#produits') { tab = 'products'; [...S('tabs').children].forEach(x => x.classList.toggle('on', x.dataset.t === 'products')); }
-  function show() { clearInterval(timer); S('detail').innerHTML = ''; ({ orders, products, loyalty, shop: shopTab })[tab](); }
+  function show() { clearInterval(timer); S('detail').innerHTML = ''; ({ orders, products, loyalty, compta, shop: shopTab })[tab](); }
 
   async function orders() {
     async function draw() {
@@ -261,6 +262,74 @@
           m.close(); MG.toast(`Bon ${r.code} envoyé à ${c.name}`); loyalty(); }
         catch (er) { Q('#gerr').textContent = er.message; Q('#gsave').disabled = false; }
       };
+    };
+  }
+
+  // ----- Comptabilité : recettes, dépenses, bénéfice, versements -----
+  let per = MG.periods()[0];
+  async function compta() {
+    const q = `from=${per[2]}&to=${per[3]}`;
+    const a = await MG.api('/api/seller/accounting?' + q), s = a.summary, bal = a.balance;
+    // jours de la période (ou mois si la période est longue)
+    const days = [], d0 = new Date(per[2] + 'T12:00:00'), d1 = new Date(per[3] + 'T12:00:00'), byDay = Object.fromEntries(a.daily.map(x => [x.day, x]));
+    const long = (d1 - d0) / 864e5 > 62;
+    if (long) { const byM = {}; a.daily.forEach(x => { const k = x.day.slice(0, 7); byM[k] = byM[k] || { net: 0, n: 0 }; byM[k].net += x.net; byM[k].n += x.n; });
+      for (let c = new Date(d0.getFullYear(), d0.getMonth(), 1); c <= d1; c = new Date(c.getFullYear(), c.getMonth() + 1, 1)) { const k = c.toISOString().slice(0, 7); const v = byM[k] || { net: 0, n: 0 };
+        days.push({ label: c.toLocaleDateString('fr-FR', { month: 'short' }), full: c.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' }), value: v.net, detail: `${v.n} commande${v.n > 1 ? 's' : ''}` }); } }
+    else for (let c = new Date(d0); c <= d1; c = new Date(c.getTime() + 864e5)) { const k = c.toISOString().slice(0, 10), v = byDay[k] || { net: 0, n: 0 };
+      days.push({ label: MG.fmtDay(k), full: new Date(k + 'T12:00:00').toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' }), value: v.net, detail: `${v.n} commande${v.n > 1 ? 's' : ''}` }); }
+    const journal = [...a.orders.map(o => ({ day: o.created_at.slice(0, 10), kind: 'in', ref: o.ref, label: o.customer, amount: o.subtotal - o.discount - o.commission, note: o.status === 'delivered' ? '' : 'non livrée' })),
+      ...a.expenses.map(e => ({ day: e.day, kind: 'out', id: e.id, ref: e.category, label: e.label, amount: e.amount }))].sort((x, y) => (x.day < y.day ? 1 : -1));
+    const kpi = (v, l, cls = '', sub = '') => `<div class="kpi ${cls}"><span>${l}</span><b>${MG.fcfa(v)}</b>${sub ? `<small>${sub}</small>` : ''}</div>`;
+    S('pane').innerHTML = `<div class="card">
+      <div class="split"><div><h2 style="margin:0">Comptabilité</h2><p class="muted" style="margin:0">Du ${MG.fmtDay(a.period.from)} au ${MG.fmtDay(a.period.to)} · ${s.orders} vente${s.orders > 1 ? 's' : ''}</p></div>
+        <a class="btn small alt" href="/api/seller/accounting.csv?${q}" download>${MG.icon('download', 16)}Exporter (Excel)</a></div>
+      <div class="period" id="per">${MG.periods().map(p => `<button type="button" class="chip${p[0] === per[0] ? ' on' : ''}" data-p="${p[0]}">${p[1]}</button>`).join('')}
+        <span class="custom"><input type="date" id="pFrom" value="${per[2]}" aria-label="Du"><span>→</span><input type="date" id="pTo" value="${per[3]}" aria-label="Au"></span></div>
+      <div class="kpis6">
+        ${kpi(s.gross, 'Ventes brutes', '', `${s.orders} commande${s.orders > 1 ? 's' : ''} · panier moyen ${MG.fcfa(s.avg)}`)}
+        ${kpi(-s.discounts, 'Bons fidélité', 'neg')}
+        ${kpi(-s.commission, `Commission du marché (${a.commission_pct} %)`, 'neg')}
+        ${kpi(s.net, 'Recettes nettes', 'main', s.net_pending ? `dont ${MG.fcfa(s.net_pending)} pas encore livrés` : 'toutes livrées')}
+        ${kpi(-s.expenses, 'Dépenses', 'neg', `${a.expenses.length} dépense${a.expenses.length > 1 ? 's' : ''}`)}
+        ${kpi(s.profit, 'Bénéfice', s.profit >= 0 ? 'good' : 'bad', s.profit >= 0 ? 'recettes − dépenses' : 'les dépenses dépassent les recettes')}
+      </div></div>
+    <div class="acc-grid">
+      <div class="card"><h3 style="margin:0">Recettes nettes ${long ? 'par mois' : 'par jour'}</h3><div id="chart" style="margin-top:var(--space-3)"></div></div>
+      <div class="card"><h3 style="margin:0 0 var(--space-3)">Mon solde</h3>
+        <div class="bal"><span>Gagné (ventes livrées)</span><b>${MG.fcfa(bal.earned)}</b></div>
+        <div class="bal"><span>Déjà versé par le marché</span><b>−${MG.fcfa(bal.paid)}</b></div>
+        <div class="bal due"><span>Reste à recevoir</span><b>${MG.fcfa(bal.due)}</b></div>
+        ${a.payouts.length ? `<details style="margin-top:var(--space-3)"><summary class="muted">Versements reçus (${a.payouts.length})</summary>${a.payouts.map(p => `<div class="bal small"><span>${MG.fmtDay(p.created_at.slice(0, 10))} · ${MG.esc({ airtel_money: 'Airtel Money', moov_money: 'Moov Money', virement: 'Virement', especes: 'Espèces' }[p.method] || p.method)}${p.reference ? ' · ' + MG.esc(p.reference) : ''}</span><b>${MG.fcfa(p.amount)}</b></div>`).join('')}</details>` : ''}
+        ${s.cancelled ? `<p class="muted" style="font-size:.85rem;margin:var(--space-3) 0 0">${s.cancelled} commande${s.cancelled > 1 ? 's' : ''} annulée${s.cancelled > 1 ? 's' : ''} (${MG.fcfa(s.cancelled_value)}) non comptée${s.cancelled > 1 ? 's' : ''}.</p>` : ''}</div>
+    </div>
+    <div class="acc-grid">
+      <form class="card" id="xf"><h3 style="margin:0">Ajouter une dépense</h3>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 var(--space-3)">
+          <div><label for="xDay">Date</label><input type="date" id="xDay" value="${new Date().toISOString().slice(0, 10)}" max="${new Date().toISOString().slice(0, 10)}" required></div>
+          <div><label for="xAmt">Montant (FCFA)</label><input type="number" id="xAmt" min="1" step="1" required placeholder="Ex. : 25000"></div></div>
+        <label for="xCat">Catégorie</label><select id="xCat">${a.categories.map(c => `<option>${MG.esc(c)}</option>`).join('')}</select>
+        <label for="xLbl">Libellé (facultatif)</label><input id="xLbl" maxlength="120" placeholder="Ex. : achat de bananes au marché de Mont-Bouët">
+        <p style="margin:var(--space-3) 0 0"><button class="btn">Enregistrer la dépense</button></p></form>
+      <div class="card"><h3 style="margin:0 0 var(--space-3)">Meilleures ventes</h3>${a.top.length ? `<table><thead><tr><th>Produit</th><th>Qté</th><th style="text-align:right">Montant</th></tr></thead><tbody>${a.top.map(t => `<tr><td>${MG.esc(t.name)}</td><td>${t.qty}</td><td style="text-align:right">${MG.fcfa(t.total)}</td></tr>`).join('')}</tbody></table>` : '<p class="muted">Pas encore de vente sur cette période.</p>'}</div>
+    </div>
+    <div class="card scroll"><h3 style="margin:0 0 var(--space-3)">Journal (recettes et dépenses)</h3>${journal.length ? `<table class="journal"><thead><tr><th>Date</th><th>Opération</th><th>Détail</th><th style="text-align:right">Recette</th><th style="text-align:right">Dépense</th><th></th></tr></thead><tbody>
+      ${journal.map(j => `<tr><td>${MG.fmtDay(j.day)}</td><td>${j.kind === 'in' ? `<span class="tag paid">Vente</span> ${MG.esc(j.ref)}` : `<span class="tag cancelled">Dépense</span> ${MG.esc(j.ref)}`}</td>
+        <td>${MG.esc(j.label || '')}${j.note ? ` <small class="muted">(${j.note})</small>` : ''}</td><td style="text-align:right">${j.kind === 'in' ? MG.fcfa(j.amount) : ''}</td><td style="text-align:right">${j.kind === 'out' ? MG.fcfa(j.amount) : ''}</td>
+        <td>${j.kind === 'out' ? `<button class="btn small alt btn-icon" data-delx="${j.id}" aria-label="Supprimer la dépense">${MG.icon('trash', 14)}</button>` : ''}</td></tr>`).join('')}
+      <tr class="tot"><td colspan="3">Total de la période</td><td style="text-align:right">${MG.fcfa(s.net)}</td><td style="text-align:right">${MG.fcfa(s.expenses)}</td><td></td></tr></tbody></table>`
+      : '<p class="muted">Aucune opération sur cette période.</p>'}</div>`;
+    MG.barChart(S('chart'), days, { title: 'Recettes nettes' });
+    S('per').onclick = e => { const b = e.target.closest('[data-p]'); if (!b) return; per = MG.periods().find(p => p[0] === b.dataset.p); compta(); };
+    S('per').onchange = () => { if (S('pFrom').value && S('pTo').value) { per = ['custom', 'Période', S('pFrom').value, S('pTo').value]; compta(); } };
+    S('xf').onsubmit = async e => {
+      e.preventDefault();
+      try { await MG.api('/api/seller/expenses', { method: 'POST', body: { day: S('xDay').value, amount: S('xAmt').value, category: S('xCat').value, label: S('xLbl').value } }); MG.toast('Dépense enregistrée'); compta(); }
+      catch (er) { MG.fail(er); }
+    };
+    S('pane').onclick = async e => {
+      const d = e.target.closest('[data-delx]'); if (!d || !confirm('Supprimer cette dépense ?')) return;
+      try { await MG.api('/api/seller/expenses/' + d.dataset.delx, { method: 'DELETE', body: {} }); MG.toast('Dépense supprimée'); compta(); } catch (er) { MG.fail(er); }
     };
   }
 
