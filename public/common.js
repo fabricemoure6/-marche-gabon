@@ -33,11 +33,11 @@
   MG.uploadPhoto = async function (file) {
     if (!file) return null;
     const bmp = await createImageBitmap(file);
-    const k = Math.min(1, 900 / Math.max(bmp.width, bmp.height));
+    const k = Math.min(1, 800 / Math.max(bmp.width, bmp.height));
     const c = document.createElement('canvas');
     c.width = Math.round(bmp.width * k); c.height = Math.round(bmp.height * k);
     c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height);
-    let blob = await new Promise(r => c.toBlob(r, 'image/jpeg', 0.8));
+    let blob = await new Promise(r => c.toBlob(r, 'image/jpeg', 0.76));
     if (blob.size > 690 * 1024) blob = await new Promise(r => c.toBlob(r, 'image/jpeg', 0.55));
     const out = await MG.api('/api/photos', { method: 'POST', body: await blob.arrayBuffer() });
     return out.id;
@@ -115,7 +115,7 @@
   MG.productCard = function (p, opts = {}) {
     const out = !(p.stock > 0);
     const watching = opts.alerts && opts.alerts.includes(p.id);
-    const shop = p.shop_name ? (opts.demo ? `<span class="pshop">${MG.esc(p.shop_name)}</span>` : `<a class="pshop" href="/boutique.html?s=${encodeURIComponent(p.slug)}">${MG.esc(p.shop_name)}</a>`) : '';
+    const shop = p.shop_name ? (opts.demo ? `<span class="pshop">${MG.esc(p.shop_name)}</span>` : `<a class="pshop" href="/boutique/${encodeURIComponent(p.slug)}">${MG.esc(p.shop_name)}</a>`) : '';
     const badge = out ? '<span class="tag out">Épuisé</span>'
       : p.promo_pct ? `<span class="tag promo">−${p.promo_pct} %</span>` : (p.badge ? `<span class="tag new">${MG.esc(p.badge)}</span>` : '');
     const left = p.promo_until ? MG.timeLeft(p.promo_until) : '';
@@ -123,7 +123,7 @@
     const nPics = (p.photos || []).length;
     if (!opts.demo) { MG._prod = MG._prod || {}; MG._prod[p.id] = { ...p, category: p.category || opts.category, watching }; }
     return `<article class="tile product${out ? ' out' : ''}${p.promo_pct ? ' is-promo' : ''}">
-      <div class="pimg"${opts.demo ? '' : ` data-gal="${MG.esc(p.id)}" role="button" tabindex="0" aria-label="Voir ${MG.esc(p.name)}${nPics > 1 ? ' (' + nPics + ' photos)' : ''}"`}><img src="${img}" alt="${MG.esc(p.name)}" loading="lazy">${nPics > 1 ? `<span class="pcount"><svg class="ico" viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>${nPics}</span>` : ''}<div class="pbadges">${badge}</div>${left && !out ? `<span class="ptimer">${left}</span>` : ''}</div>
+      <div class="pimg"${opts.demo ? '' : ` data-gal="${MG.esc(p.id)}" role="button" tabindex="0" aria-label="Voir ${MG.esc(p.name)}${nPics > 1 ? ' (' + nPics + ' photos)' : ''}"`}><img src="${img}" alt="${MG.esc(p.name)}" width="400" height="300"${opts.eager ? ' fetchpriority="high"' : ' loading="lazy"'}>${nPics > 1 ? `<span class="pcount" aria-hidden="true"><svg class="ico" viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>${nPics}</span>` : ''}<div class="pbadges" aria-hidden="true">${badge}</div>${left && !out ? `<span class="ptimer" aria-hidden="true">${left}</span>` : ''}</div>
       <div class="pbody">${shop}<h3 class="pname">${MG.esc(p.name)}</h3>${opts.desc && p.description ? `<p class="pdesc">${MG.esc(p.description)}</p>` : ''}${opts.demo ? '' : MG.stockInfo(p.stock)}
         <div class="pfoot"><div>${p.old_price ? `<span class="old">${MG.fcfa(p.old_price)}</span>` : ''}<span class="price">${MG.fcfa(p.price)}</span></div>
         ${opts.demo ? '' : out ? `<button class="btn small ${watching ? 'green' : 'alt'} notify" data-alert="${MG.esc(p.id)}" data-on="${watching ? 1 : 0}">${MG.icon(watching ? 'check' : 'bell', 16)}${watching ? 'Alerte activée' : 'Me prévenir'}</button>`
@@ -168,7 +168,7 @@
     const cover = opts.cover || (s.cover_id ? MG.photo(s.cover_id) : MG.img(s.photo_id, s.category));
     const logo = s.photo_id ? `style="background-image:url('${MG.photo(s.photo_id)}')"` : '';
     const tag = opts.demo ? 'div' : 'a';
-    return `<${tag} class="tile shop${s.promos ? ' has-promo' : ''}"${opts.demo ? '' : ` href="/boutique.html?s=${encodeURIComponent(s.slug)}"`}>
+    return `<${tag} class="tile shop${s.promos ? ' has-promo' : ''}"${opts.demo ? '' : ` href="/boutique/${encodeURIComponent(s.slug)}"`}>
       <div class="cover" style="background-image:url('${cover}')">${s.promos ? `<span class="ribbon">Promo${s.best_pct ? '<span class="rl"> jusqu\'à</span> −' + s.best_pct + ' %' : ''}</span>` : ''}</div>
       <div class="body"><span class="logo" ${logo}>${s.photo_id ? '' : MG.esc(s.name.trim().charAt(0).toUpperCase())}</span><h3>${MG.esc(s.name)}</h3>
        ${s.loyalty_enabled ? '<span class="tag fid">Carte fidélité</span>' : ''}<p class="muted" style="margin:0;font-size:.9rem">${s.products ? `${s.products} produit${s.products > 1 ? 's' : ''}` : 'Vitrine en préparation'}${s.promos ? ` · <b style="color:var(--papaye-text)">${s.promos} en promo</b>` : ''}${s.address ? ' · ' + MG.esc(s.address) : ''}</p></div></${tag}>`;
@@ -184,7 +184,7 @@
       <div class="ti"><b>${opts.title || (v.shop_name ? MG.esc(v.shop_name) : 'Bon d\'achat')}</b>
         <span>Code <code>${MG.esc(v.code)}</code>${v.min_order ? ` · dès ${MG.fcfa(v.min_order)} d'achats` : ''}</span>
         <span>${v.used_at ? 'Utilisé' : 'Valable jusqu\'au ' + new Date(v.expires_at).toLocaleDateString('fr-FR')}${v.note ? ' · ' + MG.esc(v.note) : ''}</span></div>
-      ${opts.link && v.slug && !v.used_at ? `<a class="btn small" href="/boutique.html?s=${encodeURIComponent(v.slug)}">Utiliser</a>` : ''}</div>`;
+      ${opts.link && v.slug && !v.used_at ? `<a class="btn small" href="/boutique/${encodeURIComponent(v.slug)}">Utiliser</a>` : ''}</div>`;
 
   // ---------- Comptabilité : période et graphique ----------
   const iso = d => new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
@@ -356,7 +356,7 @@
     const h = document.getElementById('top');
     if (!h) return;
     const u = MG.user, role = u && ROLE_HOME[u.role];
-    document.title = (document.title ? document.title + ' · ' : '') + MG.config.site_name;
+    if (!document.title.includes(MG.config.site_name)) document.title = (document.title ? document.title + ' · ' : '') + MG.config.site_name;
     h.innerHTML = `<div class="bar"><a class="brand" href="/">${MG.esc(MG.config.site_name)}</a>
       <nav id="nav">
         <a href="/">Boutiques</a>
@@ -537,7 +537,7 @@
     const setQuick = list => { quick.innerHTML = (list || []).map(q => `<button type="button">${MG.esc(q)}</button>`).join(''); };
     const products = list => {
       if (!list || !list.length) return;
-      add('suggest', list.map(p => `<div class="it"><a href="/boutique.html?s=${encodeURIComponent(p.slug)}" style="display:contents;color:inherit"><span style="position:relative;display:block"><img src="${MG.img(p.photo_id, p.category)}" alt="">${p.promo_pct ? `<span class="tag promo" style="position:absolute;top:6px;left:6px">−${p.promo_pct} %</span>` : ''}</span>
+      add('suggest', list.map(p => `<div class="it"><a href="/boutique/${encodeURIComponent(p.slug)}" style="display:contents;color:inherit"><span style="position:relative;display:block"><img src="${MG.img(p.photo_id, p.category)}" alt="">${p.promo_pct ? `<span class="tag promo" style="position:absolute;top:6px;left:6px">−${p.promo_pct} %</span>` : ''}</span>
         <strong>${MG.esc(p.name)}</strong><small>${MG.esc(p.shop)}</small></a>
         <div class="f"><span>${p.old_price ? `<span class="old">${MG.fcfa(p.old_price)}</span>` : ''}<span class="price">${MG.fcfa(p.price)}</span></span>${p.stock > 0 ? `<button class="add sm" data-add="${MG.esc(p.id)}" aria-label="Ajouter ${MG.esc(p.name)}">${MG.icon('plus', 16)}</button>` : '<span class="tag out">Épuisé</span>'}</div></div>`).join(''));
     };

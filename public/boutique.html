@@ -1,7 +1,11 @@
 <!doctype html>
 <html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="theme-color" content="#1f1a17">
-<title>Boutique</title><link rel="stylesheet" href="/styles.css">
+<title>Boutique</title><link rel="icon" href="/favicon.svg" type="image/svg+xml"><link rel="icon" href="/favicon.ico" sizes="48x48">
+<link rel="apple-touch-icon" href="/img/icon-180.png"><link rel="manifest" href="/manifest.webmanifest">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600..800&family=Figtree:wght@400;500;600;700;800&display=swap" media="print" onload="this.media='all'"><noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600..800&family=Figtree:wght@400;500;600;700;800&display=swap"></noscript>
+<link rel="stylesheet" href="/styles.css">
 <script>try{var t=localStorage.getItem("mg-theme");if(t==="dark"||t==="light")document.documentElement.dataset.theme=t}catch(e){}</script></head>
 <body><header id="top"></header>
 <main>
@@ -29,10 +33,15 @@
   await MG.ready;
   const $ = MG.$;
   let data;
-  try { data = await MG.api('/api/shops/' + encodeURIComponent(MG.param('s') || '')); }
+  const slug = MG.param('s') || decodeURIComponent((location.pathname.match(/^\/boutique\/([^/]+)/) || [])[1] || '');
+  try {
+    // Le serveur a déjà fourni la boutique dans la page ; un client connecté recharge pour sa carte de fidélité
+    const boot = window.__SHOP__;
+    data = boot && boot.shop.slug === slug && !(MG.user && MG.user.role === 'customer') ? boot : await MG.api('/api/shops/' + encodeURIComponent(slug));
+  }
   catch { $('#head').innerHTML = '<div class="card empty-state"><h2>Boutique introuvable</h2><p class="muted">Elle a peut-être changé d\'adresse ou n\'est plus en ligne.</p><a class="btn" href="/">Retour au marché</a></div>'; $('#prodTitle').parentElement.hidden = true; return; }
   const { shop, products } = data;
-  document.title = shop.name + ' · ' + MG.config.site_name;
+  if (!document.title.includes(shop.name)) document.title = shop.name + ' · ' + MG.config.site_name; // garde le titre complet préparé par le serveur
   const promos = products.filter(p => p.promo_pct && p.stock > 0);
   const order = products.map(p => p.id); // ordre du serveur : promotions puis nouveautés
 
@@ -58,7 +67,7 @@
   if (promos.length && products.length > 6) { // grande boutique : les promos en vitrine ; sinon elles sont déjà en tête de la grille
     $('#promos').hidden = false;
     $('#promoTitle').textContent = promos.length > 1 ? `${promos.length} produits à prix réduit` : 'Un produit à prix réduit';
-    $('#promoRail').innerHTML = promos.map(p => MG.productCard(p, { category: shop.category, alerts: (data.mine || {}).alerts })).join('');
+    $('#promoRail').innerHTML = promos.map((p, i) => MG.productCard(p, { category: shop.category, alerts: (data.mine || {}).alerts, eager: i < 4 })).join('');
   }
 
   $('#toolbar').hidden = products.length < 4; // inutile pour une petite vitrine
@@ -71,7 +80,7 @@
     list = list.slice().sort((a, b) => (b.stock > 0) - (a.stock > 0) ||
       (s === 'asc' ? a.price - b.price : s === 'desc' ? b.price - a.price : s === 'new' ? String(b.created_at).localeCompare(String(a.created_at)) : order.indexOf(a.id) - order.indexOf(b.id)));
     $('#count').textContent = list.length !== products.length ? `${list.length} sur ${products.length}` : '';
-    $('#products').innerHTML = list.map(p => MG.productCard(p, { desc: true, category: shop.category, alerts: (data.mine || {}).alerts })).join('');
+    $('#products').innerHTML = list.map((p, i) => MG.productCard(p, { desc: true, category: shop.category, alerts: (data.mine || {}).alerts, eager: i < 4 })).join('');
     $('#empty').hidden = list.length > 0;
     if (!list.length && products.length) { $('#emptyTitle').textContent = 'Aucun produit ne correspond'; $('#emptyText').textContent = 'Essayez un autre mot ou retirez le filtre.'; }
   }
