@@ -49,6 +49,8 @@
       try { await MG.api('/api/me/photo', { method: 'PUT', body: { photo_id: null } }); location.reload(); } catch (er) { MG.fail(er); }
     };
     MG.$('#out').onclick = async () => { await MG.api('/api/auth/logout', { method: 'POST', body: {} }); go('/'); };
+    const snd = document.createElement('section'); snd.id = 'sons'; view.appendChild(snd); MG.soundSettings(snd);
+    if (location.hash === '#sons') setTimeout(() => snd.scrollIntoView({ behavior: 'smooth' }), 300);
     if (u.role === 'customer') loyaltyView();
   }
 

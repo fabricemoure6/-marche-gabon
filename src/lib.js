@@ -89,7 +89,8 @@ export const DEFAULT_SETTINGS = {
   courier_radius_km: 15,    // les livreurs à moins de cette distance de la boutique sont prévenus
   promo_max_pct: 70,        // remise maximale autorisée (%)
   promo_max_days: 30,       // durée maximale d'une promotion (jours)
-  loyalty_max_pct: 30,      // valeur maximale d'un bon d'achat en pourcentage
+  loyalty_max_pct: 30,
+  commission_pct: 0,        // commission du marché sur les ventes des boutiques (%)      // valeur maximale d'un bon d'achat en pourcentage
   invite_required: 'none'   // 'none' : inscription libre · 'pro' : invitation obligatoire pour boutiques et livreurs · 'all' : pour tous
 };
 
@@ -141,6 +142,10 @@ const SCHEMA = [
      value INTEGER NOT NULL, min_order INTEGER NOT NULL DEFAULT 0, expires_at INTEGER NOT NULL, origin TEXT, note TEXT, used_at TEXT, order_id TEXT, created_at TEXT)`,
   `CREATE INDEX IF NOT EXISTS idx_vouchers_user ON vouchers(user_id, shop_id)`,
   `CREATE INDEX IF NOT EXISTS idx_vouchers_order ON vouchers(order_id)`,
+  `CREATE TABLE IF NOT EXISTS expenses (id TEXT PRIMARY KEY, shop_id TEXT NOT NULL, day TEXT NOT NULL, category TEXT NOT NULL, label TEXT, amount INTEGER NOT NULL, created_at TEXT)`,
+  `CREATE INDEX IF NOT EXISTS idx_expenses_shop ON expenses(shop_id, day)`,
+  `CREATE TABLE IF NOT EXISTS payouts (id TEXT PRIMARY KEY, shop_id TEXT NOT NULL, amount INTEGER NOT NULL, method TEXT, reference TEXT, note TEXT, created_by TEXT, created_at TEXT)`,
+  `CREATE INDEX IF NOT EXISTS idx_payouts_shop ON payouts(shop_id)`,
   `CREATE TABLE IF NOT EXISTS stock_alerts (user_id TEXT NOT NULL, product_id TEXT NOT NULL, created_at TEXT, PRIMARY KEY (user_id, product_id))`,
   `CREATE INDEX IF NOT EXISTS idx_stock_alerts_product ON stock_alerts(product_id)`,
   // Le stock ne peut jamais devenir négatif : deux paiements simultanés du dernier article échouent proprement
@@ -150,10 +155,11 @@ const SCHEMA = [
 // Colonnes ajoutées après la première version : créées sur les bases existantes
 const MIGRATIONS = {
   users: [['avatar_id', 'TEXT']],
-  products: [['promo_price', 'INTEGER'], ['promo_until', 'INTEGER'], ['promo_start', 'INTEGER'], ['stock_updated_at', 'INTEGER']],
+  notifications: [['kind', 'TEXT']],
+  products: [['promo_price', 'INTEGER'], ['promo_until', 'INTEGER'], ['promo_start', 'INTEGER'], ['stock_updated_at', 'INTEGER'], ['photos', 'TEXT']],
   shops: [['loyalty_enabled', 'INTEGER NOT NULL DEFAULT 0'], ['loyalty_every', 'INTEGER'], ['loyalty_kind', 'TEXT'], ['loyalty_value', 'INTEGER'],
     ['loyalty_min', 'INTEGER'], ['loyalty_days', 'INTEGER']],
-  orders: [['discount', 'INTEGER NOT NULL DEFAULT 0'], ['voucher_id', 'TEXT']]
+  orders: [['discount', 'INTEGER NOT NULL DEFAULT 0'], ['voucher_id', 'TEXT'], ['commission', 'INTEGER NOT NULL DEFAULT 0']]
 };
 async function migrate(db) {
   for (const [table, cols] of Object.entries(MIGRATIONS)) {
@@ -176,8 +182,15 @@ export function ensureSchema(db) {
 export const EFFECTIVE_PRICE = `(CASE WHEN p.promo_price IS NOT NULL AND p.promo_until > CAST(strftime('%s','now') AS INTEGER) * 1000 THEN p.promo_price ELSE p.price END)`;
 export const promoActive = p => p.promo_price != null && p.promo_until > Date.now() && p.promo_price < p.price;
 // Produit tel que montré au public : price = prix à payer, old_price = prix barré pendant la promotion.
+// Liste des photos d'un produit (la première est la principale)
+export function photoList(p) {
+  let l = []; try { l = p.photos ? JSON.parse(p.photos) : []; } catch { l = []; }
+  if (!Array.isArray(l) || !l.length) l = p.photo_id ? [p.photo_id] : [];
+  return l.filter(x => /^[a-f0-9]{16}$/.test(x)).slice(0, 6);
+}
 export function publicProduct(p) {
   const { promo_price, promo_until, promo_start, ...rest } = p;
+  if ('photos' in rest || rest.photo_id) rest.photos = photoList(p);
   if (!promoActive(p)) return rest;
   return { ...rest, price: promo_price, old_price: p.price, promo_pct: Math.round(100 - (100 * promo_price) / p.price), promo_until };
 }
@@ -234,6 +247,19 @@ export const slugify = s => String(s).toLowerCase().normalize('NFD').replace(/[�
 // ---------- Stock ----------
 export const LOW_STOCK = 5; // « Plus que N » à partir de ce seuil
 export const stockLevel = n => (n <= 0 ? 'out' : n <= LOW_STOCK ? 'low' : 'ok');
+
+// ---------- Comptabilité ----------
+export const SOLD = `('paid','preparing','ready','delivering','delivered')`; // commandes comptées comme ventes
+export const EXPENSE_CATS = ['Achat de marchandises', 'Transport', 'Loyer', 'Salaires', 'Électricité et eau', 'Téléphone et internet', 'Publicité', 'Impôts et taxes', 'Autre'];
+// Période [from, to] au format AAAA-MM-JJ (par défaut : le mois en cours)
+export function period(url) {
+  const ok = d => /^\d{4}-\d{2}-\d{2}$/.test(d || '');
+  const t = new Date(), first = new Date(Date.UTC(t.getUTCFullYear(), t.getUTCMonth(), 1)).toISOString().slice(0, 10);
+  let from = url.searchParams.get('from'), to = url.searchParams.get('to');
+  from = ok(from) ? from : first; to = ok(to) ? to : t.toISOString().slice(0, 10);
+  if (from > to) [from, to] = [to, from];
+  return { from, to, fromIso: from + 'T00:00:00.000Z', toIso: to + 'T23:59:59.999Z' };
+}
 
 // ---------- Fidélité ----------
 // Montant de la remise d'un bon sur un sous-total (arrondi à 5 FCFA, jamais plus que le sous-total)

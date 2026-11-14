@@ -38,9 +38,22 @@ export async function awardLoyalty(env, order) {
     minOrder: s.loyalty_min, days: s.loyalty_days || 30, origin: 'loyalty' });
 }
 
-export async function notify(env, userId, title, body, url) {
-  await env.DB.prepare('INSERT INTO notifications (id,user_id,title,body,url,created_at) VALUES (?1,?2,?3,?4,?5,?6)')
-    .bind(uid(), userId, String(title).slice(0, 120), String(body || '').slice(0, 300), url || null, now()).run();
+// Type d'une notification, pour la sonnerie choisie par chacun
+export function notifKind(title, body = '') {
+  const t = String(title), b = String(body);
+  if (/^Nouvelle commande/.test(t)) return 'order';
+  if (/^Message/.test(t)) return 'message';
+  if (/^Votre commande/.test(t)) return /^Livrée/.test(b) ? 'delivered' : /livraison/i.test(b) ? 'courier' : 'info';
+  if (/Paiement/i.test(t)) return 'payment';
+  if (/Course disponible|livreur/i.test(t)) return 'courier';
+  if (/fidélité|Cadeau|Bon d'achat|De retour en stock/i.test(t)) return 'loyalty';
+  if (/Stock|épuisé|Rupture/i.test(t)) return 'stock';
+  return 'info';
+}
+
+export async function notify(env, userId, title, body, url, kind) {
+  await env.DB.prepare('INSERT INTO notifications (id,user_id,title,body,url,created_at,kind) VALUES (?1,?2,?3,?4,?5,?6,?7)')
+    .bind(uid(), userId, String(title).slice(0, 120), String(body || '').slice(0, 300), url || null, now(), kind || notifKind(title, body)).run();
 }
 
 // Quand un paiement est confirmé : commandes payées, boutiques et client prévenus
