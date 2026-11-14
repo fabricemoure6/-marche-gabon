@@ -414,3 +414,18 @@ th{font-size:.78rem;text-transform:uppercase;letter-spacing:.04em;color:var(--in
  .ticket .btn{margin-left:auto}
  .ticket .ti{order:3;flex-basis:100%}
 }
+
+/* ---------- Photo de profil ---------- */
+.pfp{display:inline-grid;place-items:center;flex:none;border-radius:50%;object-fit:cover;background:var(--soleil);color:var(--on-papaye);font-family:var(--font-display);font-weight:800;line-height:1;vertical-align:middle}
+img.pfp{background:var(--surface-300)}
+nav a.me{padding-left:6px}
+nav a.me .pfp{box-shadow:0 0 0 2px var(--papaye)}
+.pfp-pick{display:flex;align-items:center;gap:var(--space-4);margin:var(--space-2) 0}
+.pfp-pick .pfp{box-shadow:0 0 0 4px var(--surface-200),0 0 0 6px var(--papaye-tint)}
+.msg-row{display:flex;gap:var(--space-2);align-items:flex-end;align-self:flex-start;max-width:90%}
+.msg-row .msg{max-width:none}
+.person{display:flex;align-items:center;gap:var(--space-3)}
+.person .pfp{box-shadow:0 0 0 3px var(--surface-200)}
+.courier-card{display:flex;align-items:center;gap:var(--space-4);flex-wrap:wrap;background:var(--lagune-tint);border-radius:var(--radius-l);padding:var(--space-4);margin-top:var(--space-3)}
+.courier-card .tx{flex:1;min-width:200px}
+.profile-head{display:flex;gap:var(--space-5);align-items:center;flex-wrap:wrap}

@@ -30,8 +30,23 @@
 
   function profileView() {
     const u = MG.user, roles = { customer: 'Client', seller: 'Gestionnaire de boutique', courier: 'Livreur', admin: 'Administrateur' };
-    view.innerHTML = `<div class="card"><h1>${MG.esc(u.name)}</h1><p>${MG.esc(u.email)}<br>${MG.esc(u.phone || '')}<br><span class="tag">${roles[u.role]}</span></p>
-      <p><a class="btn" href="/commandes.html">Mes commandes</a> <button class="btn alt" id="out">Se déconnecter</button></p></div>`;
+    view.innerHTML = `<div class="card"><div class="profile-head"><div id="pfpBox"></div>
+      <div style="flex:1;min-width:200px"><h1 style="margin:0">${MG.esc(u.name)}</h1><p style="margin:.3rem 0">${MG.esc(u.email)}<br>${MG.esc(u.phone || '')}</p><span class="tag">${roles[u.role]}</span></div></div>
+      <div class="row" id="pfpActs" hidden style="margin-top:var(--space-3)"><button class="btn small" id="pfpSave">Enregistrer la photo</button></div>
+      ${u.avatar_id ? '<button class="link" id="pfpDel" style="margin-top:var(--space-2)">Retirer ma photo</button>' : ''}
+      <p style="margin-top:var(--space-4)"><a class="btn" href="/commandes.html">Mes commandes</a> <button class="btn alt" id="out">Se déconnecter</button></p></div>`;
+    const pick = MG.photoPicker(MG.$('#pfpBox'), { name: u.name, current: u.avatar_id,
+      hint: u.role === 'courier' ? 'Les clients voient votre photo quand vous livrez : ils vous reconnaissent plus facilement.' : 'Votre photo apparaît dans vos discussions avec les boutiques et les livreurs.' });
+    MG.$('#pfpBox input').addEventListener('change', () => (MG.$('#pfpActs').hidden = false));
+    MG.$('#pfpSave').onclick = async () => {
+      const b = MG.$('#pfpSave'); b.disabled = true; b.textContent = 'Envoi…';
+      try { const id = await MG.uploadAvatar(pick.file()); await MG.api('/api/me/photo', { method: 'PUT', body: { photo_id: id } }); MG.toast('Photo de profil enregistrée'); setTimeout(() => location.reload(), 600); }
+      catch (er) { MG.fail(er); b.disabled = false; b.textContent = 'Enregistrer la photo'; }
+    };
+    if (MG.$('#pfpDel')) MG.$('#pfpDel').onclick = async () => {
+      if (!confirm('Retirer votre photo de profil ?')) return;
+      try { await MG.api('/api/me/photo', { method: 'PUT', body: { photo_id: null } }); location.reload(); } catch (er) { MG.fail(er); }
+    };
     MG.$('#out').onclick = async () => { await MG.api('/api/auth/logout', { method: 'POST', body: {} }); go('/'); };
     if (u.role === 'customer') loyaltyView();
   }
@@ -75,6 +90,7 @@
     } else {
       f.innerHTML = `<label for="role">Je suis</label>
         <select id="role"><option value="customer">Client (j'achète)</option><option value="seller">Gestionnaire de boutique (je vends)</option><option value="courier">Livreur</option></select>
+        <div id="pfpWrap"><label>Photo de profil <span class="muted" style="font-weight:500" id="pfpOpt">(facultatif)</span></label><div id="pfpReg"></div></div>
         <label for="name">Nom complet</label><input id="name" required maxlength="80" autocomplete="name">
         <label for="email">E-mail</label><input id="email" type="email" required autocomplete="username">
         <label for="phone">Téléphone (WhatsApp si possible)</label><input id="phone" type="tel" required maxlength="30" autocomplete="tel">
@@ -94,7 +110,12 @@
         MG.$('#err').textContent = locked ? 'Ce type de compte se crée uniquement avec un lien d\'invitation : demandez-le à l\'équipe.' : '';
         f.querySelector('button.btn').disabled = locked;
       };
-      const sync = () => (MG.$('#sellerBox').hidden = sel.value !== 'seller');
+      const regPick = MG.photoPicker(MG.$('#pfpReg'), { name: '' });
+      const sync = () => {
+        MG.$('#sellerBox').hidden = sel.value !== 'seller';
+        MG.$('#pfpWrap').hidden = sel.value === 'seller'; // une boutique a déjà sa propre photo
+        MG.$('#pfpOpt').textContent = sel.value === 'courier' ? '(recommandée : les clients vous reconnaissent)' : '(facultatif)';
+      };
       sel.onchange = () => { sync(); lockNote(); }; sync(); lockNote();
       f.onsubmit = async e => {
         e.preventDefault();
@@ -102,6 +123,11 @@
           shopName: MG.$('#shopName').value, category: MG.$('#category').value, address: MG.$('#address').value, invite: invite ? invite.code : undefined };
         try {
           await MG.api('/api/auth/register', { method: 'POST', body });
+          const pf = body.role !== 'seller' && regPick.file();
+          if (pf) { // le compte existe : on envoie la photo ; un échec ici ne bloque pas l'inscription
+            try { await MG.api('/api/me/photo', { method: 'PUT', body: { photo_id: await MG.uploadAvatar(pf) } }); }
+            catch { MG.toast('Compte créé. La photo n\'a pas pu être envoyée : ajoutez-la depuis votre profil.', true); await new Promise(r => setTimeout(r, 1500)); }
+          }
           go(body.role === 'seller' ? '/vendeur.html' : body.role === 'courier' ? '/livreur.html' : dest());
         } catch (er) { MG.$('#err').textContent = er.message; }
       };

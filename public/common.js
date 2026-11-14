@@ -43,6 +43,39 @@
     return out.id;
   };
 
+  // Photo de profil : recadrée au centre en carré de 400 px (JPEG léger)
+  MG.uploadAvatar = async function (file) {
+    if (!file) return null;
+    if (!/^image\//.test(file.type)) throw new Error('Choisissez une image (JPEG, PNG ou WebP)');
+    const bmp = await createImageBitmap(file);
+    const side = Math.min(bmp.width, bmp.height), out = Math.min(400, side);
+    const c = document.createElement('canvas'); c.width = c.height = out;
+    c.getContext('2d').drawImage(bmp, (bmp.width - side) / 2, (bmp.height - side) / 2, side, side, 0, 0, out, out);
+    const blob = await new Promise(r => c.toBlob(r, 'image/jpeg', 0.82));
+    return (await MG.api('/api/photos', { method: 'POST', body: await blob.arrayBuffer() })).id;
+  };
+  // Avatar rond : la photo, sinon l'initiale sur fond soleil. u = {name, avatar_id}
+  MG.avatar = (u, size = 40) => {
+    const n = (u && u.name ? u.name.trim() : '?') || '?';
+    return u && u.avatar_id
+      ? `<img class="pfp" src="${MG.photo(u.avatar_id)}" alt="" width="${size}" height="${size}" style="width:${size}px;height:${size}px">`
+      : `<span class="pfp" aria-hidden="true" style="width:${size}px;height:${size}px;font-size:${Math.round(size * 0.42)}px">${MG.esc(n.charAt(0).toUpperCase())}</span>`;
+  };
+  // Sélecteur de photo de profil avec aperçu rond. Renvoie { file() } pour lire le fichier choisi.
+  MG.photoPicker = function (box, { name = '', current = null, hint = '' } = {}) {
+    box.innerHTML = `<div class="pfp-pick"><span class="pfp-prev">${MG.avatar({ name, avatar_id: current }, 88)}</span>
+      <div><label class="btn small alt" style="margin:0;cursor:pointer">${MG.icon('user', 16)}<span>${current ? 'Changer la photo' : 'Ajouter une photo'}</span>
+        <input type="file" accept="image/*" capture="user" hidden></label>
+        ${hint ? `<p class="muted" style="margin:.4rem 0 0;font-size:.85rem">${MG.esc(hint)}</p>` : ''}</div></div>`;
+    const input = box.querySelector('input'), prev = box.querySelector('.pfp-prev');
+    input.onchange = () => {
+      const f = input.files[0]; if (!f) return;
+      prev.innerHTML = `<img class="pfp" src="${URL.createObjectURL(f)}" alt="" style="width:88px;height:88px">`;
+      box.querySelector('label span').textContent = 'Changer la photo';
+    };
+    return { file: () => input.files[0] || null };
+  };
+
   MG.getPosition = () => new Promise((res, rej) => {
     if (!navigator.geolocation) return rej(new Error('La géolocalisation n\'est pas disponible sur cet appareil'));
     navigator.geolocation.getCurrentPosition(p => res({ lat: p.coords.latitude, lng: p.coords.longitude }),
@@ -156,7 +189,7 @@
         ${u ? '<a href="/commandes.html">' + (u.role === 'customer' ? 'Mes commandes' : 'Mes achats') + '</a>' : ''}
         ${role ? `<a href="${role[0]}">${role[1]}</a>` : ''}
         ${u ? '<button id="bell" class="bell" aria-label="Notifications">' + MG.icon('bell') + '<span class="badge" id="bellBadge" hidden>0</span></button>' : ''}
-        ${u ? `<a href="/compte.html">${MG.icon('user', 18)}${MG.esc(u.name.split(' ')[0])}</a>` : '<a href="/compte.html">Connexion</a>'}
+        ${u ? `<a href="/compte.html" class="me">${MG.avatar(u, 28)}${MG.esc(u.name.split(' ')[0])}</a>` : '<a href="/compte.html">Connexion</a>'}
         ${!u || u.role === 'customer' ? '<a class="cart" href="/panier.html">' + MG.icon('cart', 18) + 'Panier <span class="badge" id="cartBadge" hidden>0</span></a>' : ''}
       </nav><button id="burger" aria-label="Menu">${MG.icon('menu', 24)}</button></div><div id="notifBox" hidden></div>`;
     MG.$('#burger').onclick = () => MG.$('#nav').classList.toggle('open');
@@ -273,7 +306,9 @@
           const mine = m.sender_id === me;
           div.className = 'msg ' + (mine ? 'me' : 'them');
           div.innerHTML = `<small><b>${mine ? 'Vous' : MG.esc(m.sender_name)}</b><span class="role ${MG.esc(m.sender_role)}">${ROLE_NAME[m.sender_role] || ''}</span></small>${MG.esc(m.body)}<time>${MG.date(m.created_at)}</time>`;
-          log.appendChild(div); last = m.created_at;
+          if (!mine) { const row = document.createElement('div'); row.className = 'msg-row'; row.innerHTML = MG.avatar({ name: m.sender_name, avatar_id: m.avatar_id }, 32); row.appendChild(div); log.appendChild(row); }
+          else log.appendChild(div);
+          last = m.created_at;
         }
         if (d.items.length && (atBottom || !log.dataset.init)) log.scrollTop = log.scrollHeight;
         log.dataset.init = '1';

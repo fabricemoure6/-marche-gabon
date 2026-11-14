@@ -143,8 +143,9 @@ async function itemsOf(env, orderId) {
 async function loadOrderFor(env, user, ref) {
   const o = await env.DB.prepare(
     `SELECT o.*, s.name AS shop_name, s.owner_id AS shop_owner, s.address AS shop_address, s.lat AS shop_lat, s.lng AS shop_lng,
-            s.phone AS shop_phone, s.whatsapp AS shop_whatsapp, c.name AS customer_name, c.phone AS customer_phone
-     FROM orders o JOIN shops s ON s.id=o.shop_id JOIN users c ON c.id=o.customer_id WHERE o.ref=?1`).bind(ref).first();
+            s.phone AS shop_phone, s.whatsapp AS shop_whatsapp, c.name AS customer_name, c.phone AS customer_phone, c.avatar_id AS customer_avatar,
+            k.name AS courier_name, k.avatar_id AS courier_avatar
+     FROM orders o JOIN shops s ON s.id=o.shop_id JOIN users c ON c.id=o.customer_id LEFT JOIN users k ON k.id=o.courier_id WHERE o.ref=?1`).bind(ref).first();
   if (!o) return null;
   const role = user.role === 'admin' ? 'admin' : o.customer_id === user.id ? 'customer' : o.shop_owner === user.id ? 'seller' : o.courier_id === user.id ? 'courier' : null;
   return role ? { o, role } : null;
@@ -155,7 +156,8 @@ function orderPublic(o, role) {
   const out = {
     ref: o.ref, status: o.status, statusLabel: ORDER_STATUS[o.status], subtotal: o.subtotal, discount: o.discount || 0, delivery_fee: o.delivery_fee, total: o.total,
     address: o.address, note: o.note, distance_km: o.distance_km, created_at: o.created_at, shop: { name: o.shop_name, address: o.shop_address },
-    customer: { name: o.customer_name }, hasCourier: !!o.courier_id, role
+    customer: { name: o.customer_name, avatar_id: o.customer_avatar || null }, hasCourier: !!o.courier_id, role,
+    courier: o.courier_id ? { name: o.courier_name, avatar_id: o.courier_avatar || null } : null
   };
   // Les numéros ne sont montrés qu'aux personnes qui ont besoin d'appeler ou d'écrire sur WhatsApp
   if (role !== 'courier' || o.status === 'delivering') out.customer.phone = o.phone || o.customer_phone;
@@ -318,6 +320,16 @@ export default {
         await env.DB.prepare('INSERT INTO photos (id,owner_id,mime,data,size,created_at) VALUES (?1,?2,?3,?4,?5,?6)').bind(id, user.id, mime, toBase64(buf), buf.byteLength, now()).run();
         return json({ id }, 201);
       }
+      if (method === 'PUT' && p === '/api/me/photo') {
+        const b = await readJson(request) || {};
+        let photo = null;
+        if (b.photo_id) {
+          photo = String(b.photo_id);
+          if (!/^[a-f0-9]{16}$/.test(photo) || !await env.DB.prepare('SELECT 1 FROM photos WHERE id=?1 AND owner_id=?2').bind(photo, user.id).first()) return bad('Photo introuvable');
+        }
+        await env.DB.prepare('UPDATE users SET avatar_id=?2 WHERE id=?1').bind(user.id, photo).run();
+        return json({ ok: true, avatar_id: photo });
+      }
 
       // ----- Panier -----
       if (method === 'GET' && p === '/api/cart') {
@@ -471,8 +483,8 @@ export default {
         if (!r || r.role === 'courier') return bad('Commande introuvable', 404);
         if (!r.o.courier_id || !['ready', 'delivering'].includes(r.o.status)) return json({ courier: null });
         const c = await env.DB.prepare(
-          `SELECT c.lat,c.lng,c.updated_at,u.name,u.phone FROM couriers c JOIN users u ON u.id=c.user_id WHERE c.user_id=?1`).bind(r.o.courier_id).first();
-        return json({ courier: c && validCoord(c.lat, c.lng) ? { ...c, ageSec: Math.round((Date.now() - c.updated_at) / 1000) } : (c ? { name: c.name, phone: c.phone, lat: null } : null), dest: { lat: r.o.lat, lng: r.o.lng } });
+          `SELECT c.lat,c.lng,c.updated_at,u.name,u.phone,u.avatar_id FROM couriers c JOIN users u ON u.id=c.user_id WHERE c.user_id=?1`).bind(r.o.courier_id).first();
+        return json({ courier: c && validCoord(c.lat, c.lng) ? { ...c, ageSec: Math.round((Date.now() - c.updated_at) / 1000) } : (c ? { name: c.name, phone: c.phone, avatar_id: c.avatar_id, lat: null } : null), dest: { lat: r.o.lat, lng: r.o.lng } });
       }
 
       // ----- Discussion de commande (client, boutique, livreur) -----
@@ -481,7 +493,7 @@ export default {
         if (!r) return bad('Commande introuvable', 404);
         const after = url.searchParams.get('after') || '';
         const { results } = await env.DB.prepare(
-          `SELECT id,sender_id,sender_name,sender_role,body,created_at FROM chat_messages WHERE order_id=?1 AND created_at>?2 ORDER BY created_at LIMIT 100`).bind(r.o.id, after).all();
+          `SELECT m.id,m.sender_id,m.sender_name,m.sender_role,m.body,m.created_at,u.avatar_id FROM chat_messages m LEFT JOIN users u ON u.id=m.sender_id WHERE m.order_id=?1 AND m.created_at>?2 ORDER BY m.created_at LIMIT 100`).bind(r.o.id, after).all();
         return json({ me: user.id, items: results });
       }
       if (method === 'POST' && (m = p.match(/^\/api\/orders\/(CMD-[A-F0-9]{6})\/messages$/))) {
@@ -604,7 +616,7 @@ export default {
         }
         if (method === 'GET' && p === '/api/seller/customers') {
           const { results } = await env.DB.prepare(
-            `SELECT c.user_id,c.stamps,c.orders,c.spent,c.updated_at,u.name,u.phone,
+            `SELECT c.user_id,c.stamps,c.orders,c.spent,c.updated_at,u.name,u.phone,u.avatar_id,
                     (SELECT COUNT(*) FROM vouchers v WHERE v.user_id=c.user_id AND v.shop_id=c.shop_id AND v.used_at IS NULL AND v.expires_at>?2) AS vouchers
              FROM loyalty_cards c JOIN users u ON u.id=c.user_id WHERE c.shop_id=?1 ORDER BY c.orders DESC, c.spent DESC LIMIT 200`).bind(shop.id, Date.now()).all();
           return json(results);
@@ -775,7 +787,7 @@ export default {
           return json({ ok: true });
         }
         if (method === 'GET' && p === '/api/admin/users') {
-          const { results } = await env.DB.prepare(`SELECT id,email,name,phone,role,status,created_at FROM users ORDER BY created_at DESC LIMIT 300`).all();
+          const { results } = await env.DB.prepare(`SELECT id,email,name,phone,role,status,created_at,avatar_id FROM users ORDER BY created_at DESC LIMIT 300`).all();
           return json(results);
         }
         if (method === 'POST' && (m = p.match(/^\/api\/admin\/users\/([a-f0-9]{16})\/status$/))) {

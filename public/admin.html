@@ -99,7 +99,7 @@
     const list = await MG.api('/api/admin/users');
     const R = ROLE;
     pane.innerHTML = `<div id="link"></div><div class="card scroll"><table><thead><tr><th>Nom</th><th>Contact</th><th>Rôle</th><th>État</th><th></th></tr></thead><tbody>${list.map(u => `<tr>
-      <td>${MG.esc(u.name)}</td><td>${MG.esc(u.email)}<br><small>${MG.esc(u.phone || '')}</small></td><td>${R[u.role]}</td><td><span class="tag ${u.status}">${u.status}</span></td>
+      <td><span class="person">${MG.avatar(u, 36)}${MG.esc(u.name)}</span></td><td>${MG.esc(u.email)}<br><small>${MG.esc(u.phone || '')}</small></td><td>${R[u.role]}</td><td><span class="tag ${u.status}">${u.status}</span></td>
       <td>${u.role === 'admin' ? '' : `<button class="btn small alt" data-r="${u.id}">Lien de réinitialisation</button> <button class="btn small ${u.status === 'active' ? 'red' : 'green'}" data-u="${u.status === 'active' ? 'suspended' : 'active'}" data-id="${u.id}">${u.status === 'active' ? 'Suspendre' : 'Réactiver'}</button>`}</td></tr>`).join('')}</tbody></table></div>`;
     pane.onclick = async e => {
       const r = e.target.closest('[data-r]'), s = e.target.closest('[data-u]');

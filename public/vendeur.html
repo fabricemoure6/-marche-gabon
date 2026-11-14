@@ -46,6 +46,8 @@
       if (ch) {
         const { order: o } = await MG.api('/api/orders/' + ch.dataset.chat);
         S('detail').innerHTML = `<div class="card"><h3>Discussion ${MG.esc(o.ref)}</h3>
+          <div class="row" style="gap:var(--space-5)"><span class="person">${MG.avatar(o.customer, 40)}<span><span class="muted" style="font-size:.85rem">Client</span><br><b>${MG.esc(o.customer.name)}</b></span></span>
+          ${o.courier ? `<span class="person">${MG.avatar(o.courier, 40)}<span><span class="muted" style="font-size:.85rem">Livreur</span><br><b>${MG.esc(o.courier.name)}</b></span></span>` : ''}</div>
           <p>${o.customer.phone ? `Client : <a href="tel:${MG.esc(o.customer.phone)}">${MG.esc(o.customer.phone)}</a> · <a target="_blank" rel="noopener" href="${MG.waLink(o.waCustomer, 'Bonjour, à propos de votre commande ' + o.ref)}">WhatsApp</a>` : ''}</p><div id="chat"></div></div>`;
         MG.chat(S('chat'), o.ref); S('detail').scrollIntoView({ behavior: 'smooth' });
       }
@@ -180,7 +182,7 @@
       <div class="card"><h2 style="margin:0">Mes clients fidèles</h2>
         <div class="kpis"><div><b>${stats.customers}</b><span>clients livrés</span></div><div><b>${stats.issued}</b><span>bons émis</span></div><div><b>${stats.used}</b><span>bons utilisés</span></div><div><b>${MG.fcfa(stats.discounted)}</b><span>de remises accordées</span></div></div>
         ${customers.length ? `<div class="scroll"><table><thead><tr><th>Client</th><th>Commandes</th><th>Dépensé</th><th>Carte</th><th></th></tr></thead><tbody>${customers.map(c => `<tr>
-          <td><b>${MG.esc(c.name)}</b><br><small class="muted">dernière : ${MG.date(c.updated_at)}</small></td><td>${c.orders}</td><td>${MG.fcfa(c.spent)}</td>
+          <td><span class="person">${MG.avatar(c, 40)}<span><b>${MG.esc(c.name)}</b><br><small class="muted">dernière : ${MG.date(c.updated_at)}</small></span></span></td><td>${c.orders}</td><td>${MG.fcfa(c.spent)}</td>
           <td>${pg.enabled ? MG.stamps(c.stamps % pg.every, pg.every) : '—'}${c.vouchers ? `<br><small class="muted">${c.vouchers} bon${c.vouchers > 1 ? 's' : ''} en attente</small>` : ''}</td>
           <td><button class="btn small" data-gift="${c.user_id}">Offrir un bon</button></td></tr>`).join('')}</tbody></table></div>`
         : '<p class="muted">Vos clients apparaîtront ici après leur première commande livrée.</p>'}</div>`;

@@ -73,7 +73,8 @@
       const { order: o } = await MG.api('/api/orders/' + c.dataset.chat);
       S('detail').innerHTML = `<div class="card"><h3>Discussion ${MG.esc(o.ref)}</h3>
         <p>${o.shop.phone ? `Boutique : <a href="tel:${MG.esc(o.shop.phone)}">${MG.esc(o.shop.phone)}</a> · <a target="_blank" rel="noopener" href="${MG.waLink(o.waShop)}">WhatsApp</a>` : ''}
-        ${o.customer.phone ? `<br>Client : <a href="tel:${MG.esc(o.customer.phone)}">${MG.esc(o.customer.phone)}</a> · <a target="_blank" rel="noopener" href="${MG.waLink(o.waCustomer)}">WhatsApp</a>` : '<br><span class="muted">Le numéro du client apparaît quand vous avez récupéré le colis.</span>'}</p><div id="chat"></div></div>`;
+        <span class="person" style="margin-top:.5rem">${MG.avatar(o.customer, 44)}<span><span class="muted" style="font-size:.85rem">Client</span><br><b>${MG.esc(o.customer.name)}</b></span></span>
+        ${o.customer.phone ? `Client : <a href="tel:${MG.esc(o.customer.phone)}">${MG.esc(o.customer.phone)}</a> · <a target="_blank" rel="noopener" href="${MG.waLink(o.waCustomer)}">WhatsApp</a>` : '<br><span class="muted">Le numéro du client apparaît quand vous avez récupéré le colis.</span>'}</p><div id="chat"></div></div>`;
       MG.chat(S('chat'), o.ref); S('detail').scrollIntoView({ behavior: 'smooth' });
     }
   };

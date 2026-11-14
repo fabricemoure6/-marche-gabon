@@ -56,7 +56,7 @@ export async function currentUser(request, env) {
   const sid = getCookie(request, 'sid');
   if (!sid) return null;
   const u = await env.DB.prepare(
-    `SELECT u.id,u.email,u.name,u.phone,u.role,u.status FROM sessions s JOIN users u ON u.id=s.user_id
+    `SELECT u.id,u.email,u.name,u.phone,u.role,u.status,u.avatar_id FROM sessions s JOIN users u ON u.id=s.user_id
      WHERE s.token_hash=?1 AND s.expires_at>?2`).bind(await sha256(sid), Date.now()).first();
   return u && u.status === 'active' ? u : null;
 }
@@ -145,6 +145,7 @@ const SCHEMA = [
 
 // Colonnes ajoutées après la première version : créées sur les bases existantes
 const MIGRATIONS = {
+  users: [['avatar_id', 'TEXT']],
   products: [['promo_price', 'INTEGER'], ['promo_until', 'INTEGER'], ['promo_start', 'INTEGER']],
   shops: [['loyalty_enabled', 'INTEGER NOT NULL DEFAULT 0'], ['loyalty_every', 'INTEGER'], ['loyalty_kind', 'TEXT'], ['loyalty_value', 'INTEGER'],
     ['loyalty_min', 'INTEGER'], ['loyalty_days', 'INTEGER']],
