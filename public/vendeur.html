@@ -85,7 +85,7 @@
         <li>Un produit en rupture de stock ne peut pas être mis en promotion et sort de la vitrine des promotions.</li>
         <li>Les produits en promotion apparaissent sur la page d'accueil du marché et en tête de votre boutique.</li></ul></details>
       ${list.length ? `<div class="plist">${list.map(p => `<div class="prow">
-        <img src="${MG.img(p.photo_id, shop.category)}" alt="">
+        <span style="position:relative"><img src="${MG.img(p.photo_id, shop.category)}" alt="">${(p.photos || []).length > 1 ? `<span class="pcount" style="right:4px;bottom:4px">${p.photos.length}</span>` : ''}</span>
         <div><div class="pn">${MG.esc(p.name)}</div>
           <div class="pm">${p.promo_active ? `<span class="tag promo">−${p.promo_pct} %</span> jusqu'au ${until(p.promo_until)}` : (p.description ? MG.esc(p.description).slice(0, 80) : '')}</div>
           <label class="stock" style="margin:.4rem 0 0">Stock <input type="number" min="0" value="${p.stock}" data-stock="${p.id}" aria-label="Stock de ${MG.esc(p.name)}">${p.stock < 1 ? '<span class="tag out">Épuisé</span>' : p.stock <= MG.LOW_STOCK ? '<span class="tag pending">Stock faible</span>' : ''}${p.waiting ? `<span class="waiting">${MG.icon('bell', 12)}${p.waiting} en attente</span>` : ''}</label></div>
@@ -103,21 +103,42 @@
           <div><label for="es">Stock</label><input id="es" type="number" min="0" required value="${p ? p.stock : ''}"></div></div>
         ${p && p.promo_active ? '<p class="muted" style="margin:.3rem 0 0;font-size:.85rem">Prix bloqué pendant la promotion.</p>' : ''}
         <label for="ed">Description (facultatif)</label><textarea id="ed" maxlength="500" placeholder="Taille, matière, origine…">${p ? MG.esc(p.description || '') : ''}</textarea>
-        <label for="ei">Photo</label><input id="ei" type="file" accept="image/*">
-        <img class="preview-img" id="eprev" src="${p ? MG.img(p.photo_id, shop.category) : ''}" alt=""${p ? '' : ' hidden'}>
+        <label>Photos <span class="muted" style="font-weight:500">(6 au plus · la première est la photo principale)</span></label>
+        <div class="pics" id="pics"></div>
+        <label class="btn small alt" style="margin-top:var(--space-2);cursor:pointer">${MG.icon('plus', 16)}Ajouter des photos<input id="ei" type="file" accept="image/*" multiple hidden></label>
         <p class="err" id="eerr" role="alert"></p>
         <div class="modal-actions"><button type="button" class="btn alt" data-close>Annuler</button><button class="btn" id="esave">${p ? 'Enregistrer' : 'Ajouter le produit'}</button></div></form>`, { wide: true });
       const el = m.el, Q = sel => el.querySelector(sel);
-      Q('#ei').onchange = () => { const f = Q('#ei').files[0]; if (f) { Q('#eprev').src = URL.createObjectURL(f); Q('#eprev').hidden = false; } };
+      // Photos : existantes (id) et nouvelles (fichier), dans l'ordre choisi
+      let pics = (p && p.photos ? p.photos : []).map(id => ({ id, url: MG.photo(id) }));
+      const drawPics = () => {
+        Q('#pics').innerHTML = pics.length ? pics.map((x, k) => `<div class="pic${k ? '' : ' main'}"><img src="${x.url}" alt="">${k ? '' : '<span class="pic-main">Principale</span>'}
+          <div class="pic-acts">${k ? `<button type="button" data-mv="${k}" data-d="-1" aria-label="Avancer">‹</button><button type="button" data-star="${k}" aria-label="Mettre en principale">★</button>` : ''}${k < pics.length - 1 ? `<button type="button" data-mv="${k}" data-d="1" aria-label="Reculer">›</button>` : ''}<button type="button" data-rm="${k}" aria-label="Retirer">${MG.icon('x', 14)}</button></div></div>`).join('')
+          : '<p class="muted" style="margin:0">Aucune photo : une illustration de la rubrique sera affichée. De belles photos font vendre !</p>';
+      };
+      drawPics();
+      Q('#ei').onchange = () => {
+        const files = [...Q('#ei').files]; Q('#ei').value = '';
+        const room = 6 - pics.length; if (files.length > room) MG.toast(`6 photos au plus : ${room} ajoutée${room > 1 ? 's' : ''}`, true);
+        files.slice(0, room).forEach(f => pics.push({ file: f, url: URL.createObjectURL(f) })); drawPics();
+      };
+      Q('#pics').onclick = e => {
+        const mv = e.target.closest('[data-mv]'), st = e.target.closest('[data-star]'), rm = e.target.closest('[data-rm]');
+        if (mv) { const k = Number(mv.dataset.mv), j = k + Number(mv.dataset.d); [pics[k], pics[j]] = [pics[j], pics[k]]; }
+        if (st) { const k = Number(st.dataset.star); pics.unshift(pics.splice(k, 1)[0]); }
+        if (rm) pics.splice(Number(rm.dataset.rm), 1);
+        drawPics();
+      };
       Q('#ef').onsubmit = async e => {
         e.preventDefault(); Q('#esave').disabled = true; Q('#eerr').textContent = '';
         try {
-          const f = Q('#ei').files[0];
           const body = { name: Q('#en').value, stock: Q('#es').value, description: Q('#ed').value };
           if (!(p && p.promo_active)) body.price = Q('#ep').value;
-          if (f) { Q('#esave').textContent = 'Envoi de la photo…'; body.photo_id = await MG.uploadPhoto(f); }
+          const todo = pics.filter(x => x.file).length; let done = 0;
+          for (const x of pics) if (x.file) { Q('#esave').textContent = `Envoi des photos ${++done}/${todo}…`; x.id = await MG.uploadPhoto(x.file); delete x.file; }
+          body.photos = pics.map(x => x.id);
           if (p) await MG.api('/api/seller/products/' + p.id, { method: 'PUT', body });
-          else await MG.api('/api/seller/products', { method: 'POST', body: { ...body, photo_id: body.photo_id || null } });
+          else await MG.api('/api/seller/products', { method: 'POST', body });
           m.close(); MG.toast(p ? 'Produit enregistré' : 'Produit ajouté'); products();
         } catch (er) { Q('#eerr').textContent = er.message; Q('#esave').disabled = false; Q('#esave').textContent = p ? 'Enregistrer' : 'Ajouter le produit'; }
       };

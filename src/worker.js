@@ -2,7 +2,7 @@
 import {
   json, bad, rand, uid, now, sha256, safeEqual, hashPassword, createSession, clearCookie, currentUser, destroySession,
   CATEGORIES, ORDER_STATUS, ensureSchema, loadSettings, saveSettings, toBase64, fromBase64, sniffImage,
-  validCoord, distanceKm, slugify, EFFECTIVE_PRICE, promoActive, publicProduct, voucherDiscount, loyaltyProgram, LOW_STOCK
+  validCoord, distanceKm, slugify, EFFECTIVE_PRICE, promoActive, publicProduct, voucherDiscount, loyaltyProgram, LOW_STOCK, photoList
 } from './lib.js';
 import { notify, confirmCheckout, rejectCheckout, cancelOrders, releaseVoucher, createVoucher, awardLoyalty, startOnlinePayment, singpayVerify, singpayOn, singpayCall, sp } from './pay.js';
 import { botReply, searchProducts } from './bot.js';
@@ -17,6 +17,15 @@ const ROLES_PUBLIC = ['customer', 'seller', 'courier'];
 const LOGIN_WINDOW = 15 * 60000, MAX_FAIL_EMAIL = 5, MAX_FAIL_IP = 20;
 const failCount = async (env, key, since) =>
   ((await env.DB.prepare('SELECT COUNT(*) AS n FROM login_attempts WHERE key=?1 AND at>?2').bind(key, since).first()) || { n: 0 }).n;
+
+// Photos envoyées par l'utilisateur lui-même, sans doublon, 6 au plus
+async function ownPhotos(env, user, list) {
+  const ids = [...new Set((list || []).map(String).filter(x => /^[a-f0-9]{16}$/.test(x)))].slice(0, 6);
+  if (!ids.length) return [];
+  const { results } = await env.DB.prepare(`SELECT id FROM photos WHERE owner_id=?1 AND id IN (${ids.map((_, i) => '?' + (i + 2)).join(',')})`).bind(user.id, ...ids).all();
+  const ok = new Set(results.map(r => r.id));
+  return ids.filter(x => ok.has(x));
+}
 
 // ---------- Invitations ----------
 const INVITE_RE = /^[a-f0-9]{12}$/;
@@ -213,7 +222,7 @@ export default {
       }
       if (method === 'GET' && p === '/api/promotions') {
         const { results } = await env.DB.prepare(
-          `SELECT p.id,p.name,p.description,p.price,p.promo_price,p.promo_until,p.stock,p.photo_id,s.name AS shop_name,s.slug,s.category
+          `SELECT p.id,p.name,p.description,p.price,p.promo_price,p.promo_until,p.stock,p.photo_id,p.photos,s.name AS shop_name,s.slug,s.category
            FROM products p JOIN shops s ON s.id=p.shop_id
            WHERE p.active=1 AND p.stock>0 AND s.status='active' AND ${EFFECTIVE_PRICE} < p.price
            ORDER BY (1.0 * p.promo_price / p.price) ASC, p.promo_until ASC LIMIT 24`).all();
@@ -239,7 +248,7 @@ export default {
           mine = { stamps: card ? card.stamps : 0, orders: card ? card.orders : 0, vouchers: v.n, alerts: al.map(x => x.product_id) };
         }
         const { results } = await env.DB.prepare(
-          `SELECT id,name,description,price,promo_price,promo_until,stock,photo_id,created_at FROM products WHERE shop_id=?1 AND active=1 ORDER BY created_at DESC`).bind(s.id).all();
+          `SELECT id,name,description,price,promo_price,promo_until,stock,photo_id,photos,created_at FROM products WHERE shop_id=?1 AND active=1 ORDER BY created_at DESC`).bind(s.id).all();
         const list = results.map(publicProduct).sort((a, b) => (b.promo_pct ? 1 : 0) - (a.promo_pct ? 1 : 0) || (b.stock > 0) - (a.stock > 0));
         return json({ shop: { ...s, loyalty }, products: list, mine });
       }
@@ -565,7 +574,7 @@ export default {
         }
         if (method === 'GET' && p === '/api/seller/products') {
           const { results } = await env.DB.prepare(`SELECT p.*, (SELECT COUNT(*) FROM stock_alerts a WHERE a.product_id=p.id) AS waiting FROM products p WHERE p.shop_id=?1 ORDER BY p.created_at DESC`).bind(shop.id).all();
-          return json(results.map(r => ({ ...r, promo_active: promoActive(r), promo_pct: promoActive(r) ? Math.round(100 - (100 * r.promo_price) / r.price) : null })));
+          return json(results.map(r => ({ ...r, photos: photoList(r), promo_active: promoActive(r), promo_pct: promoActive(r) ? Math.round(100 - (100 * r.promo_price) / r.price) : null })));
         }
         if ((method === 'POST' || method === 'DELETE') && (m = p.match(/^\/api\/seller\/products\/([a-f0-9]{16})\/promo$/))) {
           const prod = await env.DB.prepare('SELECT * FROM products WHERE id=?1 AND shop_id=?2 AND active=1').bind(m[1], shop.id).first();
@@ -593,11 +602,12 @@ export default {
           if (name.length < 2) return bad('Indiquez le nom du produit');
           if (!Number.isFinite(price) || price < 50 || price > 50000000) return bad('Prix invalide');
           if (!Number.isFinite(stock) || stock < 0 || stock > 100000) return bad('Stock invalide');
-          const photo = b.photo_id && await env.DB.prepare('SELECT 1 FROM photos WHERE id=?1 AND owner_id=?2').bind(String(b.photo_id), user.id).first() ? String(b.photo_id) : null;
+          const pics = await ownPhotos(env, user, Array.isArray(b.photos) ? b.photos : b.photo_id ? [b.photo_id] : []);
+          const photo = pics[0] || null;
           const id = uid();
           await env.DB.prepare('INSERT INTO products (id,shop_id,name,description,price,stock,photo_id,active,created_at) VALUES (?1,?2,?3,?4,?5,?6,?7,1,?8)')
             .bind(id, shop.id, name, cleanText(b.description, 500), price, stock, photo, now()).run();
-          await env.DB.prepare('UPDATE products SET stock_updated_at=?2 WHERE id=?1').bind(id, Date.now()).run();
+          await env.DB.prepare('UPDATE products SET stock_updated_at=?2, photos=?3 WHERE id=?1').bind(id, Date.now(), JSON.stringify(pics)).run();
           return json({ id }, 201);
         }
         if ((method === 'PUT' || method === 'DELETE') && (m = p.match(/^\/api\/seller\/products\/([a-f0-9]{16})$/))) {
@@ -612,10 +622,11 @@ export default {
           const stock = Number.isFinite(num(b && b.stock)) ? Math.floor(num(b.stock)) : prod.stock;
           if (price < 50 || price > 50000000 || stock < 0 || stock > 100000) return bad('Prix ou stock invalide');
           if (promoActive(prod) && price !== prod.price) return bad('Arrêtez la promotion avant de changer le prix normal (le prix barré doit rester honnête)');
-          let photo = prod.photo_id;
-          if (b && b.photo_id !== undefined) photo = b.photo_id && await env.DB.prepare('SELECT 1 FROM photos WHERE id=?1 AND owner_id=?2').bind(String(b.photo_id), user.id).first() ? String(b.photo_id) : null;
-          await env.DB.prepare('UPDATE products SET name=?2,description=?3,price=?4,stock=?5,photo_id=?6,active=?7,stock_updated_at=?8 WHERE id=?1')
-            .bind(prod.id, name, b && b.description !== undefined ? cleanText(b.description, 500) : prod.description, price, stock, photo, b && b.active === 0 ? 0 : 1, stock !== prod.stock ? Date.now() : prod.stock_updated_at).run();
+          let photo = prod.photo_id, pics = photoList(prod);
+          if (b && Array.isArray(b.photos)) { pics = await ownPhotos(env, user, b.photos); photo = pics[0] || null; }
+          else if (b && b.photo_id !== undefined) { const one = await ownPhotos(env, user, b.photo_id ? [b.photo_id] : []); pics = one.length ? [one[0], ...pics.filter(x => x !== one[0])].slice(0, 6) : []; photo = pics[0] || null; }
+          await env.DB.prepare('UPDATE products SET name=?2,description=?3,price=?4,stock=?5,photo_id=?6,active=?7,stock_updated_at=?8,photos=?9 WHERE id=?1')
+            .bind(prod.id, name, b && b.description !== undefined ? cleanText(b.description, 500) : prod.description, price, stock, photo, b && b.active === 0 ? 0 : 1, stock !== prod.stock ? Date.now() : prod.stock_updated_at, JSON.stringify(pics)).run();
           if (prod.stock <= 0 && stock > 0) { // de retour en stock : on prévient les clients qui attendaient
             const { results: wait } = await env.DB.prepare('SELECT user_id FROM stock_alerts WHERE product_id=?1').bind(prod.id).all();
             for (const w of wait) await notify(env, w.user_id, 'De retour en stock', `« ${name} » est de nouveau disponible chez ${shop.name}. Faites vite !`, `/boutique.html?s=${shop.slug}`);

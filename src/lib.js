@@ -151,7 +151,7 @@ const SCHEMA = [
 const MIGRATIONS = {
   users: [['avatar_id', 'TEXT']],
   notifications: [['kind', 'TEXT']],
-  products: [['promo_price', 'INTEGER'], ['promo_until', 'INTEGER'], ['promo_start', 'INTEGER'], ['stock_updated_at', 'INTEGER']],
+  products: [['promo_price', 'INTEGER'], ['promo_until', 'INTEGER'], ['promo_start', 'INTEGER'], ['stock_updated_at', 'INTEGER'], ['photos', 'TEXT']],
   shops: [['loyalty_enabled', 'INTEGER NOT NULL DEFAULT 0'], ['loyalty_every', 'INTEGER'], ['loyalty_kind', 'TEXT'], ['loyalty_value', 'INTEGER'],
     ['loyalty_min', 'INTEGER'], ['loyalty_days', 'INTEGER']],
   orders: [['discount', 'INTEGER NOT NULL DEFAULT 0'], ['voucher_id', 'TEXT']]
@@ -177,8 +177,15 @@ export function ensureSchema(db) {
 export const EFFECTIVE_PRICE = `(CASE WHEN p.promo_price IS NOT NULL AND p.promo_until > CAST(strftime('%s','now') AS INTEGER) * 1000 THEN p.promo_price ELSE p.price END)`;
 export const promoActive = p => p.promo_price != null && p.promo_until > Date.now() && p.promo_price < p.price;
 // Produit tel que montré au public : price = prix à payer, old_price = prix barré pendant la promotion.
+// Liste des photos d'un produit (la première est la principale)
+export function photoList(p) {
+  let l = []; try { l = p.photos ? JSON.parse(p.photos) : []; } catch { l = []; }
+  if (!Array.isArray(l) || !l.length) l = p.photo_id ? [p.photo_id] : [];
+  return l.filter(x => /^[a-f0-9]{16}$/.test(x)).slice(0, 6);
+}
 export function publicProduct(p) {
   const { promo_price, promo_until, promo_start, ...rest } = p;
+  if ('photos' in rest || rest.photo_id) rest.photos = photoList(p);
   if (!promoActive(p)) return rest;
   return { ...rest, price: promo_price, old_price: p.price, promo_pct: Math.round(100 - (100 * promo_price) / p.price), promo_until };
 }

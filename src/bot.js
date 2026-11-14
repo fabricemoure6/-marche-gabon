@@ -11,7 +11,7 @@ const QUICK = ['Les promotions', 'Où est ma commande ?', 'Frais de livraison', 
 // Produits actifs des boutiques actives, filtrés par rubrique et mots-clés (sans accents).
 export async function searchProducts(env, { cat = '', q = '', limit = 24 } = {}) {
   const { results } = await env.DB.prepare(
-    `SELECT p.id,p.name,p.description,p.price,p.promo_price,p.promo_until,p.stock,p.photo_id,s.name AS shop_name,s.slug,s.category,s.address
+    `SELECT p.id,p.name,p.description,p.price,p.promo_price,p.promo_until,p.stock,p.photo_id,p.photos,s.name AS shop_name,s.slug,s.category,s.address
      FROM products p JOIN shops s ON s.id=p.shop_id WHERE p.active=1 AND s.status='active' ORDER BY p.created_at DESC LIMIT 400`).all();
   const words = keywords(q);
   if (String(q).trim() && !words.length) return [];
@@ -85,7 +85,7 @@ async function rawReply(env, user, settings, message) {
   }
   if (has(t, ['promo', 'solde', 'reduction', 'remise', 'bon plan', 'bonne affaire', 'pas cher'])) {
     const { results } = await env.DB.prepare(
-      `SELECT p.id,p.name,p.description,p.price,p.promo_price,p.promo_until,p.stock,p.photo_id,s.name AS shop_name,s.slug,s.category
+      `SELECT p.id,p.name,p.description,p.price,p.promo_price,p.promo_until,p.stock,p.photo_id,p.photos,s.name AS shop_name,s.slug,s.category
        FROM products p JOIN shops s ON s.id=p.shop_id WHERE p.active=1 AND p.stock>0 AND s.status='active' AND ${EFFECTIVE_PRICE} < p.price
        ORDER BY (1.0 * p.promo_price / p.price) ASC LIMIT 8`).all();
     if (!results.length) return { reply: 'Pas de promotion en ce moment. Revenez bientôt : les boutiques en lancent régulièrement !', links: [['Voir les boutiques', '/']] };
