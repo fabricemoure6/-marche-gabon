@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 300" width="400" height="300"><rect width="400" height="300" fill="#FFE8D6"/><circle cx="80" cy="220" r="80" fill="#FFD6B5"/><ellipse cx="200" cy="264" rx="110" ry="12" fill="#F2C8A6"/>
+<rect x="184" y="34" width="32" height="26" rx="5" fill="#0B7A47" stroke="#1F1A17" stroke-width="4"/>
+<path d="M176 60 h48 v20 q40 20 40 60 v104 q0 18 -18 18 h-92 q-18 0 -18 -18 v-104 q0 -40 40 -60 z" fill="#E03A12" stroke="#1F1A17" stroke-width="5"/>
+<path d="M150 150 h100 v80 h-100z" fill="#FFF8EE" stroke="#1F1A17" stroke-width="3"/>
+<g transform="translate(200 182)"><path d="M0 18 C-24 0 -20 -20 0 -20 C20 -20 24 0 0 18Z" fill="#0B7A47"/><circle r="9" fill="#F76707"/></g>
+<text x="200" y="222" font-family="sans-serif" font-size="13" font-weight="800" fill="#1F1A17" text-anchor="middle">1 LITRE</text>
+<path d="M170 92 q-8 30 -6 60" stroke="#FF8A6A" stroke-width="7" stroke-linecap="round" fill="none"/></svg>

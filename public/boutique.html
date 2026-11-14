@@ -4,6 +4,7 @@
 <body><header id="top"></header>
 <main>
   <div id="head"></div>
+  <div class="section-head"><h2>Les produits</h2></div>
   <div class="grid" id="products"></div>
   <p class="muted" id="empty" hidden>Cette boutique n'a pas encore de produits.</p>
 </main>
@@ -16,26 +17,14 @@
   catch { MG.$('#head').innerHTML = '<div class="card"><p>Boutique introuvable.</p><a class="btn" href="/">Retour</a></div>'; return; }
   const { shop, products } = data;
   document.title = shop.name + ' · ' + MG.config.site_name;
-  MG.$('#head').innerHTML = `<div class="card"><a href="/">← Toutes les boutiques</a>
-    <div class="row" style="margin-top:.6rem">${shop.photo_id ? `<img class="thumb" src="${MG.photo(shop.photo_id)}" alt="">` : ''}
-    <div><h1 style="margin:0">${MG.esc(shop.name)}</h1><span class="tag">${MG.esc(MG.catName(shop.category))}</span></div></div>
-    ${shop.description ? `<p>${MG.esc(shop.description)}</p>` : ''}${shop.address ? `<p class="muted">📍 ${MG.esc(shop.address)}</p>` : ''}</div>`;
+  MG.$('#head').innerHTML = `<a href="/" style="display:inline-block;margin-bottom:var(--space-3)">← Toutes les boutiques</a>
+    <section class="card" style="display:flex;gap:var(--space-5);align-items:center;flex-wrap:wrap;background:var(--soleil-tint);border:0">
+      <img src="${MG.img(shop.photo_id, shop.category)}" alt="" style="width:96px;height:96px;border-radius:50%;object-fit:cover;background:var(--surface-200);border:4px solid var(--surface-200)">
+      <div style="flex:1;min-width:220px"><h1 style="margin:0 0 .4rem">${MG.esc(shop.name)}</h1>
+        <div class="row"><span class="tag">${MG.esc(MG.catName(shop.category))}</span><span class="muted">${products.length} produit${products.length > 1 ? 's' : ''}</span></div>
+        ${shop.description ? `<p style="margin:.6rem 0 0">${MG.esc(shop.description)}</p>` : ''}
+        ${shop.address ? `<p class="muted" style="margin:.4rem 0 0">${MG.icon('pin', 18)} ${MG.esc(shop.address)}</p>` : ''}</div></section>`;
   MG.$('#empty').hidden = products.length > 0;
-  MG.$('#products').innerHTML = products.map(p => `<div class="tile">
-    <div class="img" style="${p.photo_id ? `background-image:url('${MG.photo(p.photo_id)}')` : ''}">${p.photo_id ? '' : '📦'}</div>
-    <div class="body"><h3>${MG.esc(p.name)}</h3>${p.description ? `<p class="muted" style="margin:0 0 .4rem">${MG.esc(p.description)}</p>` : ''}
-    <div class="split"><span class="price">${MG.fcfa(p.price)}</span>
-    ${p.stock > 0 ? `<button class="btn small" data-add="${p.id}">Ajouter</button>` : '<span class="tag cancelled">Épuisé</span>'}</div></div></div>`).join('');
-  MG.$('#products').onclick = async e => {
-    const b = e.target.closest('[data-add]'); if (!b) return;
-    if (!MG.user) { location.href = '/compte.html?next=' + encodeURIComponent(location.pathname + location.search); return; }
-    if (MG.user.role !== 'customer') return MG.toast('Utilisez un compte client pour acheter', true);
-    try {
-      const { items } = await MG.api('/api/cart');
-      const cur = (items.find(i => i.product_id === b.dataset.add) || {}).qty || 0;
-      await MG.api('/api/cart', { method: 'PUT', body: { productId: b.dataset.add, qty: cur + 1 } });
-      MG.toast('Ajouté au panier'); MG.refreshCartBadge();
-    } catch (er) { MG.fail(er); }
-  };
+  MG.$('#products').innerHTML = products.map(p => MG.productCard(p, { desc: true, category: shop.category })).join('');
 })();
 </script></body></html>
