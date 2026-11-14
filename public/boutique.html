@@ -58,7 +58,7 @@
   if (promos.length && products.length > 6) { // grande boutique : les promos en vitrine ; sinon elles sont déjà en tête de la grille
     $('#promos').hidden = false;
     $('#promoTitle').textContent = promos.length > 1 ? `${promos.length} produits à prix réduit` : 'Un produit à prix réduit';
-    $('#promoRail').innerHTML = promos.map(p => MG.productCard(p, { category: shop.category })).join('');
+    $('#promoRail').innerHTML = promos.map(p => MG.productCard(p, { category: shop.category, alerts: (data.mine || {}).alerts })).join('');
   }
 
   $('#toolbar').hidden = products.length < 4; // inutile pour une petite vitrine
@@ -71,7 +71,7 @@
     list = list.slice().sort((a, b) => (b.stock > 0) - (a.stock > 0) ||
       (s === 'asc' ? a.price - b.price : s === 'desc' ? b.price - a.price : s === 'new' ? String(b.created_at).localeCompare(String(a.created_at)) : order.indexOf(a.id) - order.indexOf(b.id)));
     $('#count').textContent = list.length !== products.length ? `${list.length} sur ${products.length}` : '';
-    $('#products').innerHTML = list.map(p => MG.productCard(p, { desc: true, category: shop.category })).join('');
+    $('#products').innerHTML = list.map(p => MG.productCard(p, { desc: true, category: shop.category, alerts: (data.mine || {}).alerts })).join('');
     $('#empty').hidden = list.length > 0;
     if (!list.length && products.length) { $('#emptyTitle').textContent = 'Aucun produit ne correspond'; $('#emptyText').textContent = 'Essayez un autre mot ou retirez le filtre.'; }
   }

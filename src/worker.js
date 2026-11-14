@@ -2,7 +2,7 @@
 import {
   json, bad, rand, uid, now, sha256, safeEqual, hashPassword, createSession, clearCookie, currentUser, destroySession,
   CATEGORIES, ORDER_STATUS, ensureSchema, loadSettings, saveSettings, toBase64, fromBase64, sniffImage,
-  validCoord, distanceKm, slugify, EFFECTIVE_PRICE, promoActive, publicProduct, voucherDiscount, loyaltyProgram
+  validCoord, distanceKm, slugify, EFFECTIVE_PRICE, promoActive, publicProduct, voucherDiscount, loyaltyProgram, LOW_STOCK
 } from './lib.js';
 import { notify, confirmCheckout, rejectCheckout, cancelOrders, releaseVoucher, createVoucher, awardLoyalty, startOnlinePayment, singpayVerify, singpayOn, singpayCall, sp } from './pay.js';
 import { botReply, searchProducts } from './bot.js';
@@ -235,7 +235,8 @@ export default {
         if (viewer && viewer.role === 'customer') {
           const card = await env.DB.prepare('SELECT stamps,orders FROM loyalty_cards WHERE user_id=?1 AND shop_id=?2').bind(viewer.id, s.id).first();
           const v = await env.DB.prepare('SELECT COUNT(*) AS n FROM vouchers WHERE user_id=?1 AND shop_id=?2 AND used_at IS NULL AND expires_at>?3').bind(viewer.id, s.id, Date.now()).first();
-          mine = { stamps: card ? card.stamps : 0, orders: card ? card.orders : 0, vouchers: v.n };
+          const { results: al } = await env.DB.prepare('SELECT a.product_id FROM stock_alerts a JOIN products p ON p.id=a.product_id WHERE a.user_id=?1 AND p.shop_id=?2').bind(viewer.id, s.id).all();
+          mine = { stamps: card ? card.stamps : 0, orders: card ? card.orders : 0, vouchers: v.n, alerts: al.map(x => x.product_id) };
         }
         const { results } = await env.DB.prepare(
           `SELECT id,name,description,price,promo_price,promo_until,stock,photo_id,created_at FROM products WHERE shop_id=?1 AND active=1 ORDER BY created_at DESC`).bind(s.id).all();
@@ -348,10 +349,24 @@ export default {
         if (!Number.isFinite(qty) || qty < 0 || qty > 99) return bad('Quantité invalide');
         if (qty === 0) await env.DB.prepare('DELETE FROM cart_items WHERE user_id=?1 AND product_id=?2').bind(user.id, prod.id).run();
         else {
-          if (qty > prod.stock) return bad(`Stock insuffisant (${prod.stock} disponible${prod.stock > 1 ? 's' : ''})`);
-          await env.DB.prepare('INSERT INTO cart_items (user_id,product_id,qty) VALUES (?1,?2,?3) ON CONFLICT(user_id,product_id) DO UPDATE SET qty=excluded.qty').bind(user.id, prod.id, qty).run();
+          if (prod.stock <= 0) return bad('Ce produit est épuisé. Activez « Me prévenir » pour savoir quand il revient.', 409, { stock: 0 });
+          const q = Math.min(qty, prod.stock); // jamais plus que le stock : on ajuste et on prévient
+          await env.DB.prepare('INSERT INTO cart_items (user_id,product_id,qty) VALUES (?1,?2,?3) ON CONFLICT(user_id,product_id) DO UPDATE SET qty=excluded.qty').bind(user.id, prod.id, q).run();
+          return json({ ok: true, qty: q, stock: prod.stock, adjusted: q < qty });
         }
-        return json({ ok: true });
+        return json({ ok: true, qty: 0 });
+      }
+
+      // ----- Alerte « me prévenir quand le produit revient » -----
+      if ((method === 'POST' || method === 'DELETE') && (m = p.match(/^\/api\/products\/([a-f0-9]{16})\/alert$/))) {
+        if (method === 'DELETE') { await env.DB.prepare('DELETE FROM stock_alerts WHERE user_id=?1 AND product_id=?2').bind(user.id, m[1]).run(); return json({ ok: true, on: false }); }
+        const prod = await env.DB.prepare('SELECT stock FROM products WHERE id=?1 AND active=1').bind(m[1]).first();
+        if (!prod) return bad('Produit introuvable', 404);
+        if (prod.stock > 0) return bad('Ce produit est disponible : vous pouvez le commander.');
+        const n = (await env.DB.prepare('SELECT COUNT(*) AS n FROM stock_alerts WHERE user_id=?1').bind(user.id).first()).n;
+        if (n >= 50) return bad('Vous suivez déjà 50 produits');
+        await env.DB.prepare('INSERT OR IGNORE INTO stock_alerts (user_id,product_id,created_at) VALUES (?1,?2,?3)').bind(user.id, m[1], now()).run();
+        return json({ ok: true, on: true });
       }
 
       // ----- Validation du panier : une commande par boutique, un seul paiement -----
@@ -368,7 +383,8 @@ export default {
         if (!lines.length) return bad('Votre panier est vide');
         for (const l of lines) {
           if (!l.active || l.shop_status !== 'active') return bad(`« ${l.name} » n'est plus disponible. Retirez-le du panier.`);
-          if (l.qty > l.stock) return bad(`« ${l.name} » : seulement ${l.stock} en stock.`);
+          if (l.stock <= 0) return bad(`« ${l.name} » vient d'être épuisé. Retirez-le du panier pour continuer.`, 409);
+          if (l.qty > l.stock) return bad(`« ${l.name} » : il n'en reste que ${l.stock}. Ajustez la quantité dans le panier.`, 409);
         }
         const settings = await loadSettings(env);
         const byShop = new Map();
@@ -408,7 +424,7 @@ export default {
             .bind(orderId, oref, checkoutId, user.id, shopId, subtotal, fee, subtotal - discount + fee, address, hasPos ? lat : null, hasPos ? lng : null, phone, note, km, now(), discount, voucher ? voucher.id : null));
           for (const l of ls) {
             stmts.push(env.DB.prepare('INSERT INTO order_items (id,order_id,product_id,name,price,qty) VALUES (?1,?2,?3,?4,?5,?6)').bind(uid(), orderId, l.product_id, l.name, l.price, l.qty));
-            stmts.push(env.DB.prepare('UPDATE products SET stock = stock - ?2 WHERE id=?1 AND stock >= ?2').bind(l.product_id, l.qty));
+            stmts.push(env.DB.prepare('UPDATE products SET stock = stock - ?2, stock_updated_at=?3 WHERE id=?1').bind(l.product_id, l.qty, Date.now()));
           }
         }
         const method2 = ['airtel_money', 'moov_money', 'card'].includes(b.method) ? b.method : 'airtel_money';
@@ -416,7 +432,18 @@ export default {
           .bind(checkoutId, ref, user.id, amount, method2, now()));
         stmts.push(env.DB.prepare('DELETE FROM cart_items WHERE user_id=?1').bind(user.id));
         try { await env.DB.batch(stmts); }
-        catch (e) { for (const o of reserved) await releaseVoucher(env, o); throw e; }
+        catch (e) {
+          for (const o of reserved) await releaseVoucher(env, o);
+          if (/stock_insuffisant/.test(String(e && e.message))) return bad('Un article vient d\'être acheté par quelqu\'un d\'autre et le stock a changé. Vérifiez votre panier.', 409);
+          throw e;
+        }
+        // Alerte au vendeur : stock faible ou épuisé après cette commande
+        const ids = [...new Set(lines.map(l => l.product_id))];
+        const { results: after } = await env.DB.prepare(`SELECT p.name,p.stock,s.owner_id FROM products p JOIN shops s ON s.id=p.shop_id WHERE p.id IN (${ids.map((_, i) => '?' + (i + 1)).join(',')})`).bind(...ids).all();
+        for (const a of after) {
+          if (a.stock <= 0) await notify(env, a.owner_id, 'Produit épuisé', `« ${a.name} » n'a plus de stock : il n'est plus commandable. Réapprovisionnez-le dans Ma boutique → Produits.`, '/vendeur.html#produits');
+          else if (a.stock <= LOW_STOCK) await notify(env, a.owner_id, 'Stock faible', `Il ne reste que ${a.stock} « ${a.name} ». Pensez à mettre le stock à jour.`, '/vendeur.html#produits');
+        }
         const co = { id: checkoutId, ref, amount };
         const online = await startOnlinePayment(env, co, url.origin);
         return json({
@@ -537,7 +564,7 @@ export default {
           return json({ ok: true });
         }
         if (method === 'GET' && p === '/api/seller/products') {
-          const { results } = await env.DB.prepare('SELECT * FROM products WHERE shop_id=?1 ORDER BY created_at DESC').bind(shop.id).all();
+          const { results } = await env.DB.prepare(`SELECT p.*, (SELECT COUNT(*) FROM stock_alerts a WHERE a.product_id=p.id) AS waiting FROM products p WHERE p.shop_id=?1 ORDER BY p.created_at DESC`).bind(shop.id).all();
           return json(results.map(r => ({ ...r, promo_active: promoActive(r), promo_pct: promoActive(r) ? Math.round(100 - (100 * r.promo_price) / r.price) : null })));
         }
         if ((method === 'POST' || method === 'DELETE') && (m = p.match(/^\/api\/seller\/products\/([a-f0-9]{16})\/promo$/))) {
@@ -570,6 +597,7 @@ export default {
           const id = uid();
           await env.DB.prepare('INSERT INTO products (id,shop_id,name,description,price,stock,photo_id,active,created_at) VALUES (?1,?2,?3,?4,?5,?6,?7,1,?8)')
             .bind(id, shop.id, name, cleanText(b.description, 500), price, stock, photo, now()).run();
+          await env.DB.prepare('UPDATE products SET stock_updated_at=?2 WHERE id=?1').bind(id, Date.now()).run();
           return json({ id }, 201);
         }
         if ((method === 'PUT' || method === 'DELETE') && (m = p.match(/^\/api\/seller\/products\/([a-f0-9]{16})$/))) {
@@ -586,8 +614,13 @@ export default {
           if (promoActive(prod) && price !== prod.price) return bad('Arrêtez la promotion avant de changer le prix normal (le prix barré doit rester honnête)');
           let photo = prod.photo_id;
           if (b && b.photo_id !== undefined) photo = b.photo_id && await env.DB.prepare('SELECT 1 FROM photos WHERE id=?1 AND owner_id=?2').bind(String(b.photo_id), user.id).first() ? String(b.photo_id) : null;
-          await env.DB.prepare('UPDATE products SET name=?2,description=?3,price=?4,stock=?5,photo_id=?6,active=?7 WHERE id=?1')
-            .bind(prod.id, name, b && b.description !== undefined ? cleanText(b.description, 500) : prod.description, price, stock, photo, b && b.active === 0 ? 0 : 1).run();
+          await env.DB.prepare('UPDATE products SET name=?2,description=?3,price=?4,stock=?5,photo_id=?6,active=?7,stock_updated_at=?8 WHERE id=?1')
+            .bind(prod.id, name, b && b.description !== undefined ? cleanText(b.description, 500) : prod.description, price, stock, photo, b && b.active === 0 ? 0 : 1, stock !== prod.stock ? Date.now() : prod.stock_updated_at).run();
+          if (prod.stock <= 0 && stock > 0) { // de retour en stock : on prévient les clients qui attendaient
+            const { results: wait } = await env.DB.prepare('SELECT user_id FROM stock_alerts WHERE product_id=?1').bind(prod.id).all();
+            for (const w of wait) await notify(env, w.user_id, 'De retour en stock', `« ${name} » est de nouveau disponible chez ${shop.name}. Faites vite !`, `/boutique.html?s=${shop.slug}`);
+            await env.DB.prepare('DELETE FROM stock_alerts WHERE product_id=?1').bind(prod.id).run();
+          }
           return json({ ok: true });
         }
         if (method === 'GET' && p === '/api/seller/loyalty') {
@@ -651,12 +684,22 @@ export default {
           const next = b && b.status, allowed = { paid: ['preparing', 'cancelled'], preparing: ['ready', 'cancelled'] }[o.status] || [];
           if (!allowed.includes(next)) return bad('Changement de statut impossible');
           await env.DB.prepare('UPDATE orders SET status=?2, updated_at=?3 WHERE id=?1').bind(o.id, next, now()).run();
+          const outOfStock = next === 'cancelled' && b.reason === 'out_of_stock';
           if (next === 'cancelled') {
-            await env.DB.prepare(`UPDATE products SET stock = stock + COALESCE((SELECT qty FROM order_items WHERE order_id=?1 AND product_id=products.id),0)
-              WHERE id IN (SELECT product_id FROM order_items WHERE order_id=?1)`).bind(o.id).run();
+            if (outOfStock) { // le vendeur n'avait plus l'article : le stock passe à 0 pour éviter d'autres commandes
+              await env.DB.prepare(`UPDATE products SET stock=0, stock_updated_at=?2 WHERE id IN (SELECT product_id FROM order_items WHERE order_id=?1)`).bind(o.id, Date.now()).run();
+            } else {
+              await env.DB.prepare(`UPDATE products SET stock = stock + COALESCE((SELECT qty FROM order_items WHERE order_id=?1 AND product_id=products.id),0)
+                WHERE id IN (SELECT product_id FROM order_items WHERE order_id=?1)`).bind(o.id).run();
+            }
             await releaseVoucher(env, o.id);
           }
-          await notify(env, o.customer_id, 'Votre commande ' + o.ref, ORDER_STATUS[next], `/commandes.html?ref=${o.ref}`);
+          await notify(env, o.customer_id, 'Votre commande ' + o.ref, outOfStock
+            ? `Désolé, ${shop.name} n'a plus cet article en stock : la commande est annulée. Le remboursement vous sera versé par l'équipe du marché.` : ORDER_STATUS[next], `/commandes.html?ref=${o.ref}`);
+          if (outOfStock) {
+            const { results: admins } = await env.DB.prepare(`SELECT id FROM users WHERE role='admin'`).all();
+            for (const a of admins) await notify(env, a.id, 'Rupture : remboursement à faire', `Commande ${o.ref} (${shop.name}) annulée pour rupture de stock, ${o.total} FCFA à rembourser.`, '/admin.html');
+          }
           if (next === 'ready') await pushCouriers(env, shop, o, await loadSettings(env));
           return json({ ok: true });
         }

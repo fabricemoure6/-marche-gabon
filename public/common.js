@@ -108,8 +108,13 @@
 
   // Tuile produit partagée (accueil, boutique, recherche).
   // p = {id, name, description, price, old_price?, promo_pct?, promo_until?, stock, photo_id, shop_name?, slug?, category?}
+  MG.LOW_STOCK = 5;
+  // Indication de stock lisible par tous : épuisé, plus que N, en stock
+  MG.stockInfo = n => n <= 0 ? '<span class="stock-info out">Épuisé</span>'
+    : n <= MG.LOW_STOCK ? `<span class="stock-info low">Plus que ${n} en stock</span>` : '<span class="stock-info ok">En stock</span>';
   MG.productCard = function (p, opts = {}) {
     const out = !(p.stock > 0);
+    const watching = opts.alerts && opts.alerts.includes(p.id);
     const shop = p.shop_name ? (opts.demo ? `<span class="pshop">${MG.esc(p.shop_name)}</span>` : `<a class="pshop" href="/boutique.html?s=${encodeURIComponent(p.slug)}">${MG.esc(p.shop_name)}</a>`) : '';
     const badge = out ? '<span class="tag out">Épuisé</span>'
       : p.promo_pct ? `<span class="tag promo">−${p.promo_pct} %</span>` : (p.badge ? `<span class="tag new">${MG.esc(p.badge)}</span>` : '');
@@ -117,9 +122,10 @@
     const img = opts.img || MG.img(p.photo_id, p.category || opts.category);
     return `<article class="tile product${out ? ' out' : ''}${p.promo_pct ? ' is-promo' : ''}">
       <div class="pimg"><img src="${img}" alt="${MG.esc(p.name)}" loading="lazy"><div class="pbadges">${badge}</div>${left && !out ? `<span class="ptimer">${left}</span>` : ''}</div>
-      <div class="pbody">${shop}<h3 class="pname">${MG.esc(p.name)}</h3>${opts.desc && p.description ? `<p class="pdesc">${MG.esc(p.description)}</p>` : ''}
+      <div class="pbody">${shop}<h3 class="pname">${MG.esc(p.name)}</h3>${opts.desc && p.description ? `<p class="pdesc">${MG.esc(p.description)}</p>` : ''}${opts.demo ? '' : MG.stockInfo(p.stock)}
         <div class="pfoot"><div>${p.old_price ? `<span class="old">${MG.fcfa(p.old_price)}</span>` : ''}<span class="price">${MG.fcfa(p.price)}</span></div>
-        ${opts.demo || out ? '' : `<button class="add" data-add="${MG.esc(p.id)}" aria-label="Ajouter ${MG.esc(p.name)} au panier">${MG.icon('plus')}</button>`}</div></div></article>`;
+        ${opts.demo ? '' : out ? `<button class="btn small ${watching ? 'green' : 'alt'} notify" data-alert="${MG.esc(p.id)}" data-on="${watching ? 1 : 0}">${MG.icon(watching ? 'check' : 'bell', 16)}${watching ? 'Alerte activée' : 'Me prévenir'}</button>`
+          : `<button class="add" data-add="${MG.esc(p.id)}" data-stock="${p.stock}" aria-label="Ajouter ${MG.esc(p.name)} au panier">${MG.icon('plus')}</button>`}</div></div></article>`;
   };
 
   // Tuile boutique. s = {name, slug, category, address, photo_id, cover_id?, products, promos?, best_pct?}
@@ -165,13 +171,31 @@
     try {
       const { items } = await MG.api('/api/cart');
       const cur = (items.find(i => i.product_id === btn.dataset.add) || {}).qty || 0;
-      await MG.api('/api/cart', { method: 'PUT', body: { productId: btn.dataset.add, qty: cur + 1 } });
+      const r = await MG.api('/api/cart', { method: 'PUT', body: { productId: btn.dataset.add, qty: cur + 1 } });
+      MG.refreshCartBadge();
+      if (r.adjusted) return MG.toast(`Il n'en reste que ${r.stock} : vous avez déjà tout le stock dans votre panier.`, true);
       const old = btn.innerHTML; btn.classList.add('done'); btn.innerHTML = MG.icon('check', btn.classList.contains('sm') ? 16 : 20);
       setTimeout(() => { btn.classList.remove('done'); btn.innerHTML = old; }, 1500);
-      MG.toast('Ajouté au panier'); MG.refreshCartBadge();
+      MG.toast(r.stock - r.qty <= 0 ? 'Ajouté : c\'était le dernier en stock !' : r.stock <= MG.LOW_STOCK ? `Ajouté au panier · plus que ${r.stock - r.qty} après vous` : 'Ajouté au panier');
+    } catch (er) {
+      if (er.status === 409) { MG.toast(er.message, true); const card = btn.closest('.product'); if (card) setTimeout(() => location.reload(), 1600); return; }
+      MG.fail(er);
+    }
+  };
+  MG.toggleAlert = async function (btn) {
+    if (!MG.user) { location.href = '/compte.html?next=' + encodeURIComponent(location.pathname + location.search); return; }
+    if (MG.user.role !== 'customer') return MG.toast('Les alertes sont réservées aux comptes clients', true);
+    const on = btn.dataset.on === '1';
+    try {
+      await MG.api('/api/products/' + btn.dataset.alert + '/alert', { method: on ? 'DELETE' : 'POST', body: {} });
+      btn.dataset.on = on ? '0' : '1'; btn.classList.toggle('green', !on); btn.classList.toggle('alt', on);
+      btn.innerHTML = MG.icon(on ? 'bell' : 'check', 16) + (on ? 'Me prévenir' : 'Alerte activée');
+      MG.toast(on ? 'Alerte retirée' : 'C\'est noté : vous serez prévenu dès son retour en stock');
     } catch (er) { MG.fail(er); }
   };
   document.addEventListener('click', e => {
+    const al = e.target.closest('[data-alert]');
+    if (al) { e.preventDefault(); MG.toggleAlert(al); return; }
     const b = e.target.closest('[data-add]');
     if (b && !b.closest('[data-own-add]')) { e.preventDefault(); MG.addToCart(b); }
   });

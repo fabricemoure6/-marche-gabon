@@ -140,13 +140,17 @@ const SCHEMA = [
   `CREATE TABLE IF NOT EXISTS vouchers (id TEXT PRIMARY KEY, code TEXT UNIQUE NOT NULL, user_id TEXT NOT NULL, shop_id TEXT NOT NULL, kind TEXT NOT NULL,
      value INTEGER NOT NULL, min_order INTEGER NOT NULL DEFAULT 0, expires_at INTEGER NOT NULL, origin TEXT, note TEXT, used_at TEXT, order_id TEXT, created_at TEXT)`,
   `CREATE INDEX IF NOT EXISTS idx_vouchers_user ON vouchers(user_id, shop_id)`,
-  `CREATE INDEX IF NOT EXISTS idx_vouchers_order ON vouchers(order_id)`
+  `CREATE INDEX IF NOT EXISTS idx_vouchers_order ON vouchers(order_id)`,
+  `CREATE TABLE IF NOT EXISTS stock_alerts (user_id TEXT NOT NULL, product_id TEXT NOT NULL, created_at TEXT, PRIMARY KEY (user_id, product_id))`,
+  `CREATE INDEX IF NOT EXISTS idx_stock_alerts_product ON stock_alerts(product_id)`,
+  // Le stock ne peut jamais devenir négatif : deux paiements simultanés du dernier article échouent proprement
+  `CREATE TRIGGER IF NOT EXISTS products_stock_nonneg BEFORE UPDATE OF stock ON products WHEN NEW.stock < 0 BEGIN SELECT RAISE(ABORT, 'stock_insuffisant'); END`
 ];
 
 // Colonnes ajoutées après la première version : créées sur les bases existantes
 const MIGRATIONS = {
   users: [['avatar_id', 'TEXT']],
-  products: [['promo_price', 'INTEGER'], ['promo_until', 'INTEGER'], ['promo_start', 'INTEGER']],
+  products: [['promo_price', 'INTEGER'], ['promo_until', 'INTEGER'], ['promo_start', 'INTEGER'], ['stock_updated_at', 'INTEGER']],
   shops: [['loyalty_enabled', 'INTEGER NOT NULL DEFAULT 0'], ['loyalty_every', 'INTEGER'], ['loyalty_kind', 'TEXT'], ['loyalty_value', 'INTEGER'],
     ['loyalty_min', 'INTEGER'], ['loyalty_days', 'INTEGER']],
   orders: [['discount', 'INTEGER NOT NULL DEFAULT 0'], ['voucher_id', 'TEXT']]
@@ -226,6 +230,10 @@ export function distanceKm(lat1, lng1, lat2, lng2) {
 
 export const slugify = s => String(s).toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
   .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 50) || 'boutique';
+
+// ---------- Stock ----------
+export const LOW_STOCK = 5; // « Plus que N » à partir de ce seuil
+export const stockLevel = n => (n <= 0 ? 'out' : n <= LOW_STOCK ? 'low' : 'ok');
 
 // ---------- Fidélité ----------
 // Montant de la remise d'un bon sur un sous-total (arrondi à 5 FCFA, jamais plus que le sous-total)
