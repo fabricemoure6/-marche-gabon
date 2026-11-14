@@ -33,6 +33,16 @@ SMS ; l'administrateur valide dans l'onglet Paiements.
   et les boutiques concernées portent un ruban « Promo ». Le panier et le paiement appliquent le prix promo.
 - Accueil : les boutiques sont rangées par rayon ; les produits se voient dans chaque boutique (et dans la recherche).
 
+## Stock et disponibilité
+- Chaque produit affiche « En stock », « Plus que N en stock » (5 ou moins) ou « Épuisé ».
+- Panier : quantité limitée au stock (ajustée avec un message), avertissement si le stock a baissé depuis l'ajout
+  (bouton « Ajuster »), paiement bloqué tant que le panier n'est pas corrigé.
+- Sécurité : un déclencheur en base empêche tout stock négatif ; si deux clients paient le dernier article en même temps,
+  un seul paiement passe, l'autre reçoit un message clair.
+- Produit épuisé : bouton « Me prévenir » ; au réassort, les clients qui attendaient reçoivent une notification.
+- Vendeur : notification « Stock faible » ou « Produit épuisé » après chaque commande, bandeau « Stock à vérifier »,
+  nombre de clients en attente par produit, annulation « Produit épuisé » qui met le stock à 0 et prévient le client et l'admin.
+
 ## Fidélité et bons d'achat
 - Chaque boutique active sa carte de fidélité (Ma boutique → Fidélité) : un bon toutes les N commandes livrées (2 à 20),
   en % (5 à 30 %, plafond réglable par l'admin) ou en FCFA (500 à 50 000), achat minimum et durée de validité au choix.

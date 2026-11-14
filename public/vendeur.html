@@ -21,6 +21,7 @@
     show();
   }
   S('tabs').onclick = e => { const b = e.target.closest('[data-t]'); if (!b) return; tab = b.dataset.t; [...S('tabs').children].forEach(x => x.classList.toggle('on', x === b)); show(); };
+  if (location.hash === '#produits') { tab = 'products'; [...S('tabs').children].forEach(x => x.classList.toggle('on', x.dataset.t === 'products')); }
   function show() { clearInterval(timer); S('detail').innerHTML = ''; ({ orders, products, loyalty, shop: shopTab })[tab](); }
 
   async function orders() {
@@ -40,8 +41,18 @@
     await draw(); timer = setInterval(draw, 20000);
     S('pane').onclick = async e => {
       const st = e.target.closest('[data-st]'), ch = e.target.closest('[data-chat]');
+      if (st && st.dataset.st === 'cancelled') {
+        const m = MG.modal(`<form id="cf"><h2>Annuler la commande ${MG.esc(st.dataset.r)}</h2><p class="muted" style="margin-top:0">Le client est prévenu et l'équipe du marché s'occupe du remboursement.</p>
+          <label style="display:flex;gap:.6rem;align-items:flex-start;font-weight:600"><input type="radio" name="why" value="out_of_stock" checked style="width:auto;margin-top:4px"><span><b>Produit épuisé</b><br><span class="muted" style="font-weight:500">Le stock du produit passe à 0 pour éviter d'autres commandes.</span></span></label>
+          <label style="display:flex;gap:.6rem;align-items:flex-start;font-weight:600"><input type="radio" name="why" value="other" style="width:auto;margin-top:4px"><span><b>Autre raison</b><br><span class="muted" style="font-weight:500">Les articles sont remis en stock.</span></span></label>
+          <div class="modal-actions"><button type="button" class="btn alt" data-close>Retour</button><button class="btn red">Annuler la commande</button></div></form>`);
+        m.el.querySelector('#cf').onsubmit = async ev => {
+          ev.preventDefault();
+          try { await MG.api('/api/seller/orders/' + st.dataset.r + '/status', { method: 'POST', body: { status: 'cancelled', reason: m.el.querySelector('[name=why]:checked').value } }); m.close(); MG.toast('Commande annulée'); draw(); } catch (er) { MG.fail(er); }
+        };
+        return;
+      }
       if (st) {
-        if (st.dataset.st === 'cancelled' && !confirm('Annuler cette commande ?')) return;
         try { await MG.api('/api/seller/orders/' + st.dataset.r + '/status', { method: 'POST', body: { status: st.dataset.st } }); draw(); } catch (er) { MG.fail(er); }
       }
       if (ch) {
@@ -60,7 +71,11 @@
     const maxPct = MG.config.promo_max_pct || 70, maxDays = MG.config.promo_max_days || 30;
     const nPromo = list.filter(p => p.promo_active).length;
     const until = ms => new Date(ms).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' });
-    S('pane').innerHTML = `<div class="card">
+    const outs = list.filter(p => p.stock <= 0), lows = list.filter(p => p.stock > 0 && p.stock <= MG.LOW_STOCK), waiting = list.reduce((t, p) => t + (p.waiting || 0), 0);
+    const banner = outs.length || lows.length ? `<div class="stock-banner${outs.length ? ' bad' : ''}"><b>${MG.icon(outs.length ? 'x' : 'bell', 18)} Stock à vérifier :</b>
+      <span>${[outs.length ? `${outs.length} produit${outs.length > 1 ? 's' : ''} épuisé${outs.length > 1 ? 's' : ''}` : '', lows.length ? `${lows.length} en stock faible` : ''].filter(Boolean).join(' · ')}${waiting ? ` · <b>${waiting} client${waiting > 1 ? 's' : ''}</b> ${waiting > 1 ? 'attendent' : 'attend'} un retour en stock` : ''}.
+      Un stock à jour évite les commandes annulées.</span></div>` : '';
+    S('pane').innerHTML = banner + `<div class="card">
       <div class="split" style="margin-bottom:var(--space-3)"><div><h2 style="margin:0">Mes produits</h2><p class="muted" style="margin:0">${list.length} produit${list.length > 1 ? 's' : ''}${nPromo ? ` · ${nPromo} en promotion` : ''}</p></div>
         <button class="btn" id="addBtn">${MG.icon('plus')}Ajouter un produit</button></div>
       <details class="policy"><summary>Règles des promotions du marché</summary><ul>
@@ -73,7 +88,7 @@
         <img src="${MG.img(p.photo_id, shop.category)}" alt="">
         <div><div class="pn">${MG.esc(p.name)}</div>
           <div class="pm">${p.promo_active ? `<span class="tag promo">−${p.promo_pct} %</span> jusqu'au ${until(p.promo_until)}` : (p.description ? MG.esc(p.description).slice(0, 80) : '')}</div>
-          <label class="stock" style="margin:.4rem 0 0">Stock <input type="number" min="0" value="${p.stock}" data-stock="${p.id}" aria-label="Stock de ${MG.esc(p.name)}">${p.stock < 1 ? '<span class="tag out">Épuisé</span>' : ''}</label></div>
+          <label class="stock" style="margin:.4rem 0 0">Stock <input type="number" min="0" value="${p.stock}" data-stock="${p.id}" aria-label="Stock de ${MG.esc(p.name)}">${p.stock < 1 ? '<span class="tag out">Épuisé</span>' : p.stock <= MG.LOW_STOCK ? '<span class="tag pending">Stock faible</span>' : ''}${p.waiting ? `<span class="waiting">${MG.icon('bell', 12)}${p.waiting} en attente</span>` : ''}</label></div>
         <div class="pp">${p.promo_active ? `<span class="old">${MG.fcfa(p.price)}</span><span class="price">${MG.fcfa(p.promo_price)}</span>` : `<span class="price">${MG.fcfa(p.price)}</span>`}</div>
         <div class="acts">${p.promo_active ? `<button class="btn small alt" data-stop="${p.id}">Arrêter la promo</button>` : `<button class="btn small" data-promo="${p.id}"${p.stock < 1 ? ' disabled title="Ajoutez du stock d\'abord"' : ''}>Promotion</button>`}
           <button class="btn small alt" data-edit="${p.id}">Modifier</button><button class="btn small alt" data-del="${p.id}" aria-label="Retirer ${MG.esc(p.name)}">${MG.icon('trash', 16)}</button></div></div>`).join('')}</div>`
@@ -147,7 +162,10 @@
     S('addBtn').onclick = () => editor(null);
     S('pane').onchange = async e => {
       const i = e.target.closest('[data-stock]'); if (!i) return;
-      try { await MG.api('/api/seller/products/' + i.dataset.stock, { method: 'PUT', body: { stock: i.value } }); MG.toast('Stock enregistré'); if (Number(i.value) < 1) products(); } catch (er) { MG.fail(er); products(); }
+      const p = list.find(x => x.id === i.dataset.stock);
+      try { await MG.api('/api/seller/products/' + i.dataset.stock, { method: 'PUT', body: { stock: i.value } });
+        MG.toast(p && p.stock <= 0 && Number(i.value) > 0 && p.waiting ? `Stock enregistré : ${p.waiting} client${p.waiting > 1 ? 's sont prévenus' : ' est prévenu'}` : 'Stock enregistré'); products(); }
+      catch (er) { MG.fail(er); products(); }
     };
     S('pane').onclick = async e => {
       const find = id => list.find(x => x.id === id);
