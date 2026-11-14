@@ -1,17 +1,17 @@
 // Assistant à règles : répond aux questions fréquentes sans service externe.
-import { CATEGORIES, ORDER_STATUS } from './lib.js';
+import { CATEGORIES, ORDER_STATUS, publicProduct, EFFECTIVE_PRICE } from './lib.js';
 
 const has = (t, words) => words.some(w => t.includes(w));
 const norm = s => String(s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 const STOP = new Set(['je', 'j', 'cherche', 'chercher', 'voudrais', 'veux', 'acheter', 'trouver', 'avez', 'vous', 'des', 'du', 'de', 'la', 'le', 'les', 'un', 'une',
   'pour', 'avec', 'est', 'il', 'y', 'a', 'quoi', 'faire', 'preparer', 'svp', 'stp', 'merci', 'bonjour', 'produit', 'produits', 'prix', 'combien', 'coute', 'moins', 'cher', 'au', 'aux', 'en', 'et', 'ou', 'mon', 'ma', 'mes', 'oui', 'non', 'salut', 'bonsoir', 'hello', 'coucou', 'mbolo', 'aide', 'help', 'avec', 'plaisir']);
 const keywords = q => norm(q).split(/[^a-z0-9]+/).filter(w => w.length > 2 && !STOP.has(w));
-const QUICK = ['Où est ma commande ?', 'Frais de livraison', 'Comment payer ?', 'Trouver un produit'];
+const QUICK = ['Les promotions', 'Où est ma commande ?', 'Frais de livraison', 'Trouver un produit'];
 
 // Produits actifs des boutiques actives, filtrés par rubrique et mots-clés (sans accents).
 export async function searchProducts(env, { cat = '', q = '', limit = 24 } = {}) {
   const { results } = await env.DB.prepare(
-    `SELECT p.id,p.name,p.description,p.price,p.stock,p.photo_id,s.name AS shop_name,s.slug,s.category,s.address
+    `SELECT p.id,p.name,p.description,p.price,p.promo_price,p.promo_until,p.stock,p.photo_id,s.name AS shop_name,s.slug,s.category,s.address
      FROM products p JOIN shops s ON s.id=p.shop_id WHERE p.active=1 AND s.status='active' ORDER BY p.created_at DESC LIMIT 400`).all();
   const words = keywords(q);
   if (String(q).trim() && !words.length) return [];
@@ -24,7 +24,7 @@ export async function searchProducts(env, { cat = '', q = '', limit = 24 } = {})
     .filter(x => !words.length || x.score > 0)
     .sort((a, b) => b.score - a.score || (b.r.stock > 0) - (a.r.stock > 0))
     .slice(0, limit)
-    .map(x => x.r);
+    .map(x => publicProduct(x.r));
 }
 
 export async function botReply(env, user, settings, message) {
@@ -83,6 +83,19 @@ async function rawReply(env, user, settings, message) {
       links: [['Mon compte', '/compte.html']]
     };
   }
+  if (has(t, ['promo', 'solde', 'reduction', 'remise', 'bon plan', 'bonne affaire', 'pas cher'])) {
+    const { results } = await env.DB.prepare(
+      `SELECT p.id,p.name,p.description,p.price,p.promo_price,p.promo_until,p.stock,p.photo_id,s.name AS shop_name,s.slug,s.category
+       FROM products p JOIN shops s ON s.id=p.shop_id WHERE p.active=1 AND p.stock>0 AND s.status='active' AND ${EFFECTIVE_PRICE} < p.price
+       ORDER BY (1.0 * p.promo_price / p.price) ASC LIMIT 8`).all();
+    if (!results.length) return { reply: 'Pas de promotion en ce moment. Revenez bientôt : les boutiques en lancent régulièrement !', links: [['Voir les boutiques', '/']] };
+    const list = results.map(publicProduct);
+    return {
+      reply: `Voici les meilleures promotions du moment (jusqu'à −${list[0].promo_pct} %) :`,
+      products: list.map(p => ({ id: p.id, name: p.name, price: p.price, old_price: p.old_price, promo_pct: p.promo_pct, stock: p.stock, photo_id: p.photo_id, shop: p.shop_name, slug: p.slug, category: p.category })),
+      links: [['Toutes les promotions', '/#promos']]
+    };
+  }
   if (has(t, ['trouver un produit'])) {
     return { reply: 'Dites-moi ce que vous cherchez : « pagne », « bananes », « parfum », « téléphone »… Je vous montre les produits disponibles avec leur prix.', links: [] };
   }
@@ -92,7 +105,7 @@ async function rawReply(env, user, settings, message) {
   if (products.length) {
     return {
       reply: products.length > 1 ? `J'ai trouvé ${products.length} produits qui peuvent vous plaire :` : 'Voici ce que j\'ai trouvé :',
-      products: products.map(p => ({ id: p.id, name: p.name, price: p.price, stock: p.stock, photo_id: p.photo_id, shop: p.shop_name, slug: p.slug, category: p.category })),
+      products: products.map(p => ({ id: p.id, name: p.name, price: p.price, old_price: p.old_price, promo_pct: p.promo_pct, stock: p.stock, photo_id: p.photo_id, shop: p.shop_name, slug: p.slug, category: p.category })),
       links: hit ? [[`Voir la rubrique ${hit[1]}`, `/?cat=${hit[0]}`]] : []
     };
   }

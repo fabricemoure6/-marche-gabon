@@ -16,21 +16,35 @@
       <h1 id="siteName"></h1>
       <p id="tagline"></p>
       <form id="search" class="search" role="search"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
-        <input id="q" placeholder="Rechercher un produit, une boutique…" aria-label="Recherche"><button class="btn">Chercher</button></form>
+        <input id="q" type="search" placeholder="Rechercher un produit, une boutique…" aria-label="Recherche"><button class="btn">Chercher</button></form>
     </div>
   </section>
 
-  <div class="section-head" style="margin-top:var(--space-5)"><h2>Les rayons</h2></div>
-  <div class="cats" id="cats"></div>
+  <p class="notice info" id="demoNote" hidden>Aperçu : ces boutiques et promotions illustrent la présentation du marché. Les vraies boutiques s'afficheront ici dès leur validation.</p>
 
-  <div class="section-head"><h2 id="prodTitle">Les nouveautés du marché</h2><span class="muted" id="prodCount"></span></div>
-  <p class="notice info" id="demoNote" hidden>Aperçu : ces articles illustrent la présentation du marché. Les produits des boutiques inscrites s'afficheront ici avec leurs vraies photos.</p>
-  <div class="grid" id="products"></div>
-  <div class="card empty" id="noProd" hidden><h3>Rien trouvé pour le moment</h3><p class="muted">Essayez un autre mot ou une autre rubrique.</p></div>
+  <!-- Promotions : visibles dès l'arrivée sur le site -->
+  <section class="promo-band" id="promos" hidden>
+    <div class="head"><div><span class="kick">BONS PLANS</span><h2>Promotions du moment</h2><p id="promoSub"></p></div>
+      <div class="rail-nav"><button type="button" data-dir="-1" aria-label="Promotions précédentes">←</button><button type="button" data-dir="1" aria-label="Promotions suivantes">→</button></div></div>
+    <div class="rail" id="promoRail"></div>
+  </section>
 
-  <div class="section-head"><h2>Les boutiques</h2></div>
-  <div class="grid shops" id="shops"></div>
-  <p class="muted" id="empty" hidden>Aucune boutique pour le moment.</p>
+  <!-- Résultats de recherche -->
+  <section id="results" hidden>
+    <div class="section-head"><h2 id="resTitle"></h2><button class="link" id="clearSearch" type="button">Effacer la recherche</button></div>
+    <div id="resShops"></div>
+    <div class="section-head" id="resProdHead" hidden><h2 style="font-size:1.2rem">Produits</h2></div>
+    <div class="grid" id="resProducts"></div>
+    <div class="card empty-state" id="resEmpty" hidden><img src="/img/produits/panier-tresse.svg" alt=""><h3>Rien trouvé</h3><p class="muted">Essayez un autre mot, ou parcourez les rayons.</p></div>
+  </section>
+
+  <!-- Boutiques rangées par rayon -->
+  <section id="browse">
+    <div class="section-head"><h2>Les rayons</h2></div>
+    <div class="cats" id="cats"></div>
+    <div id="sections"></div>
+    <div class="card empty-state" id="noShop" hidden><img src="/img/produits/panier-tresse.svg" alt=""><h3>Pas encore de boutique dans ce rayon</h3><p class="muted">Revenez bientôt, ou ouvrez la vôtre !</p></div>
+  </section>
 
   <section class="card cta">
     <div><h2>Vous vendez ou livrez ?</h2><p class="muted" style="margin:0">Ouvrez votre boutique en ligne ou devenez livreur partenaire.</p></div>
@@ -41,56 +55,95 @@
 <script>
 (async () => {
   await MG.ready;
-  MG.$('#siteName').textContent = MG.config.site_name;
-  MG.$('#tagline').textContent = MG.config.tagline;
-  let cat = MG.param('cat') || '';
-  if (MG.param('q')) MG.$('#q').value = MG.param('q');
+  const $ = MG.$;
+  $('#siteName').textContent = MG.config.site_name;
+  $('#tagline').textContent = MG.config.tagline;
+  let cat = MG.param('cat') || '', shops = [], promos = [], demo = false;
+  if (MG.param('q')) $('#q').value = MG.param('q');
 
-  // Exemples illustrés, montrés seulement tant que le catalogue est vide
-  const DEMO = [
-    ['pagne', 'Pagne wax 6 yards', 'Tissus d\'Akébé', 15000, 'habits', 'pagne-wax', '−19 %'],
-    ['bananes', 'Régime de bananes plantain', 'Mama Rose', 3500, 'alimentation', 'bananes-plantain'],
-    ['parfum', 'Eau de parfum 100 ml', 'Beauté Lalala', 25000, 'parfumerie', 'parfum', 'Nouveau'],
-    ['huile', 'Huile de palme rouge 1 L', 'Mama Rose', 2000, 'alimentation', 'huile-palme'],
-    ['ananas', 'Ananas pain de sucre', 'Le Verger', 1000, 'alimentation', 'ananas'],
-    ['tel', 'Smartphone 128 Go', 'Tech Glass', 89000, 'electronique', 'smartphone', '−10 %'],
-    ['marmite', 'Marmite en fonte 6 L', 'Maison Okoumé', 12500, 'maison', 'marmite'],
-    ['panier', 'Panier tressé', 'Maison Okoumé', 7500, 'autres', 'panier-tresse', 'Nouveau'],
-    ['poisson', 'Poisson fumé (lot de 3)', 'Pêcherie d\'Owendo', 4000, 'alimentation', 'poisson-fume'],
-    ['riz', 'Sac de riz parfumé 25 kg', 'Quincaillerie du Port', 17500, 'quincaillerie', 'sac-riz']
+  // ----- Aperçu illustré, montré seulement tant qu'aucune boutique n'est validée -----
+  const IMG = n => '/img/produits/' + n + '.svg';
+  const DAY = 86400000, T = Date.now();
+  const DEMO_PROMOS = [
+    { id: 'd1', name: 'Pagne wax 6 yards', shop_name: 'Tissus d\'Akébé', price: 15000, old_price: 18500, promo_pct: 19, promo_until: T + 3 * DAY, stock: 5, img: IMG('pagne-wax') },
+    { id: 'd2', name: 'Smartphone 128 Go', shop_name: 'Tech Glass', price: 89000, old_price: 99000, promo_pct: 10, promo_until: T + 6 * DAY, stock: 2, img: IMG('smartphone') },
+    { id: 'd3', name: 'Marmite en fonte 6 L', shop_name: 'Maison Okoumé', price: 9900, old_price: 12500, promo_pct: 21, promo_until: T + 20 * 3600000, stock: 4, img: IMG('marmite') },
+    { id: 'd4', name: 'Eau de parfum 100 ml', shop_name: 'Beauté Lalala', price: 20000, old_price: 25000, promo_pct: 20, promo_until: T + 9 * DAY, stock: 3, img: IMG('parfum') },
+    { id: 'd5', name: 'Huile de palme rouge 1 L', shop_name: 'Mama Rose', price: 1600, old_price: 2000, promo_pct: 20, promo_until: T + 2 * DAY, stock: 9, img: IMG('huile-palme') },
+    { id: 'd6', name: 'Sac de riz parfumé 25 kg', shop_name: 'Quincaillerie du Port', price: 15500, old_price: 17500, promo_pct: 11, promo_until: T + 5 * DAY, stock: 7, img: IMG('sac-riz') }
   ];
-  const demoCard = d => MG.productCard({ id: d[0], name: d[1], shop_name: d[2], slug: '', price: d[3], category: d[4], stock: 1, badge: d[6] }, { demo: true })
-    .replace(MG.illu(d[4]), '/img/produits/' + d[5] + '.svg').replace(/<a class="pshop"[^>]*>/, '<span class="pshop">').replace('</a><h3', '</span><h3');
+  const DEMO_SHOPS = [
+    ['Mama Rose', 'alimentation', 'Mont-Bouët', 24, 1, 20, 'bananes-plantain'], ['Le Verger de Nzeng-Ayong', 'alimentation', 'Nzeng-Ayong', 11, 0, 0, 'ananas'],
+    ['Pêcherie d\'Owendo', 'alimentation', 'Owendo', 8, 0, 0, 'poisson-fume'], ['Tissus d\'Akébé', 'habits', 'Akébé', 30, 1, 19, 'pagne-wax'],
+    ['Beauté Lalala', 'parfumerie', 'Louis', 12, 1, 20, 'parfum'], ['Karité & Co', 'parfumerie', 'Glass', 6, 0, 0, 'beurre-karite'],
+    ['Quincaillerie du Port', 'quincaillerie', 'Port-Gentil', 40, 1, 11, 'sac-riz'], ['Tech Glass', 'electronique', 'Glass', 18, 1, 10, 'smartphone'],
+    ['Maison Okoumé', 'maison', 'Owendo', 31, 1, 21, 'marmite'], ['Vannerie du Komo', 'autres', 'Kango', 9, 0, 0, 'panier-tresse']
+  ].map(d => ({ name: d[0], category: d[1], address: d[2], products: d[3], promos: d[4], best_pct: d[5], cover: IMG(d[6]) }));
 
-  const drawCats = () => {
-    MG.$('#cats').innerHTML = `<button class="cat${!cat ? ' on' : ''}" data-c=""><span class="bub"><img src="/img/produits/panier-tresse.svg" alt=""></span>Tout</button>` +
-      MG.config.categories.map(c => `<button class="cat${cat === c[0] ? ' on' : ''}" data-c="${MG.esc(c[0])}"><span class="bub"><img src="${MG.illu(c[0])}" alt=""></span>${MG.esc(c[1])}</button>`).join('');
+  // ----- Promotions -----
+  function drawPromos() {
+    $('#promos').hidden = !promos.length;
+    if (!promos.length) return;
+    const best = Math.max(...promos.map(p => p.promo_pct || 0));
+    const nShops = new Set(promos.map(p => p.shop_name)).size;
+    $('#promoSub').textContent = `${promos.length} offre${promos.length > 1 ? 's' : ''} dans ${nShops} boutique${nShops > 1 ? 's' : ''} · jusqu'à −${best} %`;
+    $('#promoRail').innerHTML = promos.map(p => MG.productCard(p, { demo, img: p.img })).join('');
+  }
+  $('#promos').onclick = e => {
+    const b = e.target.closest('[data-dir]'); if (!b) return;
+    $('#promoRail').scrollBy({ left: Number(b.dataset.dir) * $('#promoRail').clientWidth * 0.8, behavior: 'smooth' });
   };
 
-  async function load() {
+  // ----- Rayons et boutiques par rayon -----
+  function drawCats() {
+    const count = id => shops.filter(s => s.category === id).length;
+    $('#cats').innerHTML = `<button class="cat${!cat ? ' on' : ''}" data-c=""><span class="bub"><img src="/img/produits/panier-tresse.svg" alt=""></span>Tous les rayons</button>` +
+      MG.config.categories.map(c => `<button class="cat${cat === c[0] ? ' on' : ''}" data-c="${MG.esc(c[0])}"><span class="bub"><img src="${MG.illu(c[0])}" alt=""></span>${MG.esc(c[1])}${count(c[0]) ? ` <span class="muted">(${count(c[0])})</span>` : ''}</button>`).join('');
+  }
+  function drawSections() {
     drawCats();
-    const q = MG.$('#q').value.trim();
-    const qs = 'cat=' + encodeURIComponent(cat) + '&q=' + encodeURIComponent(q);
-    try {
-      const [prods, shops] = await Promise.all([MG.api('/api/products?limit=24&' + qs), MG.api('/api/shops?' + qs)]);
-      MG.$('#prodTitle').textContent = q ? `Résultats pour « ${q} »` : cat ? MG.catName(cat) : 'Les nouveautés du marché';
-      const demo = !prods.length && !q && !shops.length;
-      MG.$('#demoNote').hidden = !demo;
-      const list = demo ? DEMO.filter(d => !cat || d[4] === cat).map(demoCard) : prods.map(p => MG.productCard(p));
-      MG.$('#products').innerHTML = list.join('');
-      MG.$('#noProd').hidden = list.length > 0;
-      MG.$('#prodCount').textContent = demo ? '' : prods.length ? prods.length + ' article' + (prods.length > 1 ? 's' : '') : '';
+    const groups = MG.config.categories.filter(c => !cat || c[0] === cat)
+      .map(c => [c, shops.filter(s => s.category === c[0])]).filter(([, l]) => l.length);
+    $('#noShop').hidden = groups.length > 0;
+    $('#sections').innerHTML = groups.map(([c, list]) => `<section class="cat-section" id="rayon-${c[0]}">
+      <div class="section-head"><h2><img src="${MG.illu(c[0])}" alt="">${MG.esc(c[1])}</h2><span class="muted">${list.length} boutique${list.length > 1 ? 's' : ''}${list.some(s => s.promos) ? ' · promotions en cours' : ''}</span></div>
+      <div class="grid shops">${list.map(s => MG.shopCard(s, { demo, cover: s.cover })).join('')}</div></section>`).join('');
+  }
+  $('#cats').onclick = e => {
+    const b = e.target.closest('[data-c]'); if (!b) return;
+    cat = b.dataset.c; drawSections();
+    history.replaceState(null, '', cat ? '?cat=' + cat : location.pathname);
+  };
 
-      MG.$('#empty').hidden = shops.length > 0;
-      MG.$('#shops').innerHTML = shops.map(s => `<a class="tile shop" href="/boutique.html?s=${encodeURIComponent(s.slug)}">
-        <div class="cover" style="background-image:url('${MG.img(s.photo_id, s.category)}')"></div>
-        <div class="body"><span class="logo">${MG.esc(s.name.trim().charAt(0).toUpperCase())}</span><h3>${MG.esc(s.name)}</h3>
-        <span class="tag">${MG.esc(MG.catName(s.category))}</span>
-        <p class="muted" style="margin:.5rem 0 0;font-size:.9rem">${s.products} produit${s.products > 1 ? 's' : ''}${s.address ? ' · ' + MG.esc(s.address) : ''}</p></div></a>`).join('');
+  // ----- Recherche : produits et boutiques correspondants -----
+  async function search(q) {
+    $('#results').hidden = !q; $('#browse').hidden = !!q;
+    if (!q) return;
+    $('#resTitle').textContent = `Résultats pour « ${q} »`;
+    try {
+      const [prods, found] = await Promise.all([MG.api('/api/products?limit=24&q=' + encodeURIComponent(q)), MG.api('/api/shops?q=' + encodeURIComponent(q))]);
+      $('#resShops').innerHTML = found.length ? `<div class="grid shops" style="margin-bottom:var(--space-5)">${found.map(s => MG.shopCard(s)).join('')}</div>` : '';
+      $('#resProdHead').hidden = !prods.length;
+      $('#resProducts').innerHTML = prods.map(p => MG.productCard(p)).join('');
+      $('#resEmpty').hidden = prods.length + found.length > 0;
     } catch (e) { MG.fail(e); }
   }
-  MG.$('#cats').onclick = e => { const b = e.target.closest('[data-c]'); if (b) { cat = b.dataset.c; load(); } };
-  MG.$('#search').onsubmit = e => { e.preventDefault(); load(); MG.$('#prodTitle').scrollIntoView({ behavior: 'smooth', block: 'start' }); };
-  load();
+  $('#search').onsubmit = e => {
+    e.preventDefault();
+    const q = $('#q').value.trim();
+    history.replaceState(null, '', q ? '?q=' + encodeURIComponent(q) : location.pathname);
+    search(q); if (q) $('#results').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
+  $('#clearSearch').onclick = () => { $('#q').value = ''; history.replaceState(null, '', location.pathname); search(''); };
+
+  try {
+    [shops, promos] = await Promise.all([MG.api('/api/shops'), MG.api('/api/promotions')]);
+  } catch (e) { MG.fail(e); }
+  demo = !shops.length;
+  if (demo) { shops = DEMO_SHOPS; promos = DEMO_PROMOS; }
+  $('#demoNote').hidden = !demo;
+  drawPromos(); drawSections();
+  search($('#q').value.trim());
+  if (location.hash === '#promos' && !$('#promos').hidden) $('#promos').scrollIntoView({ behavior: 'smooth' });
 })();
 </script></body></html>

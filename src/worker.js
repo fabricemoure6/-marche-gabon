@@ -2,7 +2,7 @@
 import {
   json, bad, rand, uid, now, sha256, safeEqual, hashPassword, createSession, clearCookie, currentUser, destroySession,
   CATEGORIES, ORDER_STATUS, ensureSchema, loadSettings, saveSettings, toBase64, fromBase64, sniffImage,
-  validCoord, distanceKm, slugify
+  validCoord, distanceKm, slugify, EFFECTIVE_PRICE, promoActive, publicProduct
 } from './lib.js';
 import { notify, confirmCheckout, rejectCheckout, cancelOrders, startOnlinePayment, singpayVerify, singpayOn, singpayCall, sp } from './pay.js';
 import { botReply, searchProducts } from './bot.js';
@@ -193,16 +193,28 @@ export default {
         const s = await loadSettings(env);
         return json({
           site_name: s.site_name, tagline: s.tagline, categories: CATEGORIES, delivery_base: s.delivery_base,
-          delivery_per_km: s.delivery_per_km, online_payment: singpayOn(env), invite_required: s.invite_required
+          delivery_per_km: s.delivery_per_km, online_payment: singpayOn(env), invite_required: s.invite_required,
+          promo_max_pct: s.promo_max_pct, promo_max_days: s.promo_max_days
         });
       }
       if (method === 'GET' && p === '/api/shops') {
         const cat = url.searchParams.get('cat') || '', q = cleanText(url.searchParams.get('q'), 60).toLowerCase();
         const { results } = await env.DB.prepare(
           `SELECT s.id,s.name,s.slug,s.category,s.description,s.address,s.photo_id,
-                  (SELECT COUNT(*) FROM products p WHERE p.shop_id=s.id AND p.active=1) AS products
-           FROM shops s WHERE s.status='active' ORDER BY s.name`).all();
+                  (SELECT COUNT(*) FROM products p WHERE p.shop_id=s.id AND p.active=1) AS products,
+                  (SELECT COUNT(*) FROM products p WHERE p.shop_id=s.id AND p.active=1 AND p.stock>0 AND ${EFFECTIVE_PRICE} < p.price) AS promos,
+                  (SELECT MAX(ROUND(100 - 100.0 * p.promo_price / p.price)) FROM products p WHERE p.shop_id=s.id AND p.active=1 AND p.stock>0 AND ${EFFECTIVE_PRICE} < p.price) AS best_pct,
+                  (SELECT p.photo_id FROM products p WHERE p.shop_id=s.id AND p.active=1 AND p.photo_id IS NOT NULL ORDER BY p.created_at DESC LIMIT 1) AS cover_id
+           FROM shops s WHERE s.status='active' ORDER BY promos > 0 DESC, s.name`).all();
         return json(results.filter(s => (!cat || s.category === cat) && (!q || (s.name + ' ' + (s.description || '')).toLowerCase().includes(q))));
+      }
+      if (method === 'GET' && p === '/api/promotions') {
+        const { results } = await env.DB.prepare(
+          `SELECT p.id,p.name,p.description,p.price,p.promo_price,p.promo_until,p.stock,p.photo_id,s.name AS shop_name,s.slug,s.category
+           FROM products p JOIN shops s ON s.id=p.shop_id
+           WHERE p.active=1 AND p.stock>0 AND s.status='active' AND ${EFFECTIVE_PRICE} < p.price
+           ORDER BY (1.0 * p.promo_price / p.price) ASC, p.promo_until ASC LIMIT 24`).all();
+        return json(results.map(publicProduct));
       }
       if (method === 'GET' && p === '/api/products') {
         const cat = url.searchParams.get('cat') || '', q = cleanText(url.searchParams.get('q'), 60);
@@ -213,8 +225,9 @@ export default {
         const s = await env.DB.prepare(`SELECT id,name,slug,category,description,address,photo_id,phone FROM shops WHERE slug=?1 AND status='active'`).bind(m[1]).first();
         if (!s) return bad('Boutique introuvable', 404);
         const { results } = await env.DB.prepare(
-          `SELECT id,name,description,price,stock,photo_id FROM products WHERE shop_id=?1 AND active=1 ORDER BY created_at DESC`).bind(s.id).all();
-        return json({ shop: s, products: results });
+          `SELECT id,name,description,price,promo_price,promo_until,stock,photo_id,created_at FROM products WHERE shop_id=?1 AND active=1 ORDER BY created_at DESC`).bind(s.id).all();
+        const list = results.map(publicProduct).sort((a, b) => (b.promo_pct ? 1 : 0) - (a.promo_pct ? 1 : 0) || (b.stock > 0) - (a.stock > 0));
+        return json({ shop: s, products: list });
       }
       if (method === 'GET' && (m = p.match(/^\/api\/invites\/([a-f0-9]{12})$/))) {
         const inv = await env.DB.prepare('SELECT role,label,max_uses,uses,expires_at,auto_approve,revoked FROM invites WHERE code=?1').bind(m[1]).first();
@@ -298,7 +311,7 @@ export default {
       // ----- Panier -----
       if (method === 'GET' && p === '/api/cart') {
         const { results } = await env.DB.prepare(
-          `SELECT c.product_id,c.qty,p.name,p.price,p.stock,p.photo_id,p.active,s.id AS shop_id,s.name AS shop_name,s.slug,s.status AS shop_status
+          `SELECT c.product_id,c.qty,p.name,${EFFECTIVE_PRICE} AS price,p.price AS base_price,p.stock,p.photo_id,p.active,s.id AS shop_id,s.name AS shop_name,s.slug,s.status AS shop_status
            FROM cart_items c JOIN products p ON p.id=c.product_id JOIN shops s ON s.id=p.shop_id WHERE c.user_id=?1`).bind(user.id).all();
         return json({ items: results });
       }
@@ -325,7 +338,7 @@ export default {
         if (address.length < 5) return bad('Indiquez votre adresse de livraison (quartier, repère)');
         if (phone.length < 8) return bad('Indiquez un numéro de téléphone joignable');
         const { results: lines } = await env.DB.prepare(
-          `SELECT c.product_id,c.qty,p.name,p.price,p.stock,p.active,s.id AS shop_id,s.name AS shop_name,s.status AS shop_status,s.lat AS slat,s.lng AS slng
+          `SELECT c.product_id,c.qty,p.name,${EFFECTIVE_PRICE} AS price,p.stock,p.active,s.id AS shop_id,s.name AS shop_name,s.status AS shop_status,s.lat AS slat,s.lng AS slng
            FROM cart_items c JOIN products p ON p.id=c.product_id JOIN shops s ON s.id=p.shop_id WHERE c.user_id=?1`).bind(user.id).all();
         if (!lines.length) return bad('Votre panier est vide');
         for (const l of lines) {
@@ -468,7 +481,27 @@ export default {
         }
         if (method === 'GET' && p === '/api/seller/products') {
           const { results } = await env.DB.prepare('SELECT * FROM products WHERE shop_id=?1 ORDER BY created_at DESC').bind(shop.id).all();
-          return json(results);
+          return json(results.map(r => ({ ...r, promo_active: promoActive(r), promo_pct: promoActive(r) ? Math.round(100 - (100 * r.promo_price) / r.price) : null })));
+        }
+        if ((method === 'POST' || method === 'DELETE') && (m = p.match(/^\/api\/seller\/products\/([a-f0-9]{16})\/promo$/))) {
+          const prod = await env.DB.prepare('SELECT * FROM products WHERE id=?1 AND shop_id=?2 AND active=1').bind(m[1], shop.id).first();
+          if (!prod) return bad('Produit introuvable', 404);
+          if (method === 'DELETE') {
+            await env.DB.prepare('UPDATE products SET promo_price=NULL,promo_until=NULL,promo_start=NULL WHERE id=?1').bind(prod.id).run();
+            return json({ ok: true });
+          }
+          const st = await loadSettings(env), b = await readJson(request) || {};
+          const maxPct = st.promo_max_pct ?? 70, maxDays = st.promo_max_days ?? 30;
+          let promo = Number.isFinite(num(b.promoPrice)) ? Math.round(num(b.promoPrice)) : Math.round(prod.price * (1 - num(b.pct) / 100));
+          promo = Math.round(promo / 5) * 5; // arrondi à 5 FCFA
+          const pct = 100 - (100 * promo) / prod.price, days = Math.round(num(b.days));
+          if (!Number.isFinite(promo) || promo < 50) return bad('Prix promotionnel invalide (50 FCFA minimum)');
+          if (pct < 5) return bad('La remise doit être d\'au moins 5 % du prix normal');
+          if (pct > maxPct) return bad(`La remise ne peut pas dépasser ${maxPct} % (règle du marché)`);
+          if (!(days >= 1 && days <= maxDays)) return bad(`Durée de 1 à ${maxDays} jours`);
+          if (prod.stock < 1) return bad('Ajoutez du stock avant de mettre ce produit en promotion');
+          await env.DB.prepare('UPDATE products SET promo_price=?2,promo_until=?3,promo_start=?4 WHERE id=?1').bind(prod.id, promo, Date.now() + days * 86400000, Date.now()).run();
+          return json({ ok: true, promoPrice: promo, pct: Math.round(pct) });
         }
         if (method === 'POST' && p === '/api/seller/products') {
           const b = await readJson(request);
@@ -493,6 +526,7 @@ export default {
           const name = cleanText(b && b.name, 100) || prod.name, price = Number.isFinite(num(b && b.price)) ? Math.round(num(b.price)) : prod.price;
           const stock = Number.isFinite(num(b && b.stock)) ? Math.floor(num(b.stock)) : prod.stock;
           if (price < 50 || price > 50000000 || stock < 0 || stock > 100000) return bad('Prix ou stock invalide');
+          if (promoActive(prod) && price !== prod.price) return bad('Arrêtez la promotion avant de changer le prix normal (le prix barré doit rester honnête)');
           let photo = prod.photo_id;
           if (b && b.photo_id !== undefined) photo = b.photo_id && await env.DB.prepare('SELECT 1 FROM photos WHERE id=?1 AND owner_id=?2').bind(String(b.photo_id), user.id).first() ? String(b.photo_id) : null;
           await env.DB.prepare('UPDATE products SET name=?2,description=?3,price=?4,stock=?5,photo_id=?6,active=?7 WHERE id=?1')
@@ -705,7 +739,8 @@ export default {
             payment_instructions: cleanText(b.payment_instructions, 400) || cur.payment_instructions,
             delivery_base: nn(b.delivery_base, cur.delivery_base, 0, 100000), delivery_per_km: nn(b.delivery_per_km, cur.delivery_per_km, 0, 10000),
             courier_radius_km: nn(b.courier_radius_km, cur.courier_radius_km, 1, 200),
-            invite_required: ['none', 'pro', 'all'].includes(b.invite_required) ? b.invite_required : cur.invite_required
+            invite_required: ['none', 'pro', 'all'].includes(b.invite_required) ? b.invite_required : cur.invite_required,
+            promo_max_pct: nn(b.promo_max_pct, cur.promo_max_pct ?? 70, 5, 90), promo_max_days: nn(b.promo_max_days, cur.promo_max_days ?? 30, 1, 90)
           });
           return json({ ok: true });
         }

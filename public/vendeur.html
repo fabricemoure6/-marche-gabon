@@ -53,33 +53,112 @@
   }
 
   async function products() {
-    const list = await MG.api('/api/seller/products');
-    S('pane').innerHTML = `<form class="card" id="pf"><h3>Ajouter un produit</h3>
-      <div class="row"><input id="pn" placeholder="Nom du produit" required maxlength="100"><input id="pp" type="number" min="50" step="50" placeholder="Prix (FCFA)" required style="max-width:150px"><input id="ps" type="number" min="0" placeholder="Stock" required style="max-width:100px"></div>
-      <label for="pd">Description (facultatif)</label><input id="pd" maxlength="500">
-      <label for="pi">Photo</label><input id="pi" type="file" accept="image/*">
-      <p><button class="btn">Ajouter</button></p></form>
-      <div class="card scroll"><table><thead><tr><th></th><th>Produit</th><th>Prix</th><th>Stock</th><th></th></tr></thead><tbody>${list.filter(p => p.active).map(p => `<tr>
-        <td>${p.photo_id ? `<img class="thumb" src="${MG.photo(p.photo_id)}" alt="">` : ''}</td><td>${MG.esc(p.name)}</td>
-        <td><input type="number" value="${p.price}" min="50" step="50" data-f="price" data-id="${p.id}" style="width:110px"></td>
-        <td><input type="number" value="${p.stock}" min="0" data-f="stock" data-id="${p.id}" style="width:80px"></td>
-        <td><button class="btn small red" data-del="${p.id}">Retirer</button></td></tr>`).join('')}</tbody></table></div>`;
-    S('pf').onsubmit = async e => {
-      e.preventDefault();
-      try {
-        const f = S('pi').files[0];
-        const photo_id = f ? await MG.uploadPhoto(f) : null;
-        await MG.api('/api/seller/products', { method: 'POST', body: { name: S('pn').value, price: S('pp').value, stock: S('ps').value, description: S('pd').value, photo_id } });
-        MG.toast('Produit ajouté'); products();
-      } catch (er) { MG.fail(er); }
-    };
+    const list = (await MG.api('/api/seller/products')).filter(p => p.active);
+    const maxPct = MG.config.promo_max_pct || 70, maxDays = MG.config.promo_max_days || 30;
+    const nPromo = list.filter(p => p.promo_active).length;
+    const until = ms => new Date(ms).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' });
+    S('pane').innerHTML = `<div class="card">
+      <div class="split" style="margin-bottom:var(--space-3)"><div><h2 style="margin:0">Mes produits</h2><p class="muted" style="margin:0">${list.length} produit${list.length > 1 ? 's' : ''}${nPromo ? ` · ${nPromo} en promotion` : ''}</p></div>
+        <button class="btn" id="addBtn">${MG.icon('plus')}Ajouter un produit</button></div>
+      <details class="policy"><summary>Règles des promotions du marché</summary><ul>
+        <li>Remise de <b>5 % à ${maxPct} %</b> sur le prix normal, arrondie à 5 FCFA.</li>
+        <li>Durée de <b>1 à ${maxDays} jours</b> : la promotion s'arrête toute seule à la date de fin.</li>
+        <li>Le prix barré est votre prix normal : il ne peut pas être modifié pendant la promotion.</li>
+        <li>Un produit en rupture de stock ne peut pas être mis en promotion et sort de la vitrine des promotions.</li>
+        <li>Les produits en promotion apparaissent sur la page d'accueil du marché et en tête de votre boutique.</li></ul></details>
+      ${list.length ? `<div class="plist">${list.map(p => `<div class="prow">
+        <img src="${MG.img(p.photo_id, shop.category)}" alt="">
+        <div><div class="pn">${MG.esc(p.name)}</div>
+          <div class="pm">${p.promo_active ? `<span class="tag promo">−${p.promo_pct} %</span> jusqu'au ${until(p.promo_until)}` : (p.description ? MG.esc(p.description).slice(0, 80) : '')}</div>
+          <label class="stock" style="margin:.4rem 0 0">Stock <input type="number" min="0" value="${p.stock}" data-stock="${p.id}" aria-label="Stock de ${MG.esc(p.name)}">${p.stock < 1 ? '<span class="tag out">Épuisé</span>' : ''}</label></div>
+        <div class="pp">${p.promo_active ? `<span class="old">${MG.fcfa(p.price)}</span><span class="price">${MG.fcfa(p.promo_price)}</span>` : `<span class="price">${MG.fcfa(p.price)}</span>`}</div>
+        <div class="acts">${p.promo_active ? `<button class="btn small alt" data-stop="${p.id}">Arrêter la promo</button>` : `<button class="btn small" data-promo="${p.id}"${p.stock < 1 ? ' disabled title="Ajoutez du stock d\'abord"' : ''}>Promotion</button>`}
+          <button class="btn small alt" data-edit="${p.id}">Modifier</button><button class="btn small alt" data-del="${p.id}" aria-label="Retirer ${MG.esc(p.name)}">${MG.icon('trash', 16)}</button></div></div>`).join('')}</div>`
+      : `<div class="empty-state"><img src="${MG.illu(shop.category)}" alt=""><h3>Ajoutez votre premier produit</h3><p class="muted">Une belle photo et un prix clair : c'est ce qui fait vendre.</p></div>`}</div>`;
+
+    // ----- Ajouter / modifier -----
+    function editor(p) {
+      const m = MG.modal(`<form id="ef"><h2>${p ? 'Modifier le produit' : 'Ajouter un produit'}</h2>
+        <label for="en">Nom du produit</label><input id="en" required maxlength="100" value="${p ? MG.esc(p.name) : ''}" placeholder="Ex. : Pagne wax 6 yards">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:var(--space-3)">
+          <div><label for="ep">Prix normal (FCFA)</label><input id="ep" type="number" min="50" step="5" required value="${p ? p.price : ''}"${p && p.promo_active ? ' disabled' : ''}></div>
+          <div><label for="es">Stock</label><input id="es" type="number" min="0" required value="${p ? p.stock : ''}"></div></div>
+        ${p && p.promo_active ? '<p class="muted" style="margin:.3rem 0 0;font-size:.85rem">Prix bloqué pendant la promotion.</p>' : ''}
+        <label for="ed">Description (facultatif)</label><textarea id="ed" maxlength="500" placeholder="Taille, matière, origine…">${p ? MG.esc(p.description || '') : ''}</textarea>
+        <label for="ei">Photo</label><input id="ei" type="file" accept="image/*">
+        <img class="preview-img" id="eprev" src="${p ? MG.img(p.photo_id, shop.category) : ''}" alt=""${p ? '' : ' hidden'}>
+        <p class="err" id="eerr" role="alert"></p>
+        <div class="modal-actions"><button type="button" class="btn alt" data-close>Annuler</button><button class="btn" id="esave">${p ? 'Enregistrer' : 'Ajouter le produit'}</button></div></form>`, { wide: true });
+      const el = m.el, Q = sel => el.querySelector(sel);
+      Q('#ei').onchange = () => { const f = Q('#ei').files[0]; if (f) { Q('#eprev').src = URL.createObjectURL(f); Q('#eprev').hidden = false; } };
+      Q('#ef').onsubmit = async e => {
+        e.preventDefault(); Q('#esave').disabled = true; Q('#eerr').textContent = '';
+        try {
+          const f = Q('#ei').files[0];
+          const body = { name: Q('#en').value, stock: Q('#es').value, description: Q('#ed').value };
+          if (!(p && p.promo_active)) body.price = Q('#ep').value;
+          if (f) { Q('#esave').textContent = 'Envoi de la photo…'; body.photo_id = await MG.uploadPhoto(f); }
+          if (p) await MG.api('/api/seller/products/' + p.id, { method: 'PUT', body });
+          else await MG.api('/api/seller/products', { method: 'POST', body: { ...body, photo_id: body.photo_id || null } });
+          m.close(); MG.toast(p ? 'Produit enregistré' : 'Produit ajouté'); products();
+        } catch (er) { Q('#eerr').textContent = er.message; Q('#esave').disabled = false; Q('#esave').textContent = p ? 'Enregistrer' : 'Ajouter le produit'; }
+      };
+      Q('#en').focus();
+    }
+
+    // ----- Promotion -----
+    function promo(p) {
+      const presets = [10, 20, 30, 50].filter(x => x <= maxPct), days = [3, 7, 14, 30].filter(x => x <= maxDays);
+      const m = MG.modal(`<form id="pf"><h2>Mettre en promotion</h2>
+        <div class="row" style="flex-wrap:nowrap;margin-bottom:var(--space-2)"><img src="${MG.img(p.photo_id, shop.category)}" alt="" style="width:56px;height:56px;border-radius:var(--radius-m);object-fit:cover">
+          <div><b>${MG.esc(p.name)}</b><br><span class="muted">Prix normal : ${MG.fcfa(p.price)}</span></div></div>
+        <label>Remise</label><div class="seg" id="pctSeg">${presets.map(x => `<button type="button" data-pct="${x}">−${x} %</button>`).join('')}</div>
+        <label for="pprice">ou prix promotionnel (FCFA)</label><input id="pprice" type="number" min="50" step="5" required>
+        <label>Durée</label><div class="seg" id="daySeg">${days.map(x => `<button type="button" data-days="${x}">${x} jours</button>`).join('')}</div>
+        <div class="promo-preview" id="pprev"></div>
+        <p class="err" id="perr" role="alert"></p>
+        <div class="modal-actions"><button type="button" class="btn alt" data-close>Annuler</button><button class="btn" id="psave">Lancer la promotion</button></div></form>`, { wide: true });
+      const el = m.el, Q = sel => el.querySelector(sel);
+      let nDays = days.includes(7) ? 7 : days[0];
+      const round5 = v => Math.round(v / 5) * 5;
+      const sync = () => {
+        const v = round5(Number(Q('#pprice').value)), pct = Math.round(100 - (100 * v) / p.price);
+        const ok = v >= 50 && pct >= 5 && pct <= maxPct;
+        el.querySelectorAll('[data-pct]').forEach(b => b.classList.toggle('on', Number(b.dataset.pct) === pct));
+        el.querySelectorAll('[data-days]').forEach(b => b.classList.toggle('on', Number(b.dataset.days) === nDays));
+        Q('#pprev').innerHTML = v ? `<div><span class="old">${MG.fcfa(p.price)}</span><span class="price">${MG.fcfa(v)}</span></div>
+          <div style="text-align:right">${ok ? `<span class="tag promo">−${pct} %</span><br><small class="muted">jusqu'au ${until(Date.now() + nDays * 86400000)}</small>` : `<small class="err">Remise entre 5 % et ${maxPct} %</small>`}</div>` : '<span class="muted">Choisissez une remise</span>';
+        Q('#psave').disabled = !ok;
+      };
+      Q('#pctSeg').onclick = e => { const b = e.target.closest('[data-pct]'); if (b) { Q('#pprice').value = round5(p.price * (1 - b.dataset.pct / 100)); sync(); } };
+      Q('#daySeg').onclick = e => { const b = e.target.closest('[data-days]'); if (b) { nDays = Number(b.dataset.days); sync(); } };
+      Q('#pprice').oninput = sync;
+      Q('#pprice').value = round5(p.price * (1 - (presets.includes(20) ? 20 : presets[0]) / 100)); sync();
+      Q('#pf').onsubmit = async e => {
+        e.preventDefault(); Q('#psave').disabled = true;
+        try { const r = await MG.api('/api/seller/products/' + p.id + '/promo', { method: 'POST', body: { promoPrice: Q('#pprice').value, days: nDays } }); m.close(); MG.toast(`Promotion lancée : −${r.pct} %`); products(); }
+        catch (er) { Q('#perr').textContent = er.message; Q('#psave').disabled = false; }
+      };
+    }
+
+    S('addBtn').onclick = () => editor(null);
     S('pane').onchange = async e => {
-      const i = e.target.closest('[data-f]'); if (!i) return;
-      try { await MG.api('/api/seller/products/' + i.dataset.id, { method: 'PUT', body: { [i.dataset.f]: i.value } }); MG.toast('Enregistré'); } catch (er) { MG.fail(er); products(); }
+      const i = e.target.closest('[data-stock]'); if (!i) return;
+      try { await MG.api('/api/seller/products/' + i.dataset.stock, { method: 'PUT', body: { stock: i.value } }); MG.toast('Stock enregistré'); if (Number(i.value) < 1) products(); } catch (er) { MG.fail(er); products(); }
     };
     S('pane').onclick = async e => {
-      const b = e.target.closest('[data-del]'); if (!b || !confirm('Retirer ce produit de la boutique ?')) return;
-      try { await MG.api('/api/seller/products/' + b.dataset.del, { method: 'DELETE', body: {} }); products(); } catch (er) { MG.fail(er); }
+      const find = id => list.find(x => x.id === id);
+      const ed = e.target.closest('[data-edit]'), pr = e.target.closest('[data-promo]'), st = e.target.closest('[data-stop]'), del = e.target.closest('[data-del]');
+      if (ed) editor(find(ed.dataset.edit));
+      if (pr) promo(find(pr.dataset.promo));
+      if (st) {
+        if (!confirm('Arrêter la promotion ? Le produit revient à son prix normal.')) return;
+        try { await MG.api('/api/seller/products/' + st.dataset.stop + '/promo', { method: 'DELETE', body: {} }); MG.toast('Promotion arrêtée'); products(); } catch (er) { MG.fail(er); }
+      }
+      if (del) {
+        if (!confirm('Retirer « ' + find(del.dataset.del).name + ' » de la boutique ?')) return;
+        try { await MG.api('/api/seller/products/' + del.dataset.del, { method: 'DELETE', body: {} }); MG.toast('Produit retiré'); products(); } catch (er) { MG.fail(er); }
+      }
     };
   }
 
