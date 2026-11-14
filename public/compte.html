@@ -15,8 +15,18 @@
 
   if (MG.param('reset')) return resetView(MG.param('reset'));
   if (MG.param('setup')) return setupView();
+  const code = (MG.param('invite') || '').toLowerCase();
+  let invite = null;
+  if (code) {
+    try { invite = await MG.api('/api/invites/' + encodeURIComponent(code)); } catch { invite = { state: 'introuvable' }; }
+    if (invite.state !== 'valide') {
+      view.innerHTML = `<div class="card empty"><h1>Lien d'invitation ${MG.esc(invite.state)}</h1><p class="muted">Ce lien ne permet plus de s'inscrire. Demandez un nouveau lien à l'équipe ${MG.esc(MG.config.site_name)}.</p><a class="btn" href="/">Voir le marché</a></div>`;
+      return;
+    }
+    invite.code = code;
+  }
   if (MG.user) return profileView();
-  authView(MG.param('role') === 'seller' || MG.param('role') === 'courier' ? 'register' : 'login', MG.param('role') || 'customer');
+  authView(invite || MG.param('role') === 'seller' || MG.param('role') === 'courier' ? 'register' : 'login', invite ? invite.role : MG.param('role') || 'customer');
 
   function profileView() {
     const u = MG.user, roles = { customer: 'Client', seller: 'Gestionnaire de boutique', courier: 'Livreur', admin: 'Administrateur' };
@@ -26,7 +36,10 @@
   }
 
   function authView(mode, role) {
-    view.innerHTML = `<div class="tabs"><button data-m="login" class="${mode === 'login' ? 'on' : ''}">Connexion</button><button data-m="register" class="${mode === 'register' ? 'on' : ''}">Créer un compte</button></div>
+    const RL = { customer: 'client', seller: 'gestionnaire de boutique', courier: 'livreur' };
+    const banner = invite ? `<div class="invite-banner"><span class="avatar">${MG.esc(MG.config.site_name.charAt(0))}</span><div><b>Vous êtes invité(e) à rejoindre ${MG.esc(MG.config.site_name)}</b><br>
+      <span class="muted">Compte ${RL[invite.role]}${invite.autoApprove ? ' · boutique validée dès l\'inscription' : ''}${invite.expiresAt ? ' · lien valable jusqu\'au ' + new Date(invite.expiresAt).toLocaleDateString('fr-FR') : ''}</span></div></div>` : '';
+    view.innerHTML = banner + `<div class="tabs"><button data-m="login" class="${mode === 'login' ? 'on' : ''}">Connexion</button><button data-m="register" class="${mode === 'register' ? 'on' : ''}">Créer un compte</button></div>
       <form class="card" id="f"></form>`;
     view.querySelector('.tabs').onclick = e => { const b = e.target.closest('[data-m]'); if (b) authView(b.dataset.m, role); };
     const f = MG.$('#f');
@@ -50,17 +63,24 @@
           <label for="shopName">Nom de la boutique</label><input id="shopName" maxlength="80">
           <label for="category">Catégorie</label><select id="category">${MG.config.categories.map(c => `<option value="${c[0]}">${MG.esc(c[1])}</option>`).join('')}</select>
           <label for="address">Adresse de la boutique</label><input id="address" maxlength="200">
-          <p class="muted">Votre boutique sera visible après validation par l'administrateur.</p>
+          <p class="muted">${invite && invite.autoApprove ? 'Votre boutique sera visible dès la création du compte.' : 'Votre boutique sera visible après validation par l\'administrateur.'}</p>
         </div>
         <label for="pw">Mot de passe (8 caractères minimum)</label><input id="pw" type="password" required minlength="8" autocomplete="new-password">
         <p class="err" id="err"></p><button class="btn">Créer mon compte</button>`;
       const sel = MG.$('#role'); sel.value = role;
+      if (invite) sel.disabled = true;
+      const need = MG.config.invite_required;
+      const lockNote = () => {
+        const r = sel.value, locked = !invite && (need === 'all' || (need === 'pro' && r !== 'customer'));
+        MG.$('#err').textContent = locked ? 'Ce type de compte se crée uniquement avec un lien d\'invitation : demandez-le à l\'équipe.' : '';
+        f.querySelector('button.btn').disabled = locked;
+      };
       const sync = () => (MG.$('#sellerBox').hidden = sel.value !== 'seller');
-      sel.onchange = sync; sync();
+      sel.onchange = () => { sync(); lockNote(); }; sync(); lockNote();
       f.onsubmit = async e => {
         e.preventDefault();
         const body = { role: sel.value, name: MG.$('#name').value, email: MG.$('#email').value, phone: MG.$('#phone').value, password: MG.$('#pw').value,
-          shopName: MG.$('#shopName').value, category: MG.$('#category').value, address: MG.$('#address').value };
+          shopName: MG.$('#shopName').value, category: MG.$('#category').value, address: MG.$('#address').value, invite: invite ? invite.code : undefined };
         try {
           await MG.api('/api/auth/register', { method: 'POST', body });
           go(body.role === 'seller' ? '/vendeur.html' : body.role === 'courier' ? '/livreur.html' : dest());

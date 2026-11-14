@@ -273,3 +273,16 @@ th{font-size:.78rem;text-transform:uppercase;letter-spacing:.04em;color:var(--in
  .hero .shapes span:nth-child(3){display:none}
 }
 @media print{header#top,#bot,.noprint{display:none!important}body{background:#fff;color:#000}.card{border:0;box-shadow:none}}
+
+/* ---------- Fenêtre de confirmation ---------- */
+.modal{width:min(480px,calc(100vw - 2rem));border:0;border-radius:var(--radius-l);padding:var(--space-5);background:var(--surface-200);color:var(--ink);box-shadow:var(--shadow-3)}
+.modal::backdrop{background:rgba(31,26,23,.55);backdrop-filter:blur(2px)}
+.modal[open]{animation:pop .25s var(--bounce) both}
+.modal-head{display:flex;gap:var(--space-3);align-items:center;margin-bottom:var(--space-3)}
+.modal-head h2{margin:0;font-size:1.3rem}
+.modal-ico{width:44px;height:44px;flex:none;border-radius:50%;display:grid;place-items:center;background:var(--danger-tint);color:var(--danger);font:800 1.3rem/1 var(--font-display)}
+.modal-list{margin:0 0 var(--space-2);padding:var(--space-3) var(--space-3) var(--space-3) var(--space-6);background:var(--surface-300);border-radius:var(--radius-m);font-size:.92rem}
+.modal-list li+li{margin-top:4px}
+.modal-actions{display:flex;justify-content:flex-end;gap:var(--space-2);flex-wrap:wrap;margin-top:var(--space-3)}
+.invite-banner{display:flex;gap:var(--space-3);align-items:center;background:var(--soleil-tint);border-radius:var(--radius-l);padding:var(--space-4);margin-bottom:var(--space-4)}
+.invite-banner .avatar{flex:none}

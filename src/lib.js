@@ -86,7 +86,8 @@ export const DEFAULT_SETTINGS = {
   payment_instructions: 'Envoyez le montant par Airtel Money au numéro indiqué avec la référence en motif, puis saisissez la référence de la transaction reçue par SMS.',
   delivery_base: 1000,      // FCFA : frais de départ par boutique
   delivery_per_km: 200,     // FCFA : par kilomètre entre la boutique et le client
-  courier_radius_km: 15     // les livreurs à moins de cette distance de la boutique sont prévenus
+  courier_radius_km: 15,    // les livreurs à moins de cette distance de la boutique sont prévenus
+  invite_required: 'none'   // 'none' : inscription libre · 'pro' : invitation obligatoire pour boutiques et livreurs · 'all' : pour tous
 };
 
 // ---------- Schéma ----------
@@ -123,7 +124,14 @@ const SCHEMA = [
   `CREATE INDEX IF NOT EXISTS idx_notif_user ON notifications(user_id, created_at)`,
   `CREATE TABLE IF NOT EXISTS chat_messages (id TEXT PRIMARY KEY, order_id TEXT NOT NULL, sender_id TEXT NOT NULL, sender_name TEXT, sender_role TEXT, body TEXT NOT NULL, created_at TEXT)`,
   `CREATE INDEX IF NOT EXISTS idx_chat_order ON chat_messages(order_id, created_at)`,
-  `CREATE TABLE IF NOT EXISTS couriers (user_id TEXT PRIMARY KEY, available INTEGER NOT NULL DEFAULT 0, lat REAL, lng REAL, vehicle TEXT, updated_at INTEGER)`
+  `CREATE TABLE IF NOT EXISTS couriers (user_id TEXT PRIMARY KEY, available INTEGER NOT NULL DEFAULT 0, lat REAL, lng REAL, vehicle TEXT, updated_at INTEGER)`,
+  `CREATE TABLE IF NOT EXISTS invites (id TEXT PRIMARY KEY, code TEXT UNIQUE NOT NULL, role TEXT NOT NULL, label TEXT, max_uses INTEGER, uses INTEGER NOT NULL DEFAULT 0,
+     expires_at INTEGER, auto_approve INTEGER NOT NULL DEFAULT 0, revoked INTEGER NOT NULL DEFAULT 0, created_by TEXT, created_at TEXT)`,
+  `CREATE TABLE IF NOT EXISTS invite_uses (invite_id TEXT NOT NULL, user_id TEXT NOT NULL, created_at TEXT)`,
+  `CREATE INDEX IF NOT EXISTS idx_invite_uses ON invite_uses(invite_id)`,
+  `CREATE TABLE IF NOT EXISTS admin_actions (id TEXT PRIMARY KEY, admin_id TEXT NOT NULL, admin_name TEXT, action TEXT NOT NULL, target_type TEXT,
+     target_id TEXT, target_name TEXT, reason TEXT, created_at TEXT)`,
+  `CREATE INDEX IF NOT EXISTS idx_admin_actions ON admin_actions(created_at)`
 ];
 
 let ready = null;
