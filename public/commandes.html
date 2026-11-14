@@ -21,7 +21,7 @@
     try {
       const r = await MG.api('/api/my/checkouts/' + payRef + '/check');
       MG.$('#msg').innerHTML = r.status === 'confirmed' || r.status === 'paid'
-        ? '<div class="notice" style="background:#D3F9D8">Paiement reçu, merci ! Les boutiques sont prévenues.</div>'
+        ? '<div class="notice" style="background:var(--foret-tint)">Paiement reçu, merci ! Les boutiques sont prévenues.</div>'
         : '<div class="notice">Paiement non confirmé pour le moment (' + MG.esc(r.status) + '). Si vous avez payé, patientez quelques instants puis actualisez la page.</div>';
     } catch { /* ignoré */ }
   }

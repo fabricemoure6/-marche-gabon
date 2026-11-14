@@ -5,7 +5,7 @@ import {
   validCoord, distanceKm, slugify
 } from './lib.js';
 import { notify, confirmCheckout, rejectCheckout, cancelOrders, startOnlinePayment, singpayVerify, singpayOn, singpayCall, sp } from './pay.js';
-import { botReply } from './bot.js';
+import { botReply, searchProducts } from './bot.js';
 
 const cleanText = (v, max) => String(v ?? '').replace(/[\u0000-\u001f\u007f]/g, ' ').trim().slice(0, max);
 const validEmail = e => /^[^\s@]{1,64}@[^\s@]{1,190}\.[^\s@]{2,}$/.test(e) && e.length <= 254;
@@ -160,6 +160,11 @@ export default {
                   (SELECT COUNT(*) FROM products p WHERE p.shop_id=s.id AND p.active=1) AS products
            FROM shops s WHERE s.status='active' ORDER BY s.name`).all();
         return json(results.filter(s => (!cat || s.category === cat) && (!q || (s.name + ' ' + (s.description || '')).toLowerCase().includes(q))));
+      }
+      if (method === 'GET' && p === '/api/products') {
+        const cat = url.searchParams.get('cat') || '', q = cleanText(url.searchParams.get('q'), 60);
+        const limit = Math.min(48, Math.max(1, parseInt(url.searchParams.get('limit'), 10) || 24));
+        return json(await searchProducts(env, { cat, q, limit }));
       }
       if (method === 'GET' && (m = p.match(/^\/api\/shops\/([a-z0-9-]{1,60})$/))) {
         const s = await env.DB.prepare(`SELECT id,name,slug,category,description,address,photo_id,phone FROM shops WHERE slug=?1 AND status='active'`).bind(m[1]).first();

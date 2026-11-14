@@ -2,9 +2,38 @@
 import { CATEGORIES, ORDER_STATUS } from './lib.js';
 
 const has = (t, words) => words.some(w => t.includes(w));
+const norm = s => String(s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+const STOP = new Set(['je', 'j', 'cherche', 'chercher', 'voudrais', 'veux', 'acheter', 'trouver', 'avez', 'vous', 'des', 'du', 'de', 'la', 'le', 'les', 'un', 'une',
+  'pour', 'avec', 'est', 'il', 'y', 'a', 'quoi', 'faire', 'preparer', 'svp', 'stp', 'merci', 'bonjour', 'produit', 'produits', 'prix', 'combien', 'coute', 'moins', 'cher', 'au', 'aux', 'en', 'et', 'ou', 'mon', 'ma', 'mes', 'oui', 'non', 'salut', 'bonsoir', 'hello', 'coucou', 'mbolo', 'aide', 'help', 'avec', 'plaisir']);
+const keywords = q => norm(q).split(/[^a-z0-9]+/).filter(w => w.length > 2 && !STOP.has(w));
+const QUICK = ['Où est ma commande ?', 'Frais de livraison', 'Comment payer ?', 'Trouver un produit'];
+
+// Produits actifs des boutiques actives, filtrés par rubrique et mots-clés (sans accents).
+export async function searchProducts(env, { cat = '', q = '', limit = 24 } = {}) {
+  const { results } = await env.DB.prepare(
+    `SELECT p.id,p.name,p.description,p.price,p.stock,p.photo_id,s.name AS shop_name,s.slug,s.category,s.address
+     FROM products p JOIN shops s ON s.id=p.shop_id WHERE p.active=1 AND s.status='active' ORDER BY p.created_at DESC LIMIT 400`).all();
+  const words = keywords(q);
+  if (String(q).trim() && !words.length) return [];
+  return results
+    .filter(r => !cat || r.category === cat)
+    .map(r => {
+      const hay = norm(r.name + ' ' + (r.description || '') + ' ' + r.shop_name + ' ' + r.category);
+      return { r, score: words.reduce((n, w) => n + (hay.includes(w) ? 1 : hay.includes(w.slice(0, 5)) ? 0.5 : 0), 0) };
+    })
+    .filter(x => !words.length || x.score > 0)
+    .sort((a, b) => b.score - a.score || (b.r.stock > 0) - (a.r.stock > 0))
+    .slice(0, limit)
+    .map(x => x.r);
+}
 
 export async function botReply(env, user, settings, message) {
-  const t = String(message || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').slice(0, 300);
+  const r = await rawReply(env, user, settings, message);
+  return { quick: QUICK, ...r };
+}
+
+async function rawReply(env, user, settings, message) {
+  const t = norm(message).slice(0, 300);
   const links = [];
 
   if (has(t, ['ou est', 'suivre', 'suivi', 'statut', 'ma commande', 'mes commandes', 'livreur est'])) {
@@ -54,17 +83,29 @@ export async function botReply(env, user, settings, message) {
       links: [['Mon compte', '/compte.html']]
     };
   }
-  if (has(t, ['boutique', 'magasin', 'trouver', 'produit', 'habit', 'parfum', 'aliment', 'quincaill'])) {
-    const hit = CATEGORIES.find(([id, label]) => t.includes(id.slice(0, 5)) || t.includes(label.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').split(' ')[0]));
-    if (hit) links.push([hit[1], `/?cat=${hit[0]}`]); else links.push(['Toutes les boutiques', '/']);
-    return { reply: 'Voici les boutiques de cette rubrique. Choisissez une boutique, ajoutez des produits au panier, puis validez.', links };
+  if (has(t, ['trouver un produit'])) {
+    return { reply: 'Dites-moi ce que vous cherchez : « pagne », « bananes », « parfum », « téléphone »… Je vous montre les produits disponibles avec leur prix.', links: [] };
   }
-  if (has(t, ['bonjour', 'salut', 'bonsoir', 'hello', 'coucou'])) {
-    return { reply: 'Bonjour ! Je peux vous aider pour une commande, la livraison, le paiement ou pour ouvrir une boutique. Que souhaitez-vous savoir ?', links: [] };
+  const wantsProduct = has(t, ['cherche', 'acheter', 'trouver', 'produit', 'avez-vous', 'avez vous', 'prix', 'combien', 'vend', 'habit', 'parfum', 'aliment', 'quincaill', 'boutique', 'magasin']);
+  const hit = CATEGORIES.find(([id, label]) => t.includes(id.slice(0, 5)) || t.includes(norm(label).split(' ')[0]));
+  const products = await searchProducts(env, { q: message, cat: '', limit: 6 });
+  if (products.length) {
+    return {
+      reply: products.length > 1 ? `J'ai trouvé ${products.length} produits qui peuvent vous plaire :` : 'Voici ce que j\'ai trouvé :',
+      products: products.map(p => ({ id: p.id, name: p.name, price: p.price, stock: p.stock, photo_id: p.photo_id, shop: p.shop_name, slug: p.slug, category: p.category })),
+      links: hit ? [[`Voir la rubrique ${hit[1]}`, `/?cat=${hit[0]}`]] : []
+    };
+  }
+  if (wantsProduct || hit || keywords(message).length) {
+    if (hit) links.push([hit[1], `/?cat=${hit[0]}`]); else links.push(['Toutes les boutiques', '/']);
+    return { reply: `Je n'ai pas trouvé « ${String(message).slice(0, 40)} » pour le moment. Parcourez les boutiques de cette rubrique : de nouveaux articles arrivent chaque jour.`, links };
+  }
+  if (has(t, ['bonjour', 'salut', 'bonsoir', 'hello', 'coucou', 'mbolo'])) {
+    return { reply: 'Mbolo ! Je peux vous aider pour une commande, la livraison, le paiement, ou trouver un produit. Que souhaitez-vous ?', links: [] };
   }
   if (has(t, ['merci'])) return { reply: 'Avec plaisir !', links: [] };
   return {
-    reply: 'Je n\'ai pas bien compris. Vous pouvez me demander : « où est ma commande ? », « quels sont les frais de livraison ? », « comment payer ? », « comment vendre ? ». Pour tout autre sujet, écrivez à l\'équipe.',
+    reply: 'Je n\'ai pas bien compris. Vous pouvez me demander : « où est ma commande ? », « quels sont les frais de livraison ? », « comment payer ? », ou le nom d\'un produit (« pagne », « bananes »…). Pour tout autre sujet, écrivez à l\'équipe.',
     links: []
   };
 }

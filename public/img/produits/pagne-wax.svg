@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 300" width="400" height="300"><defs><pattern id="w" width="40" height="40" patternUnits="userSpaceOnUse"><rect width="40" height="40" fill="#F76707"/><circle cx="20" cy="20" r="12" fill="#FFC53D"/><circle cx="20" cy="20" r="6" fill="#0B7A47"/><circle cx="0" cy="0" r="7" fill="#2563A8"/><circle cx="40" cy="0" r="7" fill="#2563A8"/><circle cx="0" cy="40" r="7" fill="#2563A8"/><circle cx="40" cy="40" r="7" fill="#2563A8"/></pattern></defs>
+<rect width="400" height="300" fill="#E1EDFB"/><circle cx="70" cy="70" r="60" fill="#C9DDF6"/><ellipse cx="200" cy="262" rx="140" ry="14" fill="#BFD3EC"/>
+<rect x="80" y="170" width="240" height="86" rx="16" fill="url(#w)" stroke="#1F1A17" stroke-width="4"/>
+<rect x="96" y="112" width="208" height="70" rx="14" fill="url(#w)" stroke="#1F1A17" stroke-width="4"/>
+<rect x="112" y="60" width="176" height="62" rx="12" fill="url(#w)" stroke="#1F1A17" stroke-width="4"/>
+<rect x="186" y="56" width="28" height="200" fill="#FFF8EE" stroke="#1F1A17" stroke-width="4"/><text x="200" y="164" font-family="sans-serif" font-size="13" font-weight="700" fill="#1F1A17" text-anchor="middle" transform="rotate(-90 200 160)">6 YARDS</text></svg>

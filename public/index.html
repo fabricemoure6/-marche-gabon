@@ -1,22 +1,41 @@
 <!doctype html>
 <html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#1f1a17">
 <title>Boutiques</title><link rel="stylesheet" href="/styles.css"></head>
 <body><header id="top"></header>
 <main>
   <section class="hero">
-    <h1 id="siteName"></h1>
-    <p id="tagline"></p>
-    <form id="search"><input id="q" placeholder="Rechercher une boutique ou une marque…" aria-label="Recherche"><button class="btn">Chercher</button></form>
+    <div class="shapes" aria-hidden="true">
+      <span style="width:340px;height:340px;right:-70px;top:-100px;background:var(--soleil)"></span>
+      <span style="width:160px;height:160px;right:260px;bottom:-60px;background:var(--papaye-strong)"></span>
+      <span style="width:72px;height:72px;right:96px;bottom:48px;background:var(--surface-100)"></span>
+      <img src="/img/produits/panier-tresse.svg" alt="">
+    </div>
+    <div class="content">
+      <span class="kicker">Livrée vite, près de chez vous</span>
+      <h1 id="siteName"></h1>
+      <p id="tagline"></p>
+      <form id="search" class="search" role="search"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+        <input id="q" placeholder="Rechercher un produit, une boutique…" aria-label="Recherche"><button class="btn">Chercher</button></form>
+    </div>
   </section>
-  <div class="chips" id="chips"></div>
-  <div class="grid" id="shops"></div>
+
+  <div class="section-head" style="margin-top:var(--space-5)"><h2>Les rayons</h2></div>
+  <div class="cats" id="cats"></div>
+
+  <div class="section-head"><h2 id="prodTitle">Les nouveautés du marché</h2><span class="muted" id="prodCount"></span></div>
+  <p class="notice info" id="demoNote" hidden>Aperçu : ces articles illustrent la présentation du marché. Les produits des boutiques inscrites s'afficheront ici avec leurs vraies photos.</p>
+  <div class="grid" id="products"></div>
+  <div class="card empty" id="noProd" hidden><h3>Rien trouvé pour le moment</h3><p class="muted">Essayez un autre mot ou une autre rubrique.</p></div>
+
+  <div class="section-head"><h2>Les boutiques</h2></div>
+  <div class="grid shops" id="shops"></div>
   <p class="muted" id="empty" hidden>Aucune boutique pour le moment.</p>
-  <div class="card" style="margin-top:1.5rem">
-    <h2>Vous vendez ou livrez ?</h2>
-    <p>Ouvrez votre boutique en ligne ou devenez livreur partenaire.</p>
-    <a class="btn alt" href="/compte.html?role=seller">Ouvrir ma boutique</a>
-    <a class="btn alt" href="/compte.html?role=courier">Devenir livreur</a>
-  </div>
+
+  <section class="card cta">
+    <div><h2>Vous vendez ou livrez ?</h2><p class="muted" style="margin:0">Ouvrez votre boutique en ligne ou devenez livreur partenaire.</p></div>
+    <div class="row"><a class="btn" href="/compte.html?role=seller">Ouvrir ma boutique</a><a class="btn alt" href="/compte.html?role=courier">Devenir livreur</a></div>
+  </section>
 </main>
 <script src="/common.js"></script>
 <script>
@@ -25,24 +44,53 @@
   MG.$('#siteName').textContent = MG.config.site_name;
   MG.$('#tagline').textContent = MG.config.tagline;
   let cat = MG.param('cat') || '';
-  const chips = MG.$('#chips');
-  const drawChips = () => {
-    chips.innerHTML = '<button class="chip' + (!cat ? ' on' : '') + '" data-c="">Toutes</button>' +
-      MG.config.categories.map(c => `<button class="chip${cat === c[0] ? ' on' : ''}" data-c="${MG.esc(c[0])}">${MG.esc(c[1])}</button>`).join('');
+  if (MG.param('q')) MG.$('#q').value = MG.param('q');
+
+  // Exemples illustrés, montrés seulement tant que le catalogue est vide
+  const DEMO = [
+    ['pagne', 'Pagne wax 6 yards', 'Tissus d\'Akébé', 15000, 'habits', 'pagne-wax', '−19 %'],
+    ['bananes', 'Régime de bananes plantain', 'Mama Rose', 3500, 'alimentation', 'bananes-plantain'],
+    ['parfum', 'Eau de parfum 100 ml', 'Beauté Lalala', 25000, 'parfumerie', 'parfum', 'Nouveau'],
+    ['huile', 'Huile de palme rouge 1 L', 'Mama Rose', 2000, 'alimentation', 'huile-palme'],
+    ['ananas', 'Ananas pain de sucre', 'Le Verger', 1000, 'alimentation', 'ananas'],
+    ['tel', 'Smartphone 128 Go', 'Tech Glass', 89000, 'electronique', 'smartphone', '−10 %'],
+    ['marmite', 'Marmite en fonte 6 L', 'Maison Okoumé', 12500, 'maison', 'marmite'],
+    ['panier', 'Panier tressé', 'Maison Okoumé', 7500, 'autres', 'panier-tresse', 'Nouveau'],
+    ['poisson', 'Poisson fumé (lot de 3)', 'Pêcherie d\'Owendo', 4000, 'alimentation', 'poisson-fume'],
+    ['riz', 'Sac de riz parfumé 25 kg', 'Quincaillerie du Port', 17500, 'quincaillerie', 'sac-riz']
+  ];
+  const demoCard = d => MG.productCard({ id: d[0], name: d[1], shop_name: d[2], slug: '', price: d[3], category: d[4], stock: 1, badge: d[6] }, { demo: true })
+    .replace(MG.illu(d[4]), '/img/produits/' + d[5] + '.svg').replace(/<a class="pshop"[^>]*>/, '<span class="pshop">').replace('</a><h3', '</span><h3');
+
+  const drawCats = () => {
+    MG.$('#cats').innerHTML = `<button class="cat${!cat ? ' on' : ''}" data-c=""><span class="bub"><img src="/img/produits/panier-tresse.svg" alt=""></span>Tout</button>` +
+      MG.config.categories.map(c => `<button class="cat${cat === c[0] ? ' on' : ''}" data-c="${MG.esc(c[0])}"><span class="bub"><img src="${MG.illu(c[0])}" alt=""></span>${MG.esc(c[1])}</button>`).join('');
   };
+
   async function load() {
-    drawChips();
+    drawCats();
+    const q = MG.$('#q').value.trim();
+    const qs = 'cat=' + encodeURIComponent(cat) + '&q=' + encodeURIComponent(q);
     try {
-      const list = await MG.api('/api/shops?cat=' + encodeURIComponent(cat) + '&q=' + encodeURIComponent(MG.$('#q').value));
-      MG.$('#empty').hidden = list.length > 0;
-      MG.$('#shops').innerHTML = list.map(s => `<a class="tile" href="/boutique.html?s=${encodeURIComponent(s.slug)}">
-        <div class="img" style="${s.photo_id ? `background-image:url('${MG.photo(s.photo_id)}')` : ''}">${s.photo_id ? '' : '🛍️'}</div>
-        <div class="body"><h3>${MG.esc(s.name)}</h3><span class="tag">${MG.esc(MG.catName(s.category))}</span>
-        <p class="muted" style="margin:.4rem 0 0">${s.products} produit${s.products > 1 ? 's' : ''}${s.address ? ' · ' + MG.esc(s.address) : ''}</p></div></a>`).join('');
+      const [prods, shops] = await Promise.all([MG.api('/api/products?limit=24&' + qs), MG.api('/api/shops?' + qs)]);
+      MG.$('#prodTitle').textContent = q ? `Résultats pour « ${q} »` : cat ? MG.catName(cat) : 'Les nouveautés du marché';
+      const demo = !prods.length && !q && !shops.length;
+      MG.$('#demoNote').hidden = !demo;
+      const list = demo ? DEMO.filter(d => !cat || d[4] === cat).map(demoCard) : prods.map(p => MG.productCard(p));
+      MG.$('#products').innerHTML = list.join('');
+      MG.$('#noProd').hidden = list.length > 0;
+      MG.$('#prodCount').textContent = demo ? '' : prods.length ? prods.length + ' article' + (prods.length > 1 ? 's' : '') : '';
+
+      MG.$('#empty').hidden = shops.length > 0;
+      MG.$('#shops').innerHTML = shops.map(s => `<a class="tile shop" href="/boutique.html?s=${encodeURIComponent(s.slug)}">
+        <div class="cover" style="background-image:url('${MG.img(s.photo_id, s.category)}')"></div>
+        <div class="body"><span class="logo">${MG.esc(s.name.trim().charAt(0).toUpperCase())}</span><h3>${MG.esc(s.name)}</h3>
+        <span class="tag">${MG.esc(MG.catName(s.category))}</span>
+        <p class="muted" style="margin:.5rem 0 0;font-size:.9rem">${s.products} produit${s.products > 1 ? 's' : ''}${s.address ? ' · ' + MG.esc(s.address) : ''}</p></div></a>`).join('');
     } catch (e) { MG.fail(e); }
   }
-  chips.onclick = e => { const b = e.target.closest('[data-c]'); if (b) { cat = b.dataset.c; load(); } };
-  MG.$('#search').onsubmit = e => { e.preventDefault(); load(); };
+  MG.$('#cats').onclick = e => { const b = e.target.closest('[data-c]'); if (b) { cat = b.dataset.c; load(); } };
+  MG.$('#search').onsubmit = e => { e.preventDefault(); load(); MG.$('#prodTitle').scrollIntoView({ behavior: 'smooth', block: 'start' }); };
   load();
 })();
 </script></body></html>

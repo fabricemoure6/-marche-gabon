@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 300" width="400" height="300"><rect width="400" height="300" fill="#F3ECE3"/><circle cx="320" cy="70" r="66" fill="#E7DCCD"/><ellipse cx="200" cy="268" rx="130" ry="13" fill="#DCCFBE"/>
+<path d="M130 70 q70 -30 140 0 l-6 20 q20 70 14 160 q-72 22 -156 0 q-6 -90 14 -160z" fill="#FFF8EE" stroke="#1F1A17" stroke-width="5" stroke-linejoin="round"/>
+<path d="M136 90 q64 18 128 0" stroke="#1F1A17" stroke-width="4" fill="none"/><path d="M180 62 l8 -20 M200 60 v-22 M220 62 l-8 -20" stroke="#B5A99C" stroke-width="4" stroke-linecap="round"/>
+<rect x="148" y="130" width="104" height="74" rx="12" fill="#2563A8"/><text x="200" y="162" font-family="sans-serif" font-size="18" font-weight="800" fill="#FFF8EE" text-anchor="middle">RIZ</text>
+<text x="200" y="188" font-family="sans-serif" font-size="15" font-weight="700" fill="#FFC53D" text-anchor="middle">25 kg</text>
+<g fill="#E7DCCD"><ellipse cx="160" cy="232" rx="6" ry="3"/><ellipse cx="236" cy="226" rx="6" ry="3"/><ellipse cx="200" cy="238" rx="6" ry="3"/></g></svg>

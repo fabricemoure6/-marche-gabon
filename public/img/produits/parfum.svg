@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 300" width="400" height="300"><rect width="400" height="300" fill="#FDE7F0"/><circle cx="320" cy="230" r="80" fill="#F9CFE0"/><ellipse cx="200" cy="264" rx="110" ry="12" fill="#EDBFD2"/>
+<rect x="178" y="40" width="44" height="34" rx="6" fill="#1F1A17"/><rect x="170" y="70" width="60" height="22" rx="5" fill="#FFC53D" stroke="#1F1A17" stroke-width="4"/>
+<rect x="120" y="88" width="160" height="172" rx="34" fill="#FF9EC2" stroke="#1F1A17" stroke-width="5"/>
+<rect x="136" y="104" width="128" height="140" rx="24" fill="#FFC2D8"/><path d="M146 120 q6 50 0 100" stroke="#FFF" stroke-width="8" stroke-linecap="round" fill="none" opacity=".8"/>
+<rect x="160" y="150" width="80" height="44" rx="8" fill="#FFF8EE" stroke="#1F1A17" stroke-width="3"/><text x="200" y="178" font-family="Georgia,serif" font-size="18" font-style="italic" fill="#1F1A17" text-anchor="middle">Oyem</text>
+<g fill="#F76707"><circle cx="80" cy="80" r="6"/><circle cx="60" cy="120" r="4"/><circle cx="96" cy="140" r="3"/></g></svg>
