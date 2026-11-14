@@ -25,6 +25,14 @@ SMS ; l'administrateur valide dans l'onglet Paiements.
 - Livreur : inscription « livreur » → se mettre disponible (partage de position) → accepter une course proche → récupérer → livré.
 - Livraison : frais de base + prix au km (valeurs de départ, à ajuster). Les livreurs dans le rayon (15 km) sont notifiés.
 
+## Promotions
+- Le vendeur lance une promotion depuis Ma boutique → Produits → « Promotion » : remise en % ou prix promo, durée.
+- Règles du marché (vérifiées par le serveur) : remise de 5 % à 70 %, durée de 1 à 30 jours (réglables dans Admin → Réglages),
+  arrêt automatique à la date de fin, prix normal bloqué pendant la promotion (prix barré honnête), pas de promotion sans stock.
+- Les produits en promotion s'affichent en tête de la page d'accueil (« Promotions du moment »), en tête de leur boutique,
+  et les boutiques concernées portent un ruban « Promo ». Le panier et le paiement appliquent le prix promo.
+- Accueil : les boutiques sont rangées par rayon ; les produits se voient dans chaque boutique (et dans la recherche).
+
 ## Sécurité de l'administration
 - **Suspendre une boutique ou un compte** demande un motif et le mot de passe de l'administrateur (5 essais au plus par 15 minutes).
   Le gestionnaire reçoit le motif par notification. Valider ou réactiver se fait en un clic.

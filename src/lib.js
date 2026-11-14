@@ -87,6 +87,8 @@ export const DEFAULT_SETTINGS = {
   delivery_base: 1000,      // FCFA : frais de départ par boutique
   delivery_per_km: 200,     // FCFA : par kilomètre entre la boutique et le client
   courier_radius_km: 15,    // les livreurs à moins de cette distance de la boutique sont prévenus
+  promo_max_pct: 70,        // remise maximale autorisée (%)
+  promo_max_days: 30,       // durée maximale d'une promotion (jours)
   invite_required: 'none'   // 'none' : inscription libre · 'pro' : invitation obligatoire pour boutiques et livreurs · 'all' : pour tous
 };
 
@@ -134,12 +136,33 @@ const SCHEMA = [
   `CREATE INDEX IF NOT EXISTS idx_admin_actions ON admin_actions(created_at)`
 ];
 
+// Colonnes ajoutées après la première version : créées sur les bases existantes
+const MIGRATIONS = { products: [['promo_price', 'INTEGER'], ['promo_until', 'INTEGER'], ['promo_start', 'INTEGER']] };
+async function migrate(db) {
+  for (const [table, cols] of Object.entries(MIGRATIONS)) {
+    const { results } = await db.prepare(`PRAGMA table_info(${table})`).all();
+    const have = new Set(results.map(r => r.name));
+    for (const [c, type] of cols) if (!have.has(c)) await db.prepare(`ALTER TABLE ${table} ADD COLUMN ${c} ${type}`).run();
+  }
+}
+
 let ready = null;
 export function ensureSchema(db) {
   if (!ready) {
-    ready = db.batch(SCHEMA.map(s => db.prepare(s))).catch(e => { ready = null; throw e; });
+    ready = db.batch(SCHEMA.map(s => db.prepare(s))).then(() => migrate(db)).catch(e => { ready = null; throw e; });
   }
   return ready;
+}
+
+// ---------- Promotions ----------
+// Prix réellement facturé (SQL) : le prix promo tant que la promotion court, sinon le prix normal.
+export const EFFECTIVE_PRICE = `(CASE WHEN p.promo_price IS NOT NULL AND p.promo_until > CAST(strftime('%s','now') AS INTEGER) * 1000 THEN p.promo_price ELSE p.price END)`;
+export const promoActive = p => p.promo_price != null && p.promo_until > Date.now() && p.promo_price < p.price;
+// Produit tel que montré au public : price = prix à payer, old_price = prix barré pendant la promotion.
+export function publicProduct(p) {
+  const { promo_price, promo_until, promo_start, ...rest } = p;
+  if (!promoActive(p)) return rest;
+  return { ...rest, price: promo_price, old_price: p.price, promo_pct: Math.round(100 - (100 * promo_price) / p.price), promo_until };
 }
 
 // ---------- Réglages ----------

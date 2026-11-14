@@ -66,16 +66,51 @@
   MG.illu = cat => '/img/produits/' + (ILLU[cat] || 'panier-tresse') + '.svg';
   MG.img = (photoId, cat) => (photoId ? MG.photo(photoId) : MG.illu(cat));
 
-  // Tuile produit partagée (accueil, boutique). p = {id, name, description, price, stock, photo_id, shop_name?, slug?, category?}
+  // Temps restant d'une promotion, en mots
+  MG.timeLeft = ms => {
+    const d = ms - Date.now(); if (d <= 0) return '';
+    const h = Math.ceil(d / 3600000);
+    return h <= 24 ? `Plus que ${h} h` : `Plus que ${Math.ceil(h / 24)} j`;
+  };
+
+  // Tuile produit partagée (accueil, boutique, recherche).
+  // p = {id, name, description, price, old_price?, promo_pct?, promo_until?, stock, photo_id, shop_name?, slug?, category?}
   MG.productCard = function (p, opts = {}) {
     const out = !(p.stock > 0);
-    const shop = p.shop_name ? `<a class="pshop" href="/boutique.html?s=${encodeURIComponent(p.slug)}">${MG.esc(p.shop_name)}</a>` : '';
-    const badge = out ? '<span class="tag out">Épuisé</span>' : (p.badge ? `<span class="tag ${p.badge === 'Nouveau' ? 'new' : 'promo'}">${MG.esc(p.badge)}</span>` : '');
-    return `<article class="tile product${out ? ' out' : ''}">
-      <div class="pimg"><img src="${MG.img(p.photo_id, p.category || opts.category)}" alt="${MG.esc(p.name)}" loading="lazy"><div class="pbadges">${badge}</div></div>
+    const shop = p.shop_name ? (opts.demo ? `<span class="pshop">${MG.esc(p.shop_name)}</span>` : `<a class="pshop" href="/boutique.html?s=${encodeURIComponent(p.slug)}">${MG.esc(p.shop_name)}</a>`) : '';
+    const badge = out ? '<span class="tag out">Épuisé</span>'
+      : p.promo_pct ? `<span class="tag promo">−${p.promo_pct} %</span>` : (p.badge ? `<span class="tag new">${MG.esc(p.badge)}</span>` : '');
+    const left = p.promo_until ? MG.timeLeft(p.promo_until) : '';
+    const img = opts.img || MG.img(p.photo_id, p.category || opts.category);
+    return `<article class="tile product${out ? ' out' : ''}${p.promo_pct ? ' is-promo' : ''}">
+      <div class="pimg"><img src="${img}" alt="${MG.esc(p.name)}" loading="lazy"><div class="pbadges">${badge}</div>${left && !out ? `<span class="ptimer">${left}</span>` : ''}</div>
       <div class="pbody">${shop}<h3 class="pname">${MG.esc(p.name)}</h3>${opts.desc && p.description ? `<p class="pdesc">${MG.esc(p.description)}</p>` : ''}
-        <div class="pfoot"><span class="price">${MG.fcfa(p.price)}</span>
-        ${opts.demo ? '' : out ? '' : `<button class="add" data-add="${MG.esc(p.id)}" aria-label="Ajouter ${MG.esc(p.name)} au panier">${MG.icon('plus')}</button>`}</div></div></article>`;
+        <div class="pfoot"><div>${p.old_price ? `<span class="old">${MG.fcfa(p.old_price)}</span>` : ''}<span class="price">${MG.fcfa(p.price)}</span></div>
+        ${opts.demo || out ? '' : `<button class="add" data-add="${MG.esc(p.id)}" aria-label="Ajouter ${MG.esc(p.name)} au panier">${MG.icon('plus')}</button>`}</div></div></article>`;
+  };
+
+  // Tuile boutique. s = {name, slug, category, address, photo_id, cover_id?, products, promos?, best_pct?}
+  MG.shopCard = function (s, opts = {}) {
+    const cover = opts.cover || (s.cover_id ? MG.photo(s.cover_id) : MG.img(s.photo_id, s.category));
+    const logo = s.photo_id ? `style="background-image:url('${MG.photo(s.photo_id)}')"` : '';
+    const tag = opts.demo ? 'div' : 'a';
+    return `<${tag} class="tile shop${s.promos ? ' has-promo' : ''}"${opts.demo ? '' : ` href="/boutique.html?s=${encodeURIComponent(s.slug)}"`}>
+      <div class="cover" style="background-image:url('${cover}')">${s.promos ? `<span class="ribbon">Promo${s.best_pct ? '<span class="rl"> jusqu\'à</span> −' + s.best_pct + ' %' : ''}</span>` : ''}</div>
+      <div class="body"><span class="logo" ${logo}>${s.photo_id ? '' : MG.esc(s.name.trim().charAt(0).toUpperCase())}</span><h3>${MG.esc(s.name)}</h3>
+      <p class="muted" style="margin:0;font-size:.9rem">${s.products ? `${s.products} produit${s.products > 1 ? 's' : ''}` : 'Vitrine en préparation'}${s.promos ? ` · <b style="color:var(--papaye-text)">${s.promos} en promo</b>` : ''}${s.address ? ' · ' + MG.esc(s.address) : ''}</p></div></${tag}>`;
+  };
+
+  // Fenêtre modale simple. Renvoie { el, close }. html = contenu du formulaire.
+  MG.modal = function (html, { wide } = {}) {
+    const d = document.createElement('dialog');
+    d.className = 'modal' + (wide ? ' wide' : '');
+    d.innerHTML = html;
+    document.body.appendChild(d);
+    const close = () => { d.close(); d.remove(); };
+    d.addEventListener('cancel', e => { e.preventDefault(); close(); });
+    d.querySelectorAll('[data-close]').forEach(b => (b.onclick = close));
+    d.showModal();
+    return { el: d, close };
   };
 
   // Ajout au panier (+1) depuis n'importe quel bouton [data-add]
@@ -174,9 +209,9 @@
     const setQuick = list => { quick.innerHTML = (list || []).map(q => `<button type="button">${MG.esc(q)}</button>`).join(''); };
     const products = list => {
       if (!list || !list.length) return;
-      add('suggest', list.map(p => `<div class="it"><a href="/boutique.html?s=${encodeURIComponent(p.slug)}" style="display:contents;color:inherit"><img src="${MG.img(p.photo_id, p.category)}" alt="">
+      add('suggest', list.map(p => `<div class="it"><a href="/boutique.html?s=${encodeURIComponent(p.slug)}" style="display:contents;color:inherit"><span style="position:relative;display:block"><img src="${MG.img(p.photo_id, p.category)}" alt="">${p.promo_pct ? `<span class="tag promo" style="position:absolute;top:6px;left:6px">−${p.promo_pct} %</span>` : ''}</span>
         <strong>${MG.esc(p.name)}</strong><small>${MG.esc(p.shop)}</small></a>
-        <div class="f"><span class="price">${MG.fcfa(p.price)}</span>${p.stock > 0 ? `<button class="add sm" data-add="${MG.esc(p.id)}" aria-label="Ajouter ${MG.esc(p.name)}">${MG.icon('plus', 16)}</button>` : '<span class="tag out">Épuisé</span>'}</div></div>`).join(''));
+        <div class="f"><span>${p.old_price ? `<span class="old">${MG.fcfa(p.old_price)}</span>` : ''}<span class="price">${MG.fcfa(p.price)}</span></span>${p.stock > 0 ? `<button class="add sm" data-add="${MG.esc(p.id)}" aria-label="Ajouter ${MG.esc(p.name)}">${MG.icon('plus', 16)}</button>` : '<span class="tag out">Épuisé</span>'}</div></div>`).join(''));
     };
     async function ask(text) {
       bubble('me', MG.esc(text)); setQuick([]);
@@ -195,7 +230,7 @@
         opened = true;
         const name = MG.user ? ' ' + MG.esc(MG.user.name.split(' ')[0]) : '';
         bubble('them', `Mbolo${name} ! Je peux vous aider pour une commande, la livraison, le paiement, ou trouver un produit. Écrivez par exemple « pagne » ou « bananes ».`);
-        setQuick(['Où est ma commande ?', 'Frais de livraison', 'Comment payer ?', 'Trouver un produit']);
+        setQuick(['Les promotions', 'Où est ma commande ?', 'Frais de livraison', 'Trouver un produit']);
       }
       MG.$('#botIn').focus();
     };
