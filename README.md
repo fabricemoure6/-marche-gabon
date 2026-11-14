@@ -33,6 +33,14 @@ SMS ; l'administrateur valide dans l'onglet Paiements.
   et les boutiques concernées portent un ruban « Promo ». Le panier et le paiement appliquent le prix promo.
 - Accueil : les boutiques sont rangées par rayon ; les produits se voient dans chaque boutique (et dans la recherche).
 
+## Fidélité et bons d'achat
+- Chaque boutique active sa carte de fidélité (Ma boutique → Fidélité) : un bon toutes les N commandes livrées (2 à 20),
+  en % (5 à 30 %, plafond réglable par l'admin) ou en FCFA (500 à 50 000), achat minimum et durée de validité au choix.
+- Chaque commande livrée ajoute un tampon ; au palier, le bon est créé automatiquement et le client est prévenu.
+- Le vendeur voit ses clients fidèles (commandes, montant dépensé, carte) et peut offrir un bon (3 par client et par mois au plus).
+- Le client retrouve ses cartes et ses bons dans Mon compte → Ma fidélité ; au panier, le meilleur bon est proposé d'office.
+- Un bon sert une seule fois ; il est rendu si la commande est annulée.
+
 ## Sécurité de l'administration
 - **Suspendre une boutique ou un compte** demande un motif et le mot de passe de l'administrateur (5 essais au plus par 15 minutes).
   Le gestionnaire reçoit le motif par notification. Valider ou réactiver se fait en un clic.

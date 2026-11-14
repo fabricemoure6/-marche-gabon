@@ -5,6 +5,7 @@
 <body><header id="top"></header>
 <main>
   <div id="head"></div>
+  <div id="fid"></div>
   <section class="promo-band" id="promos" hidden>
     <div class="head"><div><span class="kick">PROMOTIONS</span><h2 id="promoTitle"></h2></div></div>
     <div class="rail" id="promoRail"></div>
@@ -41,6 +42,17 @@
         <div class="stats"><span class="tag">${MG.esc(MG.catName(shop.category))}</span><span class="tag">${products.length} produit${products.length > 1 ? 's' : ''}</span>${promos.length ? `<span class="tag promo">${promos.length} en promo</span>` : ''}</div>
         ${shop.description ? `<p style="margin:.7rem 0 0">${MG.esc(shop.description)}</p>` : ''}
         ${shop.address ? `<p class="muted" style="margin:.4rem 0 0">${MG.icon('pin', 18)} ${MG.esc(shop.address)}</p>` : ''}</div></section>`;
+
+  // Carte de fidélité de la boutique
+  const prog = shop.loyalty, mine = data.mine;
+  if (prog) {
+    const n = mine ? mine.stamps % prog.every : 0, left = prog.every - n;
+    MG.$('#fid').innerHTML = `<section class="fid-banner"><span class="ic">${MG.icon('check', 24)}</span>
+      <div class="tx"><b>Carte de fidélité : ${MG.esc(MG.programText(prog))}</b><br>
+      <span class="muted">${mine ? (mine.vouchers ? `Vous avez <b>${mine.vouchers} bon${mine.vouchers > 1 ? 's' : ''} d'achat</b> à utiliser ici.` : `Encore ${left} commande${left > 1 ? 's' : ''} pour votre prochain bon.`)
+        : 'Connectez-vous avec un compte client : chaque commande livrée vous rapporte un tampon.'}${prog.min ? ` Bon utilisable dès ${MG.fcfa(prog.min)} d'achats.` : ''}</span></div>
+      ${mine ? MG.stamps(n, prog.every) : '<a class="btn small alt" href="/compte.html?next=' + encodeURIComponent(location.pathname + location.search) + '">Se connecter</a>'}</section>`;
+  }
 
   if (promos.length && products.length > 6) { // grande boutique : les promos en vitrine ; sinon elles sont déjà en tête de la grille
     $('#promos').hidden = false;

@@ -4,7 +4,7 @@
 <body><header id="top"></header>
 <main>
   <div id="state"></div>
-  <div class="tabs" id="tabs"><button data-t="orders" class="on">Commandes</button><button data-t="products">Produits</button><button data-t="shop">Ma boutique</button></div>
+  <div class="tabs" id="tabs"><button data-t="orders" class="on">Commandes</button><button data-t="products">Produits</button><button data-t="loyalty">Fidélité</button><button data-t="shop">Ma boutique</button></div>
   <div id="pane"></div>
   <div id="detail"></div>
 </main>
@@ -20,7 +20,7 @@
     show();
   }
   S('tabs').onclick = e => { const b = e.target.closest('[data-t]'); if (!b) return; tab = b.dataset.t; [...S('tabs').children].forEach(x => x.classList.toggle('on', x === b)); show(); };
-  function show() { clearInterval(timer); S('detail').innerHTML = ''; ({ orders, products, shop: shopTab })[tab](); }
+  function show() { clearInterval(timer); S('detail').innerHTML = ''; ({ orders, products, loyalty, shop: shopTab })[tab](); }
 
   async function orders() {
     async function draw() {
@@ -29,7 +29,7 @@
         <span class="tag ${o.status}">${MG.esc(o.statusLabel)}</span></div>
         <ul>${o.items.map(i => `<li>${i.qty} × ${MG.esc(i.name)}</li>`).join('')}</ul>
         ${o.note ? `<p class="muted">Note : ${MG.esc(o.note)}</p>` : ''}
-        <div class="split"><b>${MG.fcfa(o.subtotal)} <span class="muted">(+ livraison ${MG.fcfa(o.delivery_fee)})</span></b>
+        <div class="split"><b>${MG.fcfa(o.subtotal - (o.discount || 0))} <span class="muted">${o.discount ? `(bon fidélité −${MG.fcfa(o.discount)}) ` : ''}(+ livraison ${MG.fcfa(o.delivery_fee)})</span></b>
         <div class="row">
           ${o.status === 'paid' ? `<button class="btn small" data-st="preparing" data-r="${o.ref}">Préparer</button>` : ''}
           ${o.status === 'preparing' ? `<button class="btn small green" data-st="ready" data-r="${o.ref}">Prête : appeler un livreur</button>` : ''}
@@ -159,6 +159,66 @@
         if (!confirm('Retirer « ' + find(del.dataset.del).name + ' » de la boutique ?')) return;
         try { await MG.api('/api/seller/products/' + del.dataset.del, { method: 'DELETE', body: {} }); MG.toast('Produit retiré'); products(); } catch (er) { MG.fail(er); }
       }
+    };
+  }
+
+  async function loyalty() {
+    const [{ program: pg, stats }, customers] = await Promise.all([MG.api('/api/seller/loyalty'), MG.api('/api/seller/customers')]);
+    const maxPct = MG.config.loyalty_max_pct || 30;
+    S('pane').innerHTML = `<form class="card" id="lf"><div class="split"><div><h2 style="margin:0">Carte de fidélité</h2><p class="muted" style="margin:0">Récompensez les clients qui reviennent : un tampon par commande livrée, un bon d'achat à chaque palier.</p></div>
+        <label style="display:flex;gap:.5rem;align-items:center;margin:0;font-weight:700"><input type="checkbox" id="lEn" style="width:auto"${pg.enabled ? ' checked' : ''}> Activer</label></div>
+      <div id="lBox" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:0 var(--space-4)">
+        <div><label for="lEvery">Un bon toutes les</label><select id="lEvery">${[2, 3, 4, 5, 6, 8, 10].map(n => `<option value="${n}"${n === pg.every ? ' selected' : ''}>${n} commandes livrées</option>`).join('')}</select></div>
+        <div><label for="lKind">Type de bon</label><select id="lKind"><option value="percent"${pg.kind === 'percent' ? ' selected' : ''}>Réduction en %</option><option value="amount"${pg.kind === 'amount' ? ' selected' : ''}>Montant en FCFA</option></select></div>
+        <div><label for="lVal" id="lValLbl">Valeur</label><input id="lVal" type="number" value="${pg.value}"></div>
+        <div><label for="lMin">Achat minimum (FCFA)</label><input id="lMin" type="number" min="0" step="500" value="${pg.min}"></div>
+        <div><label for="lDays">Bon valable</label><select id="lDays">${[15, 30, 60, 90].map(n => `<option value="${n}"${n === pg.days ? ' selected' : ''}>${n} jours</option>`).join('')}</select></div>
+      </div>
+      <div class="promo-preview" id="lPrev" style="background:var(--foret-tint)"></div>
+      <p class="err" id="lErr"></p><p style="margin:0"><button class="btn">Enregistrer</button></p></form>
+
+      <div class="card"><h2 style="margin:0">Mes clients fidèles</h2>
+        <div class="kpis"><div><b>${stats.customers}</b><span>clients livrés</span></div><div><b>${stats.issued}</b><span>bons émis</span></div><div><b>${stats.used}</b><span>bons utilisés</span></div><div><b>${MG.fcfa(stats.discounted)}</b><span>de remises accordées</span></div></div>
+        ${customers.length ? `<div class="scroll"><table><thead><tr><th>Client</th><th>Commandes</th><th>Dépensé</th><th>Carte</th><th></th></tr></thead><tbody>${customers.map(c => `<tr>
+          <td><b>${MG.esc(c.name)}</b><br><small class="muted">dernière : ${MG.date(c.updated_at)}</small></td><td>${c.orders}</td><td>${MG.fcfa(c.spent)}</td>
+          <td>${pg.enabled ? MG.stamps(c.stamps % pg.every, pg.every) : '—'}${c.vouchers ? `<br><small class="muted">${c.vouchers} bon${c.vouchers > 1 ? 's' : ''} en attente</small>` : ''}</td>
+          <td><button class="btn small" data-gift="${c.user_id}">Offrir un bon</button></td></tr>`).join('')}</tbody></table></div>`
+        : '<p class="muted">Vos clients apparaîtront ici après leur première commande livrée.</p>'}</div>`;
+    const sync = () => {
+      const en = S('lEn').checked, kind = S('lKind').value;
+      S('lBox').style.opacity = en ? 1 : .45; S('lBox').querySelectorAll('input,select').forEach(x => (x.disabled = !en));
+      S('lValLbl').textContent = kind === 'percent' ? `Réduction (5 à ${maxPct} %)` : 'Montant (500 à 50 000 FCFA)';
+      const v = Number(S('lVal').value) || 0, p = { every: Number(S('lEvery').value), kind, value: v };
+      S('lPrev').innerHTML = en ? `<div><b>Vos clients verront :</b><br>Carte de fidélité : ${MG.esc(MG.programText(p))}${Number(S('lMin').value) ? ` (dès ${MG.fcfa(Number(S('lMin').value))} d'achats)` : ''}</div>${MG.stamps(Math.max(0, p.every - 1), p.every)}` : '<span class="muted">Carte désactivée : vos clients ne cumulent pas de tampons.</span>';
+    };
+    ['lEn', 'lKind', 'lVal', 'lEvery', 'lMin'].forEach(id => (S(id).oninput = S(id).onchange = sync));
+    S('lKind').addEventListener('change', () => { S('lVal').value = S('lKind').value === 'percent' ? 10 : 2000; sync(); });
+    sync();
+    S('lf').onsubmit = async e => {
+      e.preventDefault(); S('lErr').textContent = '';
+      try { await MG.api('/api/seller/loyalty', { method: 'PUT', body: { enabled: S('lEn').checked, every: S('lEvery').value, kind: S('lKind').value, value: S('lVal').value, min: S('lMin').value, days: S('lDays').value } }); MG.toast('Carte de fidélité enregistrée'); loyalty(); }
+      catch (er) { S('lErr').textContent = er.message; }
+    };
+    S('pane').onclick = e => {
+      const g = e.target.closest('[data-gift]'); if (!g) return;
+      const c = customers.find(x => x.user_id === g.dataset.gift);
+      const m = MG.modal(`<form id="gf"><h2>Offrir un bon d'achat</h2><p class="muted" style="margin-top:0">À <b>${MG.esc(c.name)}</b> · ${c.orders} commande${c.orders > 1 ? 's' : ''} · ${MG.fcfa(c.spent)} dépensés</p>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:var(--space-3)">
+          <div><label for="gk">Type</label><select id="gk"><option value="percent">Réduction en %</option><option value="amount">Montant en FCFA</option></select></div>
+          <div><label for="gv">Valeur</label><input id="gv" type="number" value="10" required></div>
+          <div><label for="gm">Achat minimum (FCFA)</label><input id="gm" type="number" min="0" step="500" value="0"></div>
+          <div><label for="gd">Valable</label><select id="gd"><option value="15">15 jours</option><option value="30" selected>30 jours</option><option value="60">60 jours</option></select></div></div>
+        <label for="gn">Petit mot (facultatif)</label><input id="gn" maxlength="120" placeholder="Merci pour votre fidélité !">
+        <p class="err" id="gerr"></p>
+        <div class="modal-actions"><button type="button" class="btn alt" data-close>Annuler</button><button class="btn green" id="gsave">Envoyer le bon</button></div></form>`, { wide: true });
+      const Q = x => m.el.querySelector(x);
+      Q('#gk').onchange = () => (Q('#gv').value = Q('#gk').value === 'percent' ? 10 : 2000);
+      Q('#gf').onsubmit = async ev => {
+        ev.preventDefault(); Q('#gsave').disabled = true;
+        try { const r = await MG.api('/api/seller/vouchers', { method: 'POST', body: { userId: c.user_id, kind: Q('#gk').value, value: Q('#gv').value, min: Q('#gm').value, days: Q('#gd').value, note: Q('#gn').value } });
+          m.close(); MG.toast(`Bon ${r.code} envoyé à ${c.name}`); loyalty(); }
+        catch (er) { Q('#gerr').textContent = er.message; Q('#gsave').disabled = false; }
+      };
     };
   }
 

@@ -18,6 +18,7 @@
       <div class="scroll"><table><thead><tr><th>Produit</th><th>Qté</th><th>Prix unitaire</th><th style="text-align:right">Montant</th></tr></thead>
       <tbody>${items.map(i => `<tr><td>${MG.esc(i.name)}</td><td>${i.qty}</td><td>${MG.fcfa(i.price)}</td><td style="text-align:right">${MG.fcfa(i.price * i.qty)}</td></tr>`).join('')}</tbody></table></div>
       <div class="total"><span>Sous-total</span><span>${MG.fcfa(o.subtotal)}</span></div>
+      ${o.discount ? `<div class="total discount"><span>Bon d'achat fidélité</span><span>−${MG.fcfa(o.discount)}</span></div>` : ''}
       <div class="total"><span>Frais de livraison</span><span>${MG.fcfa(o.delivery_fee)}</span></div>
       <div class="total big"><span>Total payé</span><span>${MG.fcfa(o.total)}</span></div>
       <p class="muted">Merci pour votre achat.</p>`;

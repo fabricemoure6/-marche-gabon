@@ -179,6 +179,7 @@
       ${f('delivery_base', 'Frais de base par boutique (FCFA)', s.delivery_base, 'number')}${f('delivery_per_km', 'Prix par km (FCFA)', s.delivery_per_km, 'number')}${f('courier_radius_km', 'Rayon de recherche des livreurs (km)', s.courier_radius_km, 'number')}
       <h3 style="margin-top:1rem">Promotions</h3>
       ${f('promo_max_pct', 'Remise maximale autorisée (%)', s.promo_max_pct ?? 70, 'number')}${f('promo_max_days', 'Durée maximale d\'une promotion (jours)', s.promo_max_days ?? 30, 'number')}
+      ${f('loyalty_max_pct', 'Bons d\'achat fidélité : réduction maximale (%)', s.loyalty_max_pct ?? 30, 'number')}
       <h3 style="margin-top:1rem">Inscriptions</h3>
       <label for="invite_required">Qui peut créer un compte ?</label>
       <select id="invite_required"><option value="none">Tout le monde (inscription libre)</option><option value="pro">Clients libres ; boutiques et livreurs uniquement avec un lien d'invitation</option><option value="all">Uniquement avec un lien d'invitation</option></select>
@@ -187,7 +188,7 @@
     S('invite_required').value = s.invite_required || 'none';
     S('sf').onsubmit = async e => {
       e.preventDefault();
-      const body = {}; ['site_name', 'tagline', 'airtel_number', 'merchant_name', 'payment_instructions', 'delivery_base', 'delivery_per_km', 'courier_radius_km', 'invite_required', 'promo_max_pct', 'promo_max_days'].forEach(k => (body[k] = S(k).value));
+      const body = {}; ['site_name', 'tagline', 'airtel_number', 'merchant_name', 'payment_instructions', 'delivery_base', 'delivery_per_km', 'courier_radius_km', 'invite_required', 'promo_max_pct', 'promo_max_days', 'loyalty_max_pct'].forEach(k => (body[k] = S(k).value));
       try { await MG.api('/api/admin/settings', { method: 'PUT', body }); MG.toast('Réglages enregistrés'); } catch (er) { MG.fail(er); }
     };
     S('chk').onclick = async () => { try { S('chkOut').textContent = JSON.stringify(await MG.api('/api/admin/singpay-check'), null, 2); } catch (er) { MG.fail(er); } };

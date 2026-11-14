@@ -29,23 +29,35 @@
   if (!(await MG.require(['customer']))) return;
   MG.$('#phone').value = MG.user.phone || '';
   let pos = null, items = [];
+  let vouchers = [], chosen = {};
   async function load() {
-    items = (await MG.api('/api/cart')).items;
+    const d = await MG.api('/api/cart');
+    items = d.items; vouchers = d.vouchers || [];
     const box = MG.$('#cart');
-    if (!items.length) { box.innerHTML = '<div class="card empty"><img src="/img/produits/panier-tresse.svg" alt="" style="width:180px;border-radius:var(--radius-l)"><h2>Votre panier est vide</h2><p class="muted">Faites un tour au marché, il y a de bonnes affaires.</p><a class="btn" href="/">Voir les produits</a></div>'; MG.$('#order').hidden = true; return; }
+    if (!items.length) { box.innerHTML = '<div class="card empty"><img src="/img/produits/panier-tresse.svg" alt="" style="width:180px;border-radius:var(--radius-l)"><h2>Votre panier est vide</h2><p class="muted">Faites un tour au marché, il y a de bonnes affaires.</p><a class="btn" href="/">Voir les boutiques</a></div>'; MG.$('#order').hidden = true; return; }
     const shops = {};
-    for (const i of items) (shops[i.shop_id] = shops[i.shop_id] || { name: i.shop_name, lines: [] }).lines.push(i);
-    let sum = 0;
-    box.innerHTML = Object.values(shops).map(s => `<div class="card"><h3>${MG.esc(s.name)}</h3>` + s.lines.map(i => {
-      sum += i.price * i.qty;
-      return `<div class="split" style="padding:.75rem 0;border-bottom:1px solid var(--line)"><div class="row" style="flex-wrap:nowrap"><img class="thumb" src="${MG.img(i.photo_id)}" alt=""><div><b>${MG.esc(i.name)}</b><br><span class="muted">${MG.fcfa(i.price)} l'unité</span>${!i.active || i.shop_status !== 'active' ? ' <span class="err">indisponible</span>' : ''}</div></div>
-      <div class="row"><span class="price" style="font-size:1rem">${MG.fcfa(i.price * i.qty)}</span><div class="qty"><button data-q="${i.product_id}" data-d="-1">−</button><b>${i.qty}</b><button data-q="${i.product_id}" data-d="1">+</button><button data-q="${i.product_id}" data-d="x" title="Retirer" aria-label="Retirer">${MG.icon('trash', 16)}</button></div></div></div>`;
-    }).join('') + '</div>').join('') + `<div class="total"><span>Sous-total produits</span><b>${MG.fcfa(sum)}</b></div>`;
+    for (const i of items) (shops[i.shop_id] = shops[i.shop_id] || { id: i.shop_id, name: i.shop_name, lines: [] }).lines.push(i);
+    let sum = 0, off = 0;
+    const discountOf = (v, sub) => (!v || sub < (v.min_order || 0)) ? 0 : Math.min(sub, v.kind === 'percent' ? Math.round(sub * v.value / 100 / 5) * 5 : v.value);
+    box.innerHTML = Object.values(shops).map(s => {
+      const sub = s.lines.reduce((t, i) => t + i.price * i.qty, 0); sum += sub;
+      const mine = vouchers.filter(v => v.shop_id === s.id);
+      if (chosen[s.id] === undefined) { // propose d'office le bon le plus avantageux
+        const best = mine.map(v => [v, discountOf(v, sub)]).filter(x => x[1] > 0).sort((a, b) => b[1] - a[1])[0];
+        chosen[s.id] = best ? best[0].id : '';
+      }
+      const v = mine.find(x => x.id === chosen[s.id]), d = discountOf(v, sub); off += d;
+      return `<div class="card"><h3>${MG.esc(s.name)}</h3>` + s.lines.map(i => `<div class="split" style="padding:.75rem 0;border-bottom:1px solid var(--line)"><div class="row" style="flex-wrap:nowrap"><img class="thumb" src="${MG.img(i.photo_id)}" alt=""><div><b>${MG.esc(i.name)}</b><br><span class="muted">${i.base_price > i.price ? `<s>${MG.fcfa(i.base_price)}</s> ` : ''}${MG.fcfa(i.price)} l'unité</span>${!i.active || i.shop_status !== 'active' ? ' <span class="err">indisponible</span>' : ''}</div></div>
+        <div class="row"><span class="price" style="font-size:1rem">${MG.fcfa(i.price * i.qty)}</span><div class="qty"><button data-q="${i.product_id}" data-d="-1" aria-label="Retirer un">−</button><b>${i.qty}</b><button data-q="${i.product_id}" data-d="1" aria-label="Ajouter un">+</button><button data-q="${i.product_id}" data-d="x" title="Retirer" aria-label="Retirer">${MG.icon('trash', 16)}</button></div></div></div>`).join('')
+        + (mine.length ? `<div class="voucher-pick"><b style="color:var(--foret)">Bon d'achat</b><select data-v="${s.id}" aria-label="Bon d'achat pour ${MG.esc(s.name)}"><option value="">Ne pas utiliser de bon</option>${mine.map(x => `<option value="${x.id}"${x.id === chosen[s.id] ? ' selected' : ''}${discountOf(x, sub) ? '' : ' disabled'}>${MG.voucherLabel(x)} · ${MG.esc(x.code)}${x.min_order ? ' (dès ' + MG.fcfa(x.min_order) + ')' : ''}</option>`).join('')}</select></div>` : '')
+        + `<div class="total"><span>Sous-total</span><b>${MG.fcfa(sub)}</b></div>${d ? `<div class="total discount"><span>Bon fidélité ${MG.esc(v.code)}</span><span>−${MG.fcfa(d)}</span></div>` : ''}</div>`;
+    }).join('') + `<div class="total"><span>Total produits${off ? ' après bons' : ''}</span><b>${MG.fcfa(sum - off)}</b></div>`;
     MG.$('#order').hidden = false;
-    MG.$('#grand').textContent = MG.fcfa(sum) + ' + livraison';
+    MG.$('#grand').textContent = MG.fcfa(sum - off) + ' + livraison';
     MG.$('#feeNote').textContent = `Livraison : ${MG.fcfa(MG.config.delivery_base)} + ${MG.fcfa(MG.config.delivery_per_km)} par km, par boutique (calculée à la validation si vous partagez votre position).`;
     MG.refreshCartBadge();
   }
+  MG.$('#cart').onchange = e => { const sel = e.target.closest('[data-v]'); if (sel) { chosen[sel.dataset.v] = sel.value; load(); } };
   MG.$('#cart').onclick = async e => {
     const b = e.target.closest('[data-q]'); if (!b) return;
     const it = items.find(i => i.product_id === b.dataset.q);
@@ -61,7 +73,7 @@
     try {
       const r = await MG.api('/api/checkout', { method: 'POST', body: {
         address: MG.$('#address').value, phone: MG.$('#phone').value, note: MG.$('#note').value, method: MG.$('#method').value,
-        lat: pos && pos.lat, lng: pos && pos.lng } });
+        lat: pos && pos.lat, lng: pos && pos.lng, vouchers: Object.values(chosen).filter(Boolean) } });
       if (r.redirectUrl) { location.href = r.redirectUrl; return; }
       showManual(r);
     } catch (er) { MG.$('#err').textContent = er.message; btn.disabled = false; }
