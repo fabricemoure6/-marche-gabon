@@ -554,3 +554,46 @@ html.theme-anim *{transition:background-color .35s ease,color .35s ease,border-c
 .kpi b{font-size:1.18rem;white-space:nowrap}
 .kpis6{grid-template-columns:repeat(auto-fit,minmax(165px,1fr))}
 tr.tot td{font-weight:800;border-top:2px solid var(--ink)}
+
+/* ---------- Panier flottant ---------- */
+#cartFab{position:fixed;right:1rem;bottom:calc(1rem + 56px + 12px);z-index:31;display:inline-flex;align-items:center;gap:var(--space-3);min-height:60px;padding:6px var(--space-5) 6px 6px;border:0;border-radius:var(--radius-pill);
+  background:var(--papaye);color:var(--on-papaye);box-shadow:var(--shadow-3);cursor:pointer;transition:transform .2s var(--bounce);animation:pop .35s var(--bounce) both}
+#cartFab:hover{transform:translateY(-3px)}
+#cartFab .cf-ico{position:relative;width:48px;height:48px;border-radius:50%;display:grid;place-items:center;background:var(--nuit);color:var(--on-nuit);flex:none}
+#cartFab .cf-n{position:absolute;top:-4px;right:-4px;min-width:22px;height:22px;padding:0 6px;border-radius:var(--radius-pill);background:var(--soleil);color:var(--on-papaye);display:grid;place-items:center;font:800 .75rem/1 var(--font-sans);box-shadow:0 0 0 2px var(--papaye)}
+#cartFab .cf-txt{display:flex;flex-direction:column;align-items:flex-start;line-height:1.15}
+#cartFab .cf-txt b{font:800 1.05rem var(--font-display)}
+#cartFab .cf-txt small{font:600 .75rem var(--font-sans);opacity:.85}
+#cartFab.bump .cf-ico{animation:cartbump .5s var(--bounce)}
+@keyframes cartbump{0%{transform:scale(1)}35%{transform:scale(1.3) rotate(-10deg)}70%{transform:scale(.92)}100%{transform:scale(1)}}
+.fly{position:fixed;z-index:60;object-fit:cover;pointer-events:none;border-radius:16px;box-shadow:var(--shadow-3)}
+#cartDrawer{position:fixed;inset:0;z-index:55;pointer-events:none}
+#cartDrawer .cd-back{position:absolute;inset:0;background:rgba(31,26,23,.5);opacity:0;transition:opacity .25s}
+#cartDrawer .cd-panel{position:absolute;top:0;right:0;bottom:0;width:min(430px,100vw);display:flex;flex-direction:column;background:var(--surface-100);box-shadow:var(--shadow-3);transform:translateX(102%);transition:transform .32s cubic-bezier(.2,.9,.3,1)}
+#cartDrawer.open{pointer-events:auto}
+#cartDrawer.open .cd-back{opacity:1}
+#cartDrawer.open .cd-panel{transform:none}
+body.cd-lock{overflow:hidden}
+.cd-head{display:flex;align-items:center;justify-content:space-between;padding:var(--space-4) var(--space-5);background:var(--nuit);color:var(--on-nuit)}
+.cd-head h2{margin:0;color:var(--on-nuit);font-size:1.3rem}
+.cd-x{width:40px;height:40px;border-radius:50%;border:0;background:rgba(255,248,238,.12);color:var(--on-nuit);display:grid;place-items:center;cursor:pointer}
+.cd-body{flex:1;overflow-y:auto;padding:var(--space-4) var(--space-5)}
+.cd-shop+.cd-shop{margin-top:var(--space-4)}
+.cd-shop h3{font-size:1rem;margin:0 0 var(--space-2);color:var(--ink-muted)}
+.cd-line{display:flex;gap:var(--space-3);padding:var(--space-3);background:var(--surface-200);border:1px solid var(--line);border-radius:var(--radius-m);margin-bottom:var(--space-2)}
+.cd-line>img{width:72px;height:72px;border-radius:12px;object-fit:cover;background:var(--surface-300);flex:none}
+.cd-info{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.cd-info b{font:700 .95rem/1.25 var(--font-display)}
+.cd-info .muted{font-size:.82rem}
+.cd-row{display:flex;align-items:center;justify-content:space-between;gap:var(--space-2);margin-top:var(--space-2)}
+.cd-row .qty button{width:30px;height:30px}
+.cd-rm{width:34px;height:34px;border-radius:50%;border:0;background:transparent;color:var(--ink-muted);display:grid;place-items:center;cursor:pointer}
+.cd-rm:hover{background:var(--danger-tint);color:var(--danger)}
+.cd-foot{padding:var(--space-4) var(--space-5) var(--space-5);border-top:1px solid var(--line);background:var(--surface-200)}
+.cd-foot .total{font:800 1.2rem var(--font-display);margin-bottom:2px}
+@media(max-width:720px){
+ #cartFab{left:1rem;right:auto;bottom:1rem;padding-right:var(--space-4)}
+ #cartFab .cf-txt small{display:none}
+}
+@media (prefers-reduced-motion:reduce){#cartDrawer .cd-panel,#cartDrawer .cd-back{transition:none}}
+@media(max-width:720px){#toast{bottom:calc(1rem + 76px)}}

@@ -240,7 +240,8 @@
       const { items } = await MG.api('/api/cart');
       const cur = (items.find(i => i.product_id === btn.dataset.add) || {}).qty || 0;
       const r = await MG.api('/api/cart', { method: 'PUT', body: { productId: btn.dataset.add, qty: cur + 1 } });
-      MG.refreshCartBadge();
+      await MG.refreshCartBadge();
+      if (!r.adjusted) flyToCart(btn);
       if (r.adjusted) return MG.toast(`Il n'en reste que ${r.stock} : vous avez déjà tout le stock dans votre panier.`, true);
       const old = btn.innerHTML; btn.classList.add('done'); btn.innerHTML = MG.icon('check', btn.classList.contains('sm') ? 16 : 20);
       setTimeout(() => { btn.classList.remove('done'); btn.innerHTML = old; }, 1500);
@@ -363,7 +364,6 @@
         ${role ? `<a href="${role[0]}">${role[1]}</a>` : ''}
         ${u ? '<button id="bell" class="bell" aria-label="Notifications">' + MG.icon('bell') + '<span class="badge" id="bellBadge" hidden>0</span></button>' : ''}
         ${u ? `<a href="/compte.html" class="me">${MG.avatar(u, 28)}${MG.esc(u.name.split(' ')[0])}</a>` : '<a href="/compte.html">Connexion</a>'}
-        ${!u || u.role === 'customer' ? '<a class="cart" href="/panier.html">' + MG.icon('cart', 18) + 'Panier <span class="badge" id="cartBadge" hidden>0</span></a>' : ''}
         <button id="themeBtn" class="theme-btn" type="button" aria-label="Passer en mode nuit" title="Mode jour / nuit">
           <svg class="ico sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.5"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
           <svg class="ico moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></svg></button>
@@ -385,15 +385,100 @@
     if (!u || u.role === 'customer') refreshCartBadge();
   }
 
+  // ---------- Panier flottant, toujours visible ----------
+  const onCartPage = () => /^\/panier(\.html)?\/?$/.test(location.pathname);
+  function cartWidget() {
+    if (!MG.user || MG.user.role !== 'customer' || document.getElementById('cartFab')) return;
+    const b = document.createElement('button');
+    b.id = 'cartFab'; b.type = 'button'; b.hidden = true;
+    b.innerHTML = `<span class="cf-ico">${MG.icon('cart', 22)}<span class="cf-n" id="cartCount">0</span></span><span class="cf-txt"><b id="cartTotal">0 FCFA</b><small>Voir mon panier</small></span>`;
+    b.onclick = () => MG.openCart();
+    document.body.appendChild(b);
+  }
   MG.refreshCartBadge = refreshCartBadge;
   async function refreshCartBadge() {
-    const b = document.getElementById('cartBadge');
-    if (!b || !MG.user) return;
+    if (!MG.user || MG.user.role !== 'customer') return null;
+    cartWidget();
     try {
-      const { items } = await MG.api('/api/cart');
-      const n = items.reduce((t, i) => t + i.qty, 0);
-      b.textContent = n; b.hidden = !n;
-    } catch { /* ignoré */ }
+      const d = await MG.api('/api/cart');
+      MG.cart = d;
+      const n = d.items.reduce((t, i) => t + i.qty, 0), tot = d.items.reduce((t, i) => t + i.price * i.qty, 0);
+      const fab = document.getElementById('cartFab');
+      if (fab) {
+        fab.hidden = !n || onCartPage();
+        fab.querySelector('#cartCount').textContent = n;
+        fab.querySelector('#cartTotal').textContent = MG.fcfa(tot);
+        fab.setAttribute('aria-label', `Panier : ${n} article${n > 1 ? 's' : ''}, ${MG.fcfa(tot)}`);
+      }
+      const drawer = document.getElementById('cartDrawer'); if (drawer && drawer.classList.contains('open')) drawCart();
+      return d;
+    } catch { return null; }
+  }
+  // Volet latéral du panier : modifier les quantités sans quitter la page
+  MG.openCart = function () {
+    let d = document.getElementById('cartDrawer');
+    if (!d) {
+      d = document.createElement('div'); d.id = 'cartDrawer';
+      d.innerHTML = `<div class="cd-back" data-cd-close></div><aside class="cd-panel" role="dialog" aria-modal="true" aria-label="Mon panier">
+        <header class="cd-head"><h2>Mon panier</h2><button type="button" class="cd-x" data-cd-close aria-label="Fermer">${MG.icon('x', 20)}</button></header>
+        <div class="cd-body" id="cdBody"></div><footer class="cd-foot" id="cdFoot"></footer></aside>`;
+      document.body.appendChild(d);
+      d.addEventListener('click', async e => {
+        if (e.target.closest('[data-cd-close]')) return MG.closeCart();
+        const b = e.target.closest('[data-cq]'); if (!b) return;
+        const it = MG.cart.items.find(i => i.product_id === b.dataset.cq);
+        const qty = b.dataset.d === 'x' ? 0 : it.qty + Number(b.dataset.d);
+        b.disabled = true;
+        try { const r = await MG.api('/api/cart', { method: 'PUT', body: { productId: it.product_id, qty: Math.max(0, qty) } }); if (r.adjusted) MG.toast(`Il n'en reste que ${r.stock}`, true); }
+        catch (er) { MG.fail(er); }
+        await refreshCartBadge();
+      });
+      document.addEventListener('keydown', e => { if (e.key === 'Escape' && d.classList.contains('open')) MG.closeCart(); });
+    }
+    drawCart();
+    requestAnimationFrame(() => d.classList.add('open'));
+    document.body.classList.add('cd-lock');
+    setTimeout(() => { const x = d.querySelector('.cd-x'); if (x) x.focus(); }, 250);
+    refreshCartBadge();
+  };
+  MG.closeCart = () => { const d = document.getElementById('cartDrawer'); if (d) d.classList.remove('open'); document.body.classList.remove('cd-lock'); const f = document.getElementById('cartFab'); if (f) f.focus(); };
+  function drawCart() {
+    const items = (MG.cart && MG.cart.items) || [], body = document.getElementById('cdBody'), foot = document.getElementById('cdFoot');
+    if (!body) return;
+    if (!items.length) {
+      body.innerHTML = `<div class="empty-state"><img src="/img/produits/panier-tresse.svg" alt=""><h3>Votre panier est vide</h3><p class="muted">Ajoutez des produits avec le bouton +.</p></div>`;
+      foot.innerHTML = `<button type="button" class="btn alt" style="width:100%" data-cd-close>Continuer mes achats</button>`; return;
+    }
+    const shops = {};
+    for (const i of items) (shops[i.shop_id] = shops[i.shop_id] || { name: i.shop_name, lines: [] }).lines.push(i);
+    const tot = items.reduce((t, i) => t + i.price * i.qty, 0), n = items.reduce((t, i) => t + i.qty, 0);
+    body.innerHTML = Object.values(shops).map(sh => `<div class="cd-shop"><h3>${MG.esc(sh.name)}</h3>${sh.lines.map(i => {
+      const gone = !i.active || i.shop_status !== 'active' || i.stock <= 0, over = !gone && i.qty > i.stock;
+      return `<div class="cd-line"><img src="${MG.img(i.photo_id)}" alt=""><div class="cd-info"><b>${MG.esc(i.name)}</b>
+        <span class="muted">${i.base_price > i.price ? `<s>${MG.fcfa(i.base_price)}</s> ` : ''}${MG.fcfa(i.price)}</span>
+        ${gone ? '<span class="stock-info out">Épuisé : à retirer</span>' : over ? `<span class="stock-info out">Il n'en reste que ${i.stock}</span>` : i.stock <= MG.LOW_STOCK ? `<span class="stock-info low">Plus que ${i.stock}</span>` : ''}
+        <div class="cd-row"><div class="qty"><button data-cq="${i.product_id}" data-d="-1" aria-label="Retirer un">−</button><b>${i.qty}</b><button data-cq="${i.product_id}" data-d="1" aria-label="Ajouter un"${gone || i.qty >= i.stock ? ' disabled' : ''}>+</button></div>
+        <span class="price" style="font-size:1rem">${MG.fcfa(i.price * i.qty)}</span><button class="cd-rm" data-cq="${i.product_id}" data-d="x" aria-label="Retirer ${MG.esc(i.name)}">${MG.icon('trash', 16)}</button></div></div></div>`;
+    }).join('')}</div>`).join('');
+    foot.innerHTML = `<div class="total"><span>${n} article${n > 1 ? 's' : ''}</span><b>${MG.fcfa(tot)}</b></div><p class="muted" style="margin:0 0 var(--space-3);font-size:.85rem">Livraison et bons d'achat calculés à l'étape suivante.</p>
+      <a class="btn big" style="width:100%" href="/panier.html">Commander</a><button type="button" class="btn alt" style="width:100%;margin-top:var(--space-2)" data-cd-close>Continuer mes achats</button>`;
+  }
+  // La photo du produit « vole » jusqu'au panier
+  function flyToCart(btn) {
+    const fab = document.getElementById('cartFab'); if (!fab || fab.hidden) return;
+    const src = (btn.closest('.product') && btn.closest('.product').querySelector('.pimg img')) || (btn.closest('.sheet') && btn.closest('.sheet').querySelector('#galImg'))
+      || (btn.closest('.suggest .it') && btn.closest('.suggest .it').querySelector('img'));
+    const bump = () => { fab.classList.remove('bump'); void fab.offsetWidth; fab.classList.add('bump'); };
+    if (!src || matchMedia('(prefers-reduced-motion: reduce)').matches) return bump();
+    const a = src.getBoundingClientRect(), b = fab.querySelector('.cf-ico').getBoundingClientRect();
+    const g = src.cloneNode(); g.className = 'fly'; g.removeAttribute('loading');
+    Object.assign(g.style, { left: a.left + 'px', top: a.top + 'px', width: a.width + 'px', height: a.height + 'px' });
+    document.body.appendChild(g);
+    const dx = b.left + b.width / 2 - (a.left + a.width / 2), dy = b.top + b.height / 2 - (a.top + a.height / 2);
+    g.animate([{ transform: 'translate(0,0) scale(1)', opacity: 1, borderRadius: '16px' },
+      { transform: `translate(${dx * .5}px,${dy * .5 - 80}px) scale(.55)`, opacity: 1, offset: .55 },
+      { transform: `translate(${dx}px,${dy}px) scale(.08)`, opacity: .3, borderRadius: '50%' }], { duration: 750, easing: 'cubic-bezier(.5,0,.6,1)' })
+      .onfinish = () => { g.remove(); bump(); };
   }
 
   async function pollNotifs() {
