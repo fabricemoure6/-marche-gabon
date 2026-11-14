@@ -97,8 +97,20 @@
     return `<${tag} class="tile shop${s.promos ? ' has-promo' : ''}"${opts.demo ? '' : ` href="/boutique.html?s=${encodeURIComponent(s.slug)}"`}>
       <div class="cover" style="background-image:url('${cover}')">${s.promos ? `<span class="ribbon">Promo${s.best_pct ? '<span class="rl"> jusqu\'à</span> −' + s.best_pct + ' %' : ''}</span>` : ''}</div>
       <div class="body"><span class="logo" ${logo}>${s.photo_id ? '' : MG.esc(s.name.trim().charAt(0).toUpperCase())}</span><h3>${MG.esc(s.name)}</h3>
-      <p class="muted" style="margin:0;font-size:.9rem">${s.products ? `${s.products} produit${s.products > 1 ? 's' : ''}` : 'Vitrine en préparation'}${s.promos ? ` · <b style="color:var(--papaye-text)">${s.promos} en promo</b>` : ''}${s.address ? ' · ' + MG.esc(s.address) : ''}</p></div></${tag}>`;
+       ${s.loyalty_enabled ? '<span class="tag fid">Carte fidélité</span>' : ''}<p class="muted" style="margin:0;font-size:.9rem">${s.products ? `${s.products} produit${s.products > 1 ? 's' : ''}` : 'Vitrine en préparation'}${s.promos ? ` · <b style="color:var(--papaye-text)">${s.promos} en promo</b>` : ''}${s.address ? ' · ' + MG.esc(s.address) : ''}</p></div></${tag}>`;
   };
+
+  // ---------- Fidélité ----------
+  MG.voucherLabel = v => (v.kind === 'percent' ? `−${v.value} %` : `−${MG.fcfa(v.value)}`);
+  MG.programText = p => `1 bon de ${p.kind === 'percent' ? p.value + ' %' : MG.fcfa(p.value)} toutes les ${p.every} commandes livrées`;
+  MG.stamps = (n, every) => `<span class="stamps" role="img" aria-label="${n} tampon${n > 1 ? 's' : ''} sur ${every}">${Array.from({ length: every }, (_, i) => `<i class="${i < n ? 'on' : ''}"></i>`).join('')}</span>`;
+  // Ticket de bon d'achat. v = {code, kind, value, min_order, expires_at, shop_name?, slug?, note?, used_at?}
+  MG.voucherTicket = (v, opts = {}) => `<div class="ticket${v.used_at ? ' used' : ''}">
+      <div class="tv">${MG.voucherLabel(v)}</div>
+      <div class="ti"><b>${opts.title || (v.shop_name ? MG.esc(v.shop_name) : 'Bon d\'achat')}</b>
+        <span>Code <code>${MG.esc(v.code)}</code>${v.min_order ? ` · dès ${MG.fcfa(v.min_order)} d'achats` : ''}</span>
+        <span>${v.used_at ? 'Utilisé' : 'Valable jusqu\'au ' + new Date(v.expires_at).toLocaleDateString('fr-FR')}${v.note ? ' · ' + MG.esc(v.note) : ''}</span></div>
+      ${opts.link && v.slug && !v.used_at ? `<a class="btn small" href="/boutique.html?s=${encodeURIComponent(v.slug)}">Utiliser</a>` : ''}</div>`;
 
   // Fenêtre modale simple. Renvoie { el, close }. html = contenu du formulaire.
   MG.modal = function (html, { wide } = {}) {

@@ -375,3 +375,42 @@ th{font-size:.78rem;text-transform:uppercase;letter-spacing:.04em;color:var(--in
 }
 .ribbon{white-space:nowrap}
 @media(max-width:720px){.ribbon .rl{display:none}}
+
+/* ---------- Fidélité ---------- */
+.tag.fid{background:var(--foret-tint);color:var(--foret);margin:0 0 .35rem}
+.stamps{display:inline-flex;gap:6px;flex-wrap:wrap;vertical-align:middle}
+.stamps i{width:22px;height:22px;border-radius:50%;border:2px dashed var(--line-strong);background:var(--surface-200)}
+.stamps i.on{border:0;background:var(--papaye);box-shadow:inset 0 0 0 4px var(--papaye-tint)}
+.ticket{position:relative;display:flex;align-items:center;gap:var(--space-4);background:var(--surface-200);border:1.5px dashed var(--foret);border-radius:var(--radius-m);padding:var(--space-3) var(--space-4)}
+.ticket::before,.ticket::after{content:"";position:absolute;top:50%;width:18px;height:18px;border-radius:50%;background:var(--surface-100);transform:translateY(-50%)}
+.ticket::before{left:-10px;border-right:1.5px dashed var(--foret)}.ticket::after{right:-10px;border-left:1.5px dashed var(--foret)}
+.ticket .tv{flex:none;min-width:84px;text-align:center;font:800 1.35rem/1.1 var(--font-display);color:var(--foret)}
+.ticket .ti{flex:1;min-width:0;display:flex;flex-direction:column;font-size:.85rem;color:var(--ink-muted)}
+.ticket .ti b{color:var(--ink);font:700 1rem/1.3 var(--font-display)}
+.ticket code{font:700 .85rem/1 ui-monospace,Menlo,monospace;color:var(--ink);background:var(--surface-300);padding:2px 6px;border-radius:6px}
+.ticket.used{opacity:.55;border-color:var(--line-strong)}.ticket.used .tv{color:var(--ink-muted)}
+.fid-banner{display:flex;gap:var(--space-4);align-items:center;flex-wrap:wrap;background:var(--foret-tint);border-radius:var(--radius-l);padding:var(--space-4) var(--space-5);margin:0 0 var(--space-4)}
+.fid-banner .ic{width:48px;height:48px;border-radius:50%;flex:none;display:grid;place-items:center;background:var(--foret);color:var(--on-foret)}
+.fid-banner .tx{flex:1;min-width:200px}
+.fid-banner b{font:700 1.05rem/1.3 var(--font-display)}
+.loyal-grid{display:grid;gap:var(--space-4);grid-template-columns:repeat(auto-fill,minmax(280px,1fr))}
+.loyal-card{background:var(--surface-200);border:1px solid var(--line);border-radius:var(--radius-l);padding:var(--space-4);display:flex;flex-direction:column;gap:var(--space-2);box-shadow:var(--shadow-1)}
+.loyal-card .top{display:flex;gap:var(--space-3);align-items:center}
+.loyal-card .top img{width:48px;height:48px;border-radius:50%;object-fit:cover;background:var(--surface-300)}
+.vlist{display:flex;flex-direction:column;gap:var(--space-3)}
+.voucher-pick{display:flex;gap:var(--space-2);align-items:center;flex-wrap:wrap;background:var(--foret-tint);border-radius:var(--radius-m);padding:var(--space-2) var(--space-3);margin:var(--space-2) 0}
+.voucher-pick select{width:auto;flex:1;min-width:200px;min-height:40px;border-radius:var(--radius-pill)}
+.total.discount{color:var(--foret);font-weight:700}
+.kpis{display:grid;gap:var(--space-3);grid-template-columns:repeat(auto-fit,minmax(140px,1fr));margin:var(--space-3) 0}
+.kpis div{background:var(--surface-300);border-radius:var(--radius-m);padding:var(--space-3)}
+.kpis b{display:block;font:800 1.4rem/1.2 var(--font-display)}
+.kpis span{font-size:.82rem;color:var(--ink-muted)}
+[hidden]{display:none!important}
+#fidelite{scroll-margin-top:84px}
+.ticket code{white-space:nowrap}
+@media(max-width:720px){
+ .ticket{flex-wrap:wrap;gap:var(--space-2) var(--space-3);padding:var(--space-3) var(--space-4)}
+ .ticket .tv{min-width:0;text-align:left;font-size:1.25rem}
+ .ticket .btn{margin-left:auto}
+ .ticket .ti{order:3;flex-basis:100%}
+}

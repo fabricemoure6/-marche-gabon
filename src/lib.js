@@ -89,6 +89,7 @@ export const DEFAULT_SETTINGS = {
   courier_radius_km: 15,    // les livreurs à moins de cette distance de la boutique sont prévenus
   promo_max_pct: 70,        // remise maximale autorisée (%)
   promo_max_days: 30,       // durée maximale d'une promotion (jours)
+  loyalty_max_pct: 30,      // valeur maximale d'un bon d'achat en pourcentage
   invite_required: 'none'   // 'none' : inscription libre · 'pro' : invitation obligatoire pour boutiques et livreurs · 'all' : pour tous
 };
 
@@ -133,11 +134,22 @@ const SCHEMA = [
   `CREATE INDEX IF NOT EXISTS idx_invite_uses ON invite_uses(invite_id)`,
   `CREATE TABLE IF NOT EXISTS admin_actions (id TEXT PRIMARY KEY, admin_id TEXT NOT NULL, admin_name TEXT, action TEXT NOT NULL, target_type TEXT,
      target_id TEXT, target_name TEXT, reason TEXT, created_at TEXT)`,
-  `CREATE INDEX IF NOT EXISTS idx_admin_actions ON admin_actions(created_at)`
+  `CREATE INDEX IF NOT EXISTS idx_admin_actions ON admin_actions(created_at)`,
+  `CREATE TABLE IF NOT EXISTS loyalty_cards (user_id TEXT NOT NULL, shop_id TEXT NOT NULL, stamps INTEGER NOT NULL DEFAULT 0, orders INTEGER NOT NULL DEFAULT 0,
+     spent INTEGER NOT NULL DEFAULT 0, updated_at TEXT, PRIMARY KEY (user_id, shop_id))`,
+  `CREATE TABLE IF NOT EXISTS vouchers (id TEXT PRIMARY KEY, code TEXT UNIQUE NOT NULL, user_id TEXT NOT NULL, shop_id TEXT NOT NULL, kind TEXT NOT NULL,
+     value INTEGER NOT NULL, min_order INTEGER NOT NULL DEFAULT 0, expires_at INTEGER NOT NULL, origin TEXT, note TEXT, used_at TEXT, order_id TEXT, created_at TEXT)`,
+  `CREATE INDEX IF NOT EXISTS idx_vouchers_user ON vouchers(user_id, shop_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_vouchers_order ON vouchers(order_id)`
 ];
 
 // Colonnes ajoutées après la première version : créées sur les bases existantes
-const MIGRATIONS = { products: [['promo_price', 'INTEGER'], ['promo_until', 'INTEGER'], ['promo_start', 'INTEGER']] };
+const MIGRATIONS = {
+  products: [['promo_price', 'INTEGER'], ['promo_until', 'INTEGER'], ['promo_start', 'INTEGER']],
+  shops: [['loyalty_enabled', 'INTEGER NOT NULL DEFAULT 0'], ['loyalty_every', 'INTEGER'], ['loyalty_kind', 'TEXT'], ['loyalty_value', 'INTEGER'],
+    ['loyalty_min', 'INTEGER'], ['loyalty_days', 'INTEGER']],
+  orders: [['discount', 'INTEGER NOT NULL DEFAULT 0'], ['voucher_id', 'TEXT']]
+};
 async function migrate(db) {
   for (const [table, cols] of Object.entries(MIGRATIONS)) {
     const { results } = await db.prepare(`PRAGMA table_info(${table})`).all();
@@ -213,3 +225,14 @@ export function distanceKm(lat1, lng1, lat2, lng2) {
 
 export const slugify = s => String(s).toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
   .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 50) || 'boutique';
+
+// ---------- Fidélité ----------
+// Montant de la remise d'un bon sur un sous-total (arrondi à 5 FCFA, jamais plus que le sous-total)
+export function voucherDiscount(v, subtotal) {
+  if (subtotal < (v.min_order || 0)) return 0;
+  const d = v.kind === 'percent' ? Math.round((subtotal * v.value) / 100 / 5) * 5 : v.value;
+  return Math.max(0, Math.min(d, subtotal));
+}
+export const loyaltyProgram = s => (s && s.loyalty_enabled ? {
+  every: s.loyalty_every, kind: s.loyalty_kind, value: s.loyalty_value, min: s.loyalty_min || 0, days: s.loyalty_days
+} : null);

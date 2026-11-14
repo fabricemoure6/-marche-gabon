@@ -45,6 +45,7 @@
       ${o.status !== 'cancelled' && o.status !== 'awaiting_payment' ? `<ul class="steps">${FLOW.map((s, i) => `<li class="${i <= idx ? 'done' : ''}">${{ paid: 'Payée', preparing: 'Préparation', ready: 'Prête', delivering: 'En livraison', delivered: 'Livrée' }[s]}</li>`).join('')}</ul>` : ''}
       <table><tbody>${items.map(i => `<tr><td>${MG.esc(i.name)}</td><td>${i.qty} × ${MG.fcfa(i.price)}</td><td style="text-align:right">${MG.fcfa(i.qty * i.price)}</td></tr>`).join('')}</tbody></table>
       <div class="total"><span>Produits</span><span>${MG.fcfa(o.subtotal)}</span></div>
+      ${o.discount ? `<div class="total discount"><span>Bon d'achat fidélité</span><span>−${MG.fcfa(o.discount)}</span></div>` : ''}
       <div class="total"><span>Livraison${o.distance_km ? ' (' + o.distance_km + ' km)' : ''}</span><span>${MG.fcfa(o.delivery_fee)}</span></div>
       <div class="total big"><span>Total</span><span>${MG.fcfa(o.total)}</span></div>
       <p class="muted">Livraison : ${MG.esc(o.address)}</p>

@@ -1,5 +1,42 @@
 // Paiement : SingPay (page hébergée) avec repli manuel Airtel Money, confirmation des commandes, notifications.
-import { uid, now } from './lib.js';
+import { uid, now, rand } from './lib.js';
+
+// Rend un bon d'achat utilisable si sa commande est annulée
+export async function releaseVoucher(env, orderId) {
+  await env.DB.prepare('UPDATE vouchers SET used_at=NULL, order_id=NULL WHERE order_id=?1').bind(orderId).run();
+}
+
+// Crée un bon d'achat et prévient le client
+export async function createVoucher(env, { userId, shopId, shopName, kind, value, minOrder, days, origin, note }) {
+  const id = uid(), code = 'FID-' + rand(3).toUpperCase(), expires = Date.now() + days * 86400000;
+  await env.DB.prepare('INSERT INTO vouchers (id,code,user_id,shop_id,kind,value,min_order,expires_at,origin,note,created_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)')
+    .bind(id, code, userId, shopId, kind, value, minOrder || 0, expires, origin, note || '', now()).run();
+  const label = kind === 'percent' ? `${value} %` : `${value} FCFA`;
+  await notify(env, userId, origin === 'gift' ? `Cadeau de ${shopName}` : 'Bon d\'achat fidélité obtenu',
+    `${shopName} vous offre un bon de ${label} (code ${code})${note ? ' : ' + note : ''}. Valable ${days} jours.`, '/compte.html#fidelite');
+  return { id, code };
+}
+
+// Commande livrée : un tampon sur la carte du client ; à chaque palier, un bon d'achat
+export async function awardLoyalty(env, order) {
+  const s = await env.DB.prepare('SELECT id,name,loyalty_enabled,loyalty_every,loyalty_kind,loyalty_value,loyalty_min,loyalty_days FROM shops WHERE id=?1').bind(order.shop_id).first();
+  const spent = order.subtotal - (order.discount || 0);
+  await env.DB.prepare(`INSERT INTO loyalty_cards (user_id,shop_id,stamps,orders,spent,updated_at) VALUES (?1,?2,?3,1,?4,?5)
+    ON CONFLICT(user_id,shop_id) DO UPDATE SET stamps=stamps+?3, orders=orders+1, spent=spent+?4, updated_at=?5`)
+    .bind(order.customer_id, order.shop_id, s && s.loyalty_enabled ? 1 : 0, spent, now()).run();
+  if (!s || !s.loyalty_enabled || !(s.loyalty_every > 0)) return null;
+  const card = await env.DB.prepare('SELECT stamps FROM loyalty_cards WHERE user_id=?1 AND shop_id=?2').bind(order.customer_id, order.shop_id).first();
+  if (card.stamps < s.loyalty_every) {
+    const left = s.loyalty_every - card.stamps;
+    await notify(env, order.customer_id, `Carte de fidélité ${s.name}`, `Merci ! Encore ${left} commande${left > 1 ? 's' : ''} livrée${left > 1 ? 's' : ''} pour obtenir votre bon d'achat.`, '/compte.html#fidelite');
+    return null;
+  }
+  // Retire les tampons utilisés de façon atomique (une seule récompense même si deux livraisons arrivent en même temps)
+  const r = await env.DB.prepare('UPDATE loyalty_cards SET stamps=stamps-?3 WHERE user_id=?1 AND shop_id=?2 AND stamps>=?3').bind(order.customer_id, order.shop_id, s.loyalty_every).run();
+  if (!r.meta.changes) return null;
+  return createVoucher(env, { userId: order.customer_id, shopId: s.id, shopName: s.name, kind: s.loyalty_kind, value: s.loyalty_value,
+    minOrder: s.loyalty_min, days: s.loyalty_days || 30, origin: 'loyalty' });
+}
 
 export async function notify(env, userId, title, body, url) {
   await env.DB.prepare('INSERT INTO notifications (id,user_id,title,body,url,created_at) VALUES (?1,?2,?3,?4,?5,?6)')
@@ -39,6 +76,7 @@ export async function cancelOrders(env, checkoutId, restock = true) {
         WHERE id IN (SELECT product_id FROM order_items WHERE order_id=?1)`).bind(o.id).run();
     }
     await env.DB.prepare(`UPDATE orders SET status='cancelled', updated_at=?2 WHERE id=?1`).bind(o.id, now()).run();
+    await releaseVoucher(env, o.id);
   }
 }
 

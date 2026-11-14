@@ -2,7 +2,7 @@
 <html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Mon compte</title><link rel="stylesheet" href="/styles.css"></head>
 <body><header id="top"></header>
-<main style="max-width:560px">
+<main style="max-width:760px">
   <div id="view"></div>
 </main>
 <script src="/common.js"></script>
@@ -33,6 +33,25 @@
     view.innerHTML = `<div class="card"><h1>${MG.esc(u.name)}</h1><p>${MG.esc(u.email)}<br>${MG.esc(u.phone || '')}<br><span class="tag">${roles[u.role]}</span></p>
       <p><a class="btn" href="/commandes.html">Mes commandes</a> <button class="btn alt" id="out">Se déconnecter</button></p></div>`;
     MG.$('#out').onclick = async () => { await MG.api('/api/auth/logout', { method: 'POST', body: {} }); go('/'); };
+    if (u.role === 'customer') loyaltyView();
+  }
+
+  // ----- Ma fidélité : cartes par boutique et bons d'achat -----
+  async function loyaltyView() {
+    const box = document.createElement('section'); box.id = 'fidelite'; view.appendChild(box);
+    const { cards, vouchers } = await MG.api('/api/my/loyalty');
+    const active = vouchers.filter(v => !v.used_at), used = vouchers.filter(v => v.used_at);
+    box.innerHTML = `<div class="section-head"><h2>Ma fidélité</h2>${active.length ? `<span class="tag fid">${active.length} bon${active.length > 1 ? 's' : ''} à utiliser</span>` : ''}</div>
+      ${active.length ? `<div class="vlist" style="margin-bottom:var(--space-5)">${active.map(v => MG.voucherTicket(v, { link: true })).join('')}</div>` : ''}
+      ${cards.length ? `<div class="loyal-grid">${cards.map(c => {
+        const p = c.program, n = p ? c.stamps % p.every : 0, left = p ? p.every - n : 0;
+        return `<a class="loyal-card" href="/boutique.html?s=${encodeURIComponent(c.slug)}" style="color:inherit;text-decoration:none;font-weight:400">
+          <div class="top"><img src="${MG.img(c.photo_id, c.category)}" alt=""><div><b style="font:700 1.05rem var(--font-display)">${MG.esc(c.name)}</b><br><span class="muted" style="font-size:.85rem">${c.orders} commande${c.orders > 1 ? 's' : ''} livrée${c.orders > 1 ? 's' : ''}</span></div></div>
+          ${p ? `${MG.stamps(n, p.every)}<span class="muted" style="font-size:.88rem">Encore ${left} commande${left > 1 ? 's' : ''} pour ${p.kind === 'percent' ? 'un bon de ' + p.value + ' %' : 'un bon de ' + MG.fcfa(p.value)}</span>`
+            : '<span class="muted" style="font-size:.88rem">Cette boutique n\'a pas encore de carte de fidélité.</span>'}</a>`;
+      }).join('')}</div>` : `<div class="card empty-state"><img src="/img/produits/panier-tresse.svg" alt=""><h3>Vos cartes de fidélité apparaîtront ici</h3><p class="muted">Chaque commande livrée dans une boutique qui a une carte vous rapporte un tampon, puis un bon d'achat.</p></div>`}
+      ${used.length ? `<details style="margin-top:var(--space-4)"><summary class="muted">Bons utilisés récemment (${used.length})</summary><div class="vlist" style="margin-top:var(--space-3)">${used.map(v => MG.voucherTicket(v)).join('')}</div></details>` : ''}`;
+    if (location.hash === '#fidelite') box.scrollIntoView({ behavior: 'smooth' });
   }
 
   function authView(mode, role) {

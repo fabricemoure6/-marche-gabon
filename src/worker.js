@@ -2,9 +2,9 @@
 import {
   json, bad, rand, uid, now, sha256, safeEqual, hashPassword, createSession, clearCookie, currentUser, destroySession,
   CATEGORIES, ORDER_STATUS, ensureSchema, loadSettings, saveSettings, toBase64, fromBase64, sniffImage,
-  validCoord, distanceKm, slugify, EFFECTIVE_PRICE, promoActive, publicProduct
+  validCoord, distanceKm, slugify, EFFECTIVE_PRICE, promoActive, publicProduct, voucherDiscount, loyaltyProgram
 } from './lib.js';
-import { notify, confirmCheckout, rejectCheckout, cancelOrders, startOnlinePayment, singpayVerify, singpayOn, singpayCall, sp } from './pay.js';
+import { notify, confirmCheckout, rejectCheckout, cancelOrders, releaseVoucher, createVoucher, awardLoyalty, startOnlinePayment, singpayVerify, singpayOn, singpayCall, sp } from './pay.js';
 import { botReply, searchProducts } from './bot.js';
 
 const cleanText = (v, max) => String(v ?? '').replace(/[\u0000-\u001f\u007f]/g, ' ').trim().slice(0, max);
@@ -153,7 +153,7 @@ async function loadOrderFor(env, user, ref) {
 function orderPublic(o, role) {
   const waDigits = p => String(p || '').replace(/\D/g, '');
   const out = {
-    ref: o.ref, status: o.status, statusLabel: ORDER_STATUS[o.status], subtotal: o.subtotal, delivery_fee: o.delivery_fee, total: o.total,
+    ref: o.ref, status: o.status, statusLabel: ORDER_STATUS[o.status], subtotal: o.subtotal, discount: o.discount || 0, delivery_fee: o.delivery_fee, total: o.total,
     address: o.address, note: o.note, distance_km: o.distance_km, created_at: o.created_at, shop: { name: o.shop_name, address: o.shop_address },
     customer: { name: o.customer_name }, hasCourier: !!o.courier_id, role
   };
@@ -194,7 +194,7 @@ export default {
         return json({
           site_name: s.site_name, tagline: s.tagline, categories: CATEGORIES, delivery_base: s.delivery_base,
           delivery_per_km: s.delivery_per_km, online_payment: singpayOn(env), invite_required: s.invite_required,
-          promo_max_pct: s.promo_max_pct, promo_max_days: s.promo_max_days
+          promo_max_pct: s.promo_max_pct, promo_max_days: s.promo_max_days, loyalty_max_pct: s.loyalty_max_pct ?? 30
         });
       }
       if (method === 'GET' && p === '/api/shops') {
@@ -204,7 +204,8 @@ export default {
                   (SELECT COUNT(*) FROM products p WHERE p.shop_id=s.id AND p.active=1) AS products,
                   (SELECT COUNT(*) FROM products p WHERE p.shop_id=s.id AND p.active=1 AND p.stock>0 AND ${EFFECTIVE_PRICE} < p.price) AS promos,
                   (SELECT MAX(ROUND(100 - 100.0 * p.promo_price / p.price)) FROM products p WHERE p.shop_id=s.id AND p.active=1 AND p.stock>0 AND ${EFFECTIVE_PRICE} < p.price) AS best_pct,
-                  (SELECT p.photo_id FROM products p WHERE p.shop_id=s.id AND p.active=1 AND p.photo_id IS NOT NULL ORDER BY p.created_at DESC LIMIT 1) AS cover_id
+                  (SELECT p.photo_id FROM products p WHERE p.shop_id=s.id AND p.active=1 AND p.photo_id IS NOT NULL ORDER BY p.created_at DESC LIMIT 1) AS cover_id,
+                  s.loyalty_enabled
            FROM shops s WHERE s.status='active' ORDER BY promos > 0 DESC, s.name`).all();
         return json(results.filter(s => (!cat || s.category === cat) && (!q || (s.name + ' ' + (s.description || '')).toLowerCase().includes(q))));
       }
@@ -222,12 +223,22 @@ export default {
         return json(await searchProducts(env, { cat, q, limit }));
       }
       if (method === 'GET' && (m = p.match(/^\/api\/shops\/([a-z0-9-]{1,60})$/))) {
-        const s = await env.DB.prepare(`SELECT id,name,slug,category,description,address,photo_id,phone FROM shops WHERE slug=?1 AND status='active'`).bind(m[1]).first();
+        const s = await env.DB.prepare(`SELECT id,name,slug,category,description,address,photo_id,phone,loyalty_enabled,loyalty_every,loyalty_kind,loyalty_value,loyalty_min,loyalty_days
+          FROM shops WHERE slug=?1 AND status='active'`).bind(m[1]).first();
         if (!s) return bad('Boutique introuvable', 404);
+        const loyalty = loyaltyProgram(s);
+        for (const k of ['loyalty_enabled', 'loyalty_every', 'loyalty_kind', 'loyalty_value', 'loyalty_min', 'loyalty_days']) delete s[k];
+        let mine = null;
+        const viewer = await currentUser(request, env);
+        if (viewer && viewer.role === 'customer') {
+          const card = await env.DB.prepare('SELECT stamps,orders FROM loyalty_cards WHERE user_id=?1 AND shop_id=?2').bind(viewer.id, s.id).first();
+          const v = await env.DB.prepare('SELECT COUNT(*) AS n FROM vouchers WHERE user_id=?1 AND shop_id=?2 AND used_at IS NULL AND expires_at>?3').bind(viewer.id, s.id, Date.now()).first();
+          mine = { stamps: card ? card.stamps : 0, orders: card ? card.orders : 0, vouchers: v.n };
+        }
         const { results } = await env.DB.prepare(
           `SELECT id,name,description,price,promo_price,promo_until,stock,photo_id,created_at FROM products WHERE shop_id=?1 AND active=1 ORDER BY created_at DESC`).bind(s.id).all();
         const list = results.map(publicProduct).sort((a, b) => (b.promo_pct ? 1 : 0) - (a.promo_pct ? 1 : 0) || (b.stock > 0) - (a.stock > 0));
-        return json({ shop: s, products: list });
+        return json({ shop: { ...s, loyalty }, products: list, mine });
       }
       if (method === 'GET' && (m = p.match(/^\/api\/invites\/([a-f0-9]{12})$/))) {
         const inv = await env.DB.prepare('SELECT role,label,max_uses,uses,expires_at,auto_approve,revoked FROM invites WHERE code=?1').bind(m[1]).first();
@@ -313,7 +324,9 @@ export default {
         const { results } = await env.DB.prepare(
           `SELECT c.product_id,c.qty,p.name,${EFFECTIVE_PRICE} AS price,p.price AS base_price,p.stock,p.photo_id,p.active,s.id AS shop_id,s.name AS shop_name,s.slug,s.status AS shop_status
            FROM cart_items c JOIN products p ON p.id=c.product_id JOIN shops s ON s.id=p.shop_id WHERE c.user_id=?1`).bind(user.id).all();
-        return json({ items: results });
+        const { results: vouchers } = await env.DB.prepare(
+          `SELECT id,code,shop_id,kind,value,min_order,expires_at FROM vouchers WHERE user_id=?1 AND used_at IS NULL AND expires_at>?2 ORDER BY expires_at`).bind(user.id, Date.now()).all();
+        return json({ items: results, vouchers: vouchers.filter(v => results.some(i => i.shop_id === v.shop_id)) });
       }
       if (method === 'PUT' && p === '/api/cart') {
         const b = await readJson(request);
@@ -351,19 +364,36 @@ export default {
         const checkoutId = uid(), ref = 'MG-' + rand(4).toUpperCase();
         const stmts = [], orderRefs = [];
         let amount = 0;
+        // Bons d'achat choisis : un par boutique, réservés avant la création des commandes
+        const wanted = [...new Set((Array.isArray(b.vouchers) ? b.vouchers : []).map(String).filter(x => /^[a-f0-9]{16}$/.test(x)))].slice(0, 20);
+        const useVoucher = new Map(), orderIds = new Map([...byShop.keys()].map(k => [k, uid()]));
+        for (const vid of wanted) {
+          const v = await env.DB.prepare('SELECT * FROM vouchers WHERE id=?1 AND user_id=?2 AND used_at IS NULL AND expires_at>?3').bind(vid, user.id, Date.now()).first();
+          if (!v || !byShop.has(v.shop_id) || useVoucher.has(v.shop_id)) continue;
+          const sub = byShop.get(v.shop_id).reduce((t, l) => t + l.price * l.qty, 0);
+          if (!voucherDiscount(v, sub)) return bad(`Le bon ${v.code} demande au moins ${v.min_order.toLocaleString('fr-FR')} FCFA d'achats dans cette boutique`);
+          useVoucher.set(v.shop_id, v);
+        }
+        const reserved = [];
+        for (const [shopId, v] of useVoucher) {
+          const r = await env.DB.prepare('UPDATE vouchers SET used_at=?3, order_id=?4 WHERE id=?1 AND user_id=?2 AND used_at IS NULL').bind(v.id, user.id, now(), orderIds.get(shopId)).run();
+          if (!r.meta.changes) { for (const o of reserved) await releaseVoucher(env, o); return bad(`Le bon ${v.code} vient d'être utilisé. Réessayez.`, 409); }
+          reserved.push(orderIds.get(shopId));
+        }
         for (const [shopId, ls] of byShop) {
           const subtotal = ls.reduce((t, l) => t + l.price * l.qty, 0);
+          const voucher = useVoucher.get(shopId) || null, discount = voucher ? voucherDiscount(voucher, subtotal) : 0;
           let km = null, fee = settings.delivery_base;
           if (hasPos && validCoord(ls[0].slat, ls[0].slng)) {
             km = Math.round(distanceKm(lat, lng, ls[0].slat, ls[0].slng) * 10) / 10;
             fee = Math.round((settings.delivery_base + settings.delivery_per_km * Math.ceil(km)) / 50) * 50;
           }
-          const orderId = uid(), oref = 'CMD-' + rand(3).toUpperCase();
-          orderRefs.push(oref); amount += subtotal + fee;
+          const orderId = orderIds.get(shopId), oref = 'CMD-' + rand(3).toUpperCase();
+          orderRefs.push(oref); amount += subtotal - discount + fee;
           stmts.push(env.DB.prepare(
-            `INSERT INTO orders (id,ref,checkout_id,customer_id,shop_id,status,subtotal,delivery_fee,total,address,lat,lng,phone,note,distance_km,created_at,updated_at)
-             VALUES (?1,?2,?3,?4,?5,'awaiting_payment',?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?15)`)
-            .bind(orderId, oref, checkoutId, user.id, shopId, subtotal, fee, subtotal + fee, address, hasPos ? lat : null, hasPos ? lng : null, phone, note, km, now()));
+            `INSERT INTO orders (id,ref,checkout_id,customer_id,shop_id,status,subtotal,delivery_fee,total,address,lat,lng,phone,note,distance_km,created_at,updated_at,discount,voucher_id)
+             VALUES (?1,?2,?3,?4,?5,'awaiting_payment',?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?15,?16,?17)`)
+            .bind(orderId, oref, checkoutId, user.id, shopId, subtotal, fee, subtotal - discount + fee, address, hasPos ? lat : null, hasPos ? lng : null, phone, note, km, now(), discount, voucher ? voucher.id : null));
           for (const l of ls) {
             stmts.push(env.DB.prepare('INSERT INTO order_items (id,order_id,product_id,name,price,qty) VALUES (?1,?2,?3,?4,?5,?6)').bind(uid(), orderId, l.product_id, l.name, l.price, l.qty));
             stmts.push(env.DB.prepare('UPDATE products SET stock = stock - ?2 WHERE id=?1 AND stock >= ?2').bind(l.product_id, l.qty));
@@ -373,7 +403,8 @@ export default {
         stmts.unshift(env.DB.prepare(`INSERT INTO checkouts (id,ref,user_id,amount,method,provider,status,created_at) VALUES (?1,?2,?3,?4,?5,'manual','pending',?6)`)
           .bind(checkoutId, ref, user.id, amount, method2, now()));
         stmts.push(env.DB.prepare('DELETE FROM cart_items WHERE user_id=?1').bind(user.id));
-        await env.DB.batch(stmts);
+        try { await env.DB.batch(stmts); }
+        catch (e) { for (const o of reserved) await releaseVoucher(env, o); throw e; }
         const co = { id: checkoutId, ref, amount };
         const online = await startOnlinePayment(env, co, url.origin);
         return json({
@@ -406,6 +437,19 @@ export default {
            WHERE o.customer_id=?1 ORDER BY o.created_at DESC LIMIT 50`).bind(user.id).all();
         return json(results.map(o => ({ ...o, statusLabel: ORDER_STATUS[o.status] })));
       }
+      if (method === 'GET' && p === '/api/my/loyalty') {
+        const { results: cards } = await env.DB.prepare(
+          `SELECT c.stamps,c.orders,c.spent,s.id AS shop_id,s.name,s.slug,s.category,s.photo_id,s.loyalty_enabled,s.loyalty_every,s.loyalty_kind,s.loyalty_value,s.loyalty_min,s.loyalty_days
+           FROM loyalty_cards c JOIN shops s ON s.id=c.shop_id WHERE c.user_id=?1 AND s.status='active' ORDER BY c.updated_at DESC`).bind(user.id).all();
+        const { results: vouchers } = await env.DB.prepare(
+          `SELECT v.id,v.code,v.kind,v.value,v.min_order,v.expires_at,v.origin,v.note,v.used_at,v.shop_id,s.name AS shop_name,s.slug FROM vouchers v JOIN shops s ON s.id=v.shop_id
+           WHERE v.user_id=?1 AND (v.used_at IS NULL AND v.expires_at>?2 OR v.used_at > ?3) ORDER BY v.used_at IS NOT NULL, v.expires_at`)
+          .bind(user.id, Date.now(), new Date(Date.now() - 60 * 86400000).toISOString()).all();
+        return json({
+          cards: cards.map(c => ({ shop_id: c.shop_id, name: c.name, slug: c.slug, category: c.category, photo_id: c.photo_id, stamps: c.stamps, orders: c.orders, spent: c.spent, program: loyaltyProgram(c) })),
+          vouchers
+        });
+      }
       if (method === 'GET' && (m = p.match(/^\/api\/orders\/(CMD-[A-F0-9]{6})$/))) {
         const r = await loadOrderFor(env, user, m[1]);
         if (!r) return bad('Commande introuvable', 404);
@@ -418,6 +462,7 @@ export default {
         await env.DB.prepare(`UPDATE products SET stock = stock + COALESCE((SELECT qty FROM order_items WHERE order_id=?1 AND product_id=products.id),0)
           WHERE id IN (SELECT product_id FROM order_items WHERE order_id=?1)`).bind(r.o.id).run();
         await env.DB.prepare(`UPDATE orders SET status='cancelled', updated_at=?2 WHERE id=?1`).bind(r.o.id, now()).run();
+        await releaseVoucher(env, r.o.id);
         return json({ ok: true });
       }
       // Position du livreur (client, vendeur ou administrateur, pendant la livraison)
@@ -533,9 +578,56 @@ export default {
             .bind(prod.id, name, b && b.description !== undefined ? cleanText(b.description, 500) : prod.description, price, stock, photo, b && b.active === 0 ? 0 : 1).run();
           return json({ ok: true });
         }
+        if (method === 'GET' && p === '/api/seller/loyalty') {
+          const sh = await env.DB.prepare('SELECT loyalty_enabled,loyalty_every,loyalty_kind,loyalty_value,loyalty_min,loyalty_days FROM shops WHERE id=?1').bind(shop.id).first();
+          const st = await env.DB.prepare(`SELECT
+              (SELECT COUNT(*) FROM loyalty_cards WHERE shop_id=?1) AS customers,
+              (SELECT COUNT(*) FROM vouchers WHERE shop_id=?1) AS issued,
+              (SELECT COUNT(*) FROM vouchers WHERE shop_id=?1 AND used_at IS NOT NULL) AS used,
+              (SELECT COALESCE(SUM(o.discount),0) FROM orders o WHERE o.shop_id=?1 AND o.status!='cancelled') AS discounted`).bind(shop.id).first();
+          return json({ program: { enabled: !!sh.loyalty_enabled, every: sh.loyalty_every || 3, kind: sh.loyalty_kind || 'percent', value: sh.loyalty_value || 10, min: sh.loyalty_min || 0, days: sh.loyalty_days || 30 }, stats: st });
+        }
+        if (method === 'PUT' && p === '/api/seller/loyalty') {
+          const b = await readJson(request) || {}, st = await loadSettings(env), maxPct = st.loyalty_max_pct ?? 30;
+          const enabled = b.enabled ? 1 : 0, every = Math.round(num(b.every)), kind = b.kind === 'amount' ? 'amount' : 'percent';
+          const value = Math.round(num(b.value)), min = Math.max(0, Math.round(num(b.min) || 0)), days = Math.round(num(b.days));
+          if (enabled) {
+            if (!(every >= 2 && every <= 20)) return bad('Un bon toutes les 2 à 20 commandes');
+            if (kind === 'percent' && !(value >= 5 && value <= maxPct)) return bad(`Bon en pourcentage : de 5 à ${maxPct} %`);
+            if (kind === 'amount' && !(value >= 500 && value <= 50000)) return bad('Bon en montant : de 500 à 50 000 FCFA');
+            if (min > 1000000) return bad('Montant minimum trop élevé');
+            if (!(days >= 7 && days <= 180)) return bad('Validité du bon : de 7 à 180 jours');
+          }
+          await env.DB.prepare('UPDATE shops SET loyalty_enabled=?2,loyalty_every=?3,loyalty_kind=?4,loyalty_value=?5,loyalty_min=?6,loyalty_days=?7 WHERE id=?1')
+            .bind(shop.id, enabled, enabled ? every : null, enabled ? kind : null, enabled ? value : null, enabled ? min : null, enabled ? days : null).run();
+          return json({ ok: true });
+        }
+        if (method === 'GET' && p === '/api/seller/customers') {
+          const { results } = await env.DB.prepare(
+            `SELECT c.user_id,c.stamps,c.orders,c.spent,c.updated_at,u.name,u.phone,
+                    (SELECT COUNT(*) FROM vouchers v WHERE v.user_id=c.user_id AND v.shop_id=c.shop_id AND v.used_at IS NULL AND v.expires_at>?2) AS vouchers
+             FROM loyalty_cards c JOIN users u ON u.id=c.user_id WHERE c.shop_id=?1 ORDER BY c.orders DESC, c.spent DESC LIMIT 200`).bind(shop.id, Date.now()).all();
+          return json(results);
+        }
+        if (method === 'POST' && p === '/api/seller/vouchers') {
+          const b = await readJson(request) || {}, st = await loadSettings(env), maxPct = st.loyalty_max_pct ?? 30;
+          const uidT = String(b.userId || '');
+          const card = /^[a-f0-9]{16}$/.test(uidT) && await env.DB.prepare('SELECT orders FROM loyalty_cards WHERE user_id=?1 AND shop_id=?2').bind(uidT, shop.id).first();
+          if (!card || card.orders < 1) return bad('Seuls vos clients déjà livrés peuvent recevoir un bon');
+          const kind = b.kind === 'amount' ? 'amount' : 'percent', value = Math.round(num(b.value)), days = Math.round(num(b.days)), min = Math.max(0, Math.round(num(b.min) || 0));
+          if (kind === 'percent' && !(value >= 5 && value <= maxPct)) return bad(`Bon en pourcentage : de 5 à ${maxPct} %`);
+          if (kind === 'amount' && !(value >= 500 && value <= 50000)) return bad('Bon en montant : de 500 à 50 000 FCFA');
+          if (!(days >= 7 && days <= 180)) return bad('Validité du bon : de 7 à 180 jours');
+          // Limite anti-abus : 3 bons offerts par client et par mois
+          const recent = await env.DB.prepare(`SELECT COUNT(*) AS n FROM vouchers WHERE user_id=?1 AND shop_id=?2 AND origin='gift' AND created_at>?3`)
+            .bind(uidT, shop.id, new Date(Date.now() - 30 * 86400000).toISOString()).first();
+          if (recent.n >= 3) return bad('Ce client a déjà reçu 3 bons offerts ce mois-ci');
+          const v = await createVoucher(env, { userId: uidT, shopId: shop.id, shopName: shop.name, kind, value, minOrder: min, days, origin: 'gift', note: cleanText(b.note, 120) });
+          return json(v, 201);
+        }
         if (method === 'GET' && p === '/api/seller/orders') {
           const { results } = await env.DB.prepare(
-            `SELECT o.id,o.ref,o.status,o.total,o.subtotal,o.delivery_fee,o.address,o.note,o.created_at,u.name AS customer_name
+            `SELECT o.id,o.ref,o.status,o.total,o.subtotal,o.discount,o.delivery_fee,o.address,o.note,o.created_at,u.name AS customer_name
              FROM orders o JOIN users u ON u.id=o.customer_id WHERE o.shop_id=?1 AND o.status!='awaiting_payment' ORDER BY o.created_at DESC LIMIT 60`).bind(shop.id).all();
           for (const o of results) { o.items = await itemsOf(env, o.id); o.statusLabel = ORDER_STATUS[o.status]; delete o.id; }
           return json(results);
@@ -550,6 +642,7 @@ export default {
           if (next === 'cancelled') {
             await env.DB.prepare(`UPDATE products SET stock = stock + COALESCE((SELECT qty FROM order_items WHERE order_id=?1 AND product_id=products.id),0)
               WHERE id IN (SELECT product_id FROM order_items WHERE order_id=?1)`).bind(o.id).run();
+            await releaseVoucher(env, o.id);
           }
           await notify(env, o.customer_id, 'Votre commande ' + o.ref, ORDER_STATUS[next], `/commandes.html?ref=${o.ref}`);
           if (next === 'ready') await pushCouriers(env, shop, o, await loadSettings(env));
@@ -608,8 +701,10 @@ export default {
           if (!o) return bad('Commande introuvable', 404);
           const want = m[2] === 'pickup' ? ['ready', 'delivering'] : ['delivering', 'delivered'];
           if (o.status !== want[0]) return bad('Changement de statut impossible');
-          await env.DB.prepare('UPDATE orders SET status=?2, updated_at=?3 WHERE id=?1').bind(o.id, want[1], now()).run();
+          const upd = await env.DB.prepare('UPDATE orders SET status=?2, updated_at=?3 WHERE id=?1 AND status=?4').bind(o.id, want[1], now(), want[0]).run();
+          if (!upd.meta.changes) return bad('Changement de statut impossible');
           await notify(env, o.customer_id, 'Votre commande ' + o.ref, ORDER_STATUS[want[1]], `/commandes.html?ref=${o.ref}`);
+          if (want[1] === 'delivered') await awardLoyalty(env, o);
           return json({ ok: true });
         }
       }
@@ -740,7 +835,8 @@ export default {
             delivery_base: nn(b.delivery_base, cur.delivery_base, 0, 100000), delivery_per_km: nn(b.delivery_per_km, cur.delivery_per_km, 0, 10000),
             courier_radius_km: nn(b.courier_radius_km, cur.courier_radius_km, 1, 200),
             invite_required: ['none', 'pro', 'all'].includes(b.invite_required) ? b.invite_required : cur.invite_required,
-            promo_max_pct: nn(b.promo_max_pct, cur.promo_max_pct ?? 70, 5, 90), promo_max_days: nn(b.promo_max_days, cur.promo_max_days ?? 30, 1, 90)
+            promo_max_pct: nn(b.promo_max_pct, cur.promo_max_pct ?? 70, 5, 90), promo_max_days: nn(b.promo_max_days, cur.promo_max_days ?? 30, 1, 90),
+            loyalty_max_pct: nn(b.loyalty_max_pct, cur.loyalty_max_pct ?? 30, 5, 80)
           });
           return json({ ok: true });
         }
