@@ -191,8 +191,20 @@
         ${u ? '<button id="bell" class="bell" aria-label="Notifications">' + MG.icon('bell') + '<span class="badge" id="bellBadge" hidden>0</span></button>' : ''}
         ${u ? `<a href="/compte.html" class="me">${MG.avatar(u, 28)}${MG.esc(u.name.split(' ')[0])}</a>` : '<a href="/compte.html">Connexion</a>'}
         ${!u || u.role === 'customer' ? '<a class="cart" href="/panier.html">' + MG.icon('cart', 18) + 'Panier <span class="badge" id="cartBadge" hidden>0</span></a>' : ''}
+        <button id="themeBtn" class="theme-btn" type="button" aria-label="Passer en mode nuit" title="Mode jour / nuit">
+          <svg class="ico sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.5"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+          <svg class="ico moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></svg></button>
       </nav><button id="burger" aria-label="Menu">${MG.icon('menu', 24)}</button></div><div id="notifBox" hidden></div>`;
     MG.$('#burger').onclick = () => MG.$('#nav').classList.toggle('open');
+    const isDark = () => document.documentElement.dataset.theme ? document.documentElement.dataset.theme === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
+    const label = () => { const b = MG.$('#themeBtn'); b.setAttribute('aria-label', isDark() ? 'Passer en mode jour' : 'Passer en mode nuit'); document.querySelector('meta[name=theme-color]')?.setAttribute('content', isDark() ? '#110e0c' : '#1f1a17'); };
+    MG.$('#themeBtn').onclick = () => {
+      const next = isDark() ? 'light' : 'dark', root = document.documentElement;
+      root.classList.add('theme-anim'); root.dataset.theme = next; setTimeout(() => root.classList.remove('theme-anim'), 400);
+      try { localStorage.setItem('mg-theme', next); } catch { /* navigation privée : choix non mémorisé */ }
+      label(); MG.toast(next === 'dark' ? 'Mode nuit activé' : 'Mode jour activé');
+    };
+    label();
     if (u) {
       MG.$('#bell').onclick = toggleNotifs;
       pollNotifs(); setInterval(pollNotifs, 30000);
