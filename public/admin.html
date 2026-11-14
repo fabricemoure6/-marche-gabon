@@ -6,7 +6,7 @@
   <h1>Administration</h1>
   <div class="tabs" id="tabs">
     <button data-t="overview" class="on">Vue d'ensemble</button><button data-t="payments">Paiements</button><button data-t="shops">Boutiques</button>
-    <button data-t="orders">Commandes</button><button data-t="users">Utilisateurs</button><button data-t="settings">Réglages</button></div>
+    <button data-t="orders">Commandes</button><button data-t="users">Utilisateurs</button><button data-t="invites">Invitations</button><button data-t="settings">Réglages</button></div>
   <div id="pane"></div>
 </main>
 <script src="/common.js"></script>
@@ -16,13 +16,45 @@
   const S = id => MG.$('#' + id), pane = S('pane');
   let tab = 'overview';
   S('tabs').onclick = e => { const b = e.target.closest('[data-t]'); if (!b) return; tab = b.dataset.t; [...S('tabs').children].forEach(x => x.classList.toggle('on', x === b)); show(); };
-  const T = { overview, payments, shops, orders, users, settings };
+  const T = { overview, payments, shops, orders, users, invites, settings };
   const show = () => T[tab]().catch(MG.fail);
+
+  // Fenêtre de confirmation sécurisée : motif + mot de passe de l'administrateur.
+  // onConfirm reçoit { reason, password } et renvoie une promesse ; une erreur reste affichée dans la fenêtre.
+  function secureConfirm({ title, target, consequences, button, onConfirm }) {
+    const d = document.createElement('dialog');
+    d.className = 'modal';
+    d.innerHTML = `<form method="dialog" id="cf">
+      <div class="modal-head"><span class="modal-ico" aria-hidden="true">!</span><div><h2>${MG.esc(title)}</h2><p class="muted" style="margin:0">${MG.esc(target)}</p></div></div>
+      <ul class="modal-list">${consequences.map(c => `<li>${MG.esc(c)}</li>`).join('')}</ul>
+      <label for="cfReason">Motif (communiqué à la personne concernée)</label>
+      <textarea id="cfReason" required minlength="5" maxlength="300" placeholder="Ex. : produits non conformes signalés par plusieurs clients"></textarea>
+      <label for="cfPw">Votre mot de passe administrateur</label>
+      <input id="cfPw" type="password" required autocomplete="current-password">
+      <p class="err" id="cfErr" role="alert"></p>
+      <div class="modal-actions"><button type="button" class="btn alt" id="cfNo">Annuler</button><button class="btn red" id="cfYes">${MG.esc(button)}</button></div></form>`;
+    document.body.appendChild(d);
+    const close = () => { d.close(); d.remove(); };
+    d.querySelector('#cfNo').onclick = close;
+    d.addEventListener('cancel', e => { e.preventDefault(); close(); });
+    d.querySelector('#cf').onsubmit = async e => {
+      e.preventDefault();
+      const yes = d.querySelector('#cfYes'); yes.disabled = true; d.querySelector('#cfErr').textContent = '';
+      try { await onConfirm({ reason: d.querySelector('#cfReason').value.trim(), password: d.querySelector('#cfPw').value }); close(); }
+      catch (er) { d.querySelector('#cfErr').textContent = er.message; d.querySelector('#cfPw').value = ''; d.querySelector('#cfPw').focus(); yes.disabled = false; }
+    };
+    d.showModal(); d.querySelector('#cfReason').focus();
+  }
+  const ROLE = { customer: 'Client', seller: 'Boutique', courier: 'Livreur', admin: 'Admin' };
 
   async function overview() {
     const o = await MG.api('/api/admin/overview');
     const cell = (v, l) => `<div class="card"><div style="font-size:1.8rem;font-weight:800">${v}</div><div class="muted">${l}</div></div>`;
-    pane.innerHTML = `<div class="grid">${cell(o.users, 'Utilisateurs')}${cell(o.shopsActive, 'Boutiques actives')}${cell(o.shopsPending, 'Boutiques à valider')}${cell(o.paymentsToCheck, 'Paiements à vérifier')}${cell(o.orders, 'Commandes')}${cell(MG.fcfa(o.revenue), 'Ventes payées')}</div>`;
+    const log = await MG.api('/api/admin/actions');
+    pane.innerHTML = `<div class="grid">${cell(o.users, 'Utilisateurs')}${cell(o.shopsActive, 'Boutiques actives')}${cell(o.shopsPending, 'Boutiques à valider')}${cell(o.paymentsToCheck, 'Paiements à vérifier')}${cell(o.orders, 'Commandes')}${cell(MG.fcfa(o.revenue), 'Ventes payées')}</div>
+      <div class="card scroll" style="margin-top:var(--space-5)"><h2>Journal des actions</h2>${log.length ? `<table><thead><tr><th>Date</th><th>Action</th><th>Concerné</th><th>Motif</th><th>Par</th></tr></thead><tbody>${log.map(a => `<tr>
+        <td><small>${MG.date(a.created_at)}</small></td><td><b>${MG.esc(a.action)}</b></td><td>${MG.esc(a.target_name)}</td><td>${MG.esc(a.reason || '—')}</td><td>${MG.esc(a.admin_name)}</td></tr>`).join('')}</tbody></table>`
+        : '<p class="muted">Aucune action enregistrée pour le moment.</p>'}</div>`;
   }
 
   async function payments() {
@@ -43,10 +75,17 @@
     pane.innerHTML = `<div class="card scroll"><table><thead><tr><th>Boutique</th><th>Gestionnaire</th><th>Catégorie</th><th>État</th><th></th></tr></thead><tbody>${list.map(s => `<tr>
       <td>${MG.esc(s.name)}<br><small class="muted">${MG.esc(s.address || '')}</small></td><td>${MG.esc(s.owner)}<br><small>${MG.esc(s.phone || '')}</small></td><td>${MG.esc(MG.catName(s.category))}</td>
       <td><span class="tag ${s.status}">${s.status}</span></td>
-      <td>${s.status !== 'active' ? `<button class="btn small green" data-s="active" data-id="${s.id}">Activer</button>` : `<button class="btn small red" data-s="suspended" data-id="${s.id}">Suspendre</button>`}</td></tr>`).join('')}</tbody></table></div>`;
+      <td>${s.status !== 'active' ? `<button class="btn small green" data-s="active" data-id="${s.id}">${s.status === 'pending' ? 'Valider' : 'Réactiver'}</button>` : `<button class="btn small red" data-s="suspended" data-id="${s.id}">Suspendre</button>`}</td></tr>`).join('')}</tbody></table></div>`;
     pane.onclick = async e => {
       const b = e.target.closest('[data-s]'); if (!b) return;
-      try { await MG.api('/api/admin/shops/' + b.dataset.id + '/status', { method: 'POST', body: { status: b.dataset.s } }); shops(); } catch (er) { MG.fail(er); }
+      const shop = list.find(x => x.id === b.dataset.id);
+      const send = extra => MG.api('/api/admin/shops/' + b.dataset.id + '/status', { method: 'POST', body: { status: b.dataset.s, ...extra } });
+      if (b.dataset.s === 'suspended') {
+        return secureConfirm({ title: 'Suspendre la boutique', target: `${shop.name} · ${shop.owner}`, button: 'Suspendre la boutique',
+          consequences: ['La boutique et ses produits disparaissent du site.', 'Le gestionnaire est prévenu avec le motif.', 'Vous pourrez la réactiver à tout moment.'],
+          onConfirm: async x => { await send(x); MG.toast('Boutique suspendue'); shops(); } });
+      }
+      try { await send({}); MG.toast(shop.status === 'pending' ? 'Boutique validée' : 'Boutique réactivée'); shops(); } catch (er) { MG.fail(er); }
     };
   }
 
@@ -58,7 +97,7 @@
 
   async function users() {
     const list = await MG.api('/api/admin/users');
-    const R = { customer: 'Client', seller: 'Boutique', courier: 'Livreur', admin: 'Admin' };
+    const R = ROLE;
     pane.innerHTML = `<div id="link"></div><div class="card scroll"><table><thead><tr><th>Nom</th><th>Contact</th><th>Rôle</th><th>État</th><th></th></tr></thead><tbody>${list.map(u => `<tr>
       <td>${MG.esc(u.name)}</td><td>${MG.esc(u.email)}<br><small>${MG.esc(u.phone || '')}</small></td><td>${R[u.role]}</td><td><span class="tag ${u.status}">${u.status}</span></td>
       <td>${u.role === 'admin' ? '' : `<button class="btn small alt" data-r="${u.id}">Lien de réinitialisation</button> <button class="btn small ${u.status === 'active' ? 'red' : 'green'}" data-u="${u.status === 'active' ? 'suspended' : 'active'}" data-id="${u.id}">${u.status === 'active' ? 'Suspendre' : 'Réactiver'}</button>`}</td></tr>`).join('')}</tbody></table></div>`;
@@ -66,8 +105,65 @@
       const r = e.target.closest('[data-r]'), s = e.target.closest('[data-u]');
       try {
         if (r) { const d = await MG.api('/api/admin/users/' + r.dataset.r + '/reset', { method: 'POST', body: {} }); S('link').innerHTML = `<div class="notice">Lien valable 1 heure, à transmettre à l'utilisateur (WhatsApp) :<br><input readonly value="${MG.esc(location.origin + d.path)}" onclick="this.select()"></div>`; }
-        if (s) { await MG.api('/api/admin/users/' + s.dataset.id + '/status', { method: 'POST', body: { status: s.dataset.u } }); users(); }
+        if (s) {
+          const u = list.find(x => x.id === s.dataset.id);
+          const send = extra => MG.api('/api/admin/users/' + s.dataset.id + '/status', { method: 'POST', body: { status: s.dataset.u, ...extra } });
+          if (s.dataset.u === 'suspended') return secureConfirm({ title: 'Suspendre le compte', target: `${u.name} · ${ROLE[u.role]} · ${u.email}`, button: 'Suspendre le compte',
+            consequences: ['La personne est déconnectée et ne peut plus se connecter.', 'Ses commandes en cours restent visibles par l\'équipe.', 'Vous pourrez réactiver le compte à tout moment.'],
+            onConfirm: async x => { await send(x); MG.toast('Compte suspendu'); users(); } });
+          await send({}); MG.toast('Compte réactivé'); users();
+        }
       } catch (er) { MG.fail(er); }
+    };
+  }
+
+  async function invites() {
+    const list = await MG.api('/api/admin/invites');
+    const link = c => location.origin + '/compte.html?invite=' + c;
+    const RL = { customer: 'Client', seller: 'Gestionnaire de boutique', courier: 'Livreur' };
+    const msg = i => `Bonjour${i.label ? ' ' + i.label : ''} ! Vous êtes invité(e) à rejoindre ${MG.config.site_name} en tant que ${RL[i.role].toLowerCase()}. Créez votre compte ici : ${link(i.code)}`;
+    const STATE = { valide: 'active', expiré: 'cancelled', épuisé: 'pending', révoqué: 'cancelled' };
+    pane.innerHTML = `<form class="card" id="inv" style="max-width:720px"><h2>Créer un lien d'inscription</h2>
+        <p class="muted" style="margin-top:0">Envoyez le lien par WhatsApp, SMS ou e-mail : la personne crée son compte directement avec le bon rôle.</p>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:0 var(--space-4)">
+          <div><label for="iRole">Type de compte</label><select id="iRole"><option value="seller">Gestionnaire de boutique</option><option value="courier">Livreur</option><option value="customer">Client</option></select></div>
+          <div><label for="iLabel">Pour qui ? (facultatif)</label><input id="iLabel" maxlength="80" placeholder="Ex. : Mama Rose, marché Mont-Bouët"></div>
+          <div><label for="iUses">Nombre d'inscriptions</label><select id="iUses"><option value="1">1 personne</option><option value="5">5 personnes</option><option value="20">20 personnes</option><option value="">Sans limite</option></select></div>
+          <div><label for="iDays">Valable</label><select id="iDays"><option value="7">7 jours</option><option value="30">30 jours</option><option value="90">90 jours</option><option value="">Sans date de fin</option></select></div>
+        </div>
+        <label id="iAutoBox" style="display:flex;gap:.6rem;align-items:center;font-weight:600"><input type="checkbox" id="iAuto" style="width:auto"> Valider la boutique automatiquement (pas de validation manuelle)</label>
+        <p style="margin-bottom:0"><button class="btn">Créer le lien</button></p></form>
+      <div id="newLink"></div>
+      <div class="card scroll"><h2>Liens créés</h2>${list.length ? `<table><thead><tr><th>Pour</th><th>Rôle</th><th>Inscriptions</th><th>Validité</th><th>État</th><th></th></tr></thead><tbody>${list.map(i => `<tr>
+        <td><b>${MG.esc(i.label || '—')}</b>${i.people.length ? `<br><small class="muted">Inscrits : ${i.people.map(MG.esc).join(', ')}</small>` : ''}</td>
+        <td>${RL[i.role]}${i.autoApprove ? '<br><small class="muted">validation auto</small>' : ''}</td>
+        <td>${i.uses}${i.maxUses != null ? ' / ' + i.maxUses : ''}</td>
+        <td><small>${i.expiresAt ? 'jusqu\'au ' + new Date(i.expiresAt).toLocaleDateString('fr-FR') : 'sans fin'}</small></td>
+        <td><span class="tag ${STATE[i.state]}">${i.state}</span></td>
+        <td style="white-space:nowrap">${i.state === 'valide' ? `<button class="btn small alt" data-copy="${i.id}">Copier</button> <a class="btn small green" target="_blank" rel="noopener" href="https://wa.me/?text=${encodeURIComponent(msg(i))}">WhatsApp</a> <button class="btn small red" data-rev="${i.id}">Révoquer</button>` : ''}</td></tr>`).join('')}</tbody></table>`
+        : '<p class="muted">Aucun lien pour le moment.</p>'}</div>`;
+    const syncAuto = () => (S('iAutoBox').hidden = S('iRole').value !== 'seller');
+    S('iRole').onchange = syncAuto; syncAuto();
+    S('inv').onsubmit = async e => {
+      e.preventDefault();
+      try {
+        const r = await MG.api('/api/admin/invites', { method: 'POST', body: { role: S('iRole').value, label: S('iLabel').value, maxUses: S('iUses').value, days: S('iDays').value, autoApprove: S('iAuto').checked } });
+        await invites();
+        S('newLink').innerHTML = `<div class="notice" style="background:var(--foret-tint)"><b>Lien prêt à envoyer</b>
+          <div class="row" style="margin-top:.5rem"><input readonly id="nl" value="${MG.esc(location.origin + r.path)}"><button class="btn small" id="nlCopy">Copier</button></div></div>`;
+        S('nl').onclick = () => S('nl').select();
+        S('nlCopy').onclick = () => copy(location.origin + r.path);
+        S('newLink').scrollIntoView({ behavior: 'smooth', block: 'center' });
+      } catch (er) { MG.fail(er); }
+    };
+    const copy = async t => { try { await navigator.clipboard.writeText(t); MG.toast('Lien copié'); } catch { prompt('Copiez le lien :', t); } };
+    pane.onclick = async e => {
+      const c = e.target.closest('[data-copy]'), r = e.target.closest('[data-rev]');
+      if (c) { const i = list.find(x => x.id === c.dataset.copy); copy(link(i.code)); }
+      if (r) {
+        if (!confirm('Révoquer ce lien ? Les personnes qui ne se sont pas encore inscrites ne pourront plus l\'utiliser.')) return;
+        try { await MG.api('/api/admin/invites/' + r.dataset.rev + '/revoke', { method: 'POST', body: {} }); MG.toast('Lien révoqué'); invites(); } catch (er) { MG.fail(er); }
+      }
     };
   }
 
@@ -81,11 +177,15 @@
       <label for="payment_instructions">Instructions montrées au client</label><textarea id="payment_instructions">${MG.esc(s.payment_instructions)}</textarea>
       <h3 style="margin-top:1rem">Livraison <small class="muted">(valeurs de départ à ajuster)</small></h3>
       ${f('delivery_base', 'Frais de base par boutique (FCFA)', s.delivery_base, 'number')}${f('delivery_per_km', 'Prix par km (FCFA)', s.delivery_per_km, 'number')}${f('courier_radius_km', 'Rayon de recherche des livreurs (km)', s.courier_radius_km, 'number')}
+      <h3 style="margin-top:1rem">Inscriptions</h3>
+      <label for="invite_required">Qui peut créer un compte ?</label>
+      <select id="invite_required"><option value="none">Tout le monde (inscription libre)</option><option value="pro">Clients libres ; boutiques et livreurs uniquement avec un lien d'invitation</option><option value="all">Uniquement avec un lien d'invitation</option></select>
       <p><button class="btn">Enregistrer</button></p></form>
       <div class="card"><h3>Paiement en ligne SingPay</h3><button class="btn alt small" id="chk">Tester la configuration</button><pre id="chkOut" class="muted" style="white-space:pre-wrap"></pre></div>`;
+    S('invite_required').value = s.invite_required || 'none';
     S('sf').onsubmit = async e => {
       e.preventDefault();
-      const body = {}; ['site_name', 'tagline', 'airtel_number', 'merchant_name', 'payment_instructions', 'delivery_base', 'delivery_per_km', 'courier_radius_km'].forEach(k => (body[k] = S(k).value));
+      const body = {}; ['site_name', 'tagline', 'airtel_number', 'merchant_name', 'payment_instructions', 'delivery_base', 'delivery_per_km', 'courier_radius_km', 'invite_required'].forEach(k => (body[k] = S(k).value));
       try { await MG.api('/api/admin/settings', { method: 'PUT', body }); MG.toast('Réglages enregistrés'); } catch (er) { MG.fail(er); }
     };
     S('chk').onclick = async () => { try { S('chkOut').textContent = JSON.stringify(await MG.api('/api/admin/singpay-check'), null, 2); } catch (er) { MG.fail(er); } };

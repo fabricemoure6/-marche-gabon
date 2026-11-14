@@ -18,13 +18,48 @@ const LOGIN_WINDOW = 15 * 60000, MAX_FAIL_EMAIL = 5, MAX_FAIL_IP = 20;
 const failCount = async (env, key, since) =>
   ((await env.DB.prepare('SELECT COUNT(*) AS n FROM login_attempts WHERE key=?1 AND at>?2').bind(key, since).first()) || { n: 0 }).n;
 
+// ---------- Invitations ----------
+const INVITE_RE = /^[a-f0-9]{12}$/;
+const inviteState = inv => !inv ? 'introuvable' : inv.revoked ? 'révoqué' : (inv.expires_at && inv.expires_at < Date.now()) ? 'expiré'
+  : (inv.max_uses != null && inv.uses >= inv.max_uses) ? 'épuisé' : 'valide';
+const inviteNeeded = (settings, role) => settings.invite_required === 'all' || (settings.invite_required === 'pro' && role !== 'customer');
+
+// ---------- Confirmation d'une action sensible (mot de passe de l'admin) ----------
+const MAX_FAIL_CONFIRM = 5;
+async function confirmAdmin(env, user, password) {
+  const key = 'a:' + user.id, t = Date.now();
+  if ((await failCount(env, key, t - LOGIN_WINDOW)) >= MAX_FAIL_CONFIRM) return 'Trop d\'essais. Réessayez dans 15 minutes.';
+  const u = await env.DB.prepare('SELECT pass_hash,salt FROM users WHERE id=?1').bind(user.id).first();
+  const { hash } = await hashPassword(String(password || ''), u.salt);
+  if (!safeEqual(hash, u.pass_hash)) {
+    await env.DB.prepare('INSERT INTO login_attempts (key,at) VALUES (?1,?2)').bind(key, t).run();
+    return 'Mot de passe incorrect : action annulée.';
+  }
+  await env.DB.prepare('DELETE FROM login_attempts WHERE key=?1').bind(key).run();
+  return null;
+}
+async function logAction(env, user, action, type, id, name, reason) {
+  await env.DB.prepare('INSERT INTO admin_actions (id,admin_id,admin_name,action,target_type,target_id,target_name,reason,created_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)')
+    .bind(uid(), user.id, user.name, action, type, id, name || '', reason || '', now()).run();
+}
+
 // ---------- Comptes ----------
 async function register(request, env, secure) {
   const b = await readJson(request);
   if (!b) return bad('Requête invalide');
   const email = cleanText(b.email, 254).toLowerCase();
   const name = cleanText(b.name, 80), phone = cleanText(b.phone, 30), password = String(b.password || '');
-  const role = ROLES_PUBLIC.includes(b.role) ? b.role : 'customer';
+  const code = String(b.invite || '').toLowerCase();
+  let invite = null;
+  if (code) {
+    if (!INVITE_RE.test(code)) return bad('Lien d\'invitation invalide');
+    invite = await env.DB.prepare('SELECT * FROM invites WHERE code=?1').bind(code).first();
+    const st = inviteState(invite);
+    if (st !== 'valide') return bad(`Ce lien d'invitation est ${st}. Demandez-en un nouveau à l'équipe.`, 403);
+  }
+  const role = invite ? invite.role : ROLES_PUBLIC.includes(b.role) ? b.role : 'customer';
+  if (!invite && inviteNeeded(await loadSettings(env), role))
+    return bad('L\'inscription ' + (role === 'customer' ? '' : role === 'seller' ? 'des boutiques ' : 'des livreurs ') + 'se fait sur invitation : demandez un lien à l\'équipe.', 403);
   if (!validEmail(email)) return bad('Adresse e-mail invalide');
   if (name.length < 2) return bad('Indiquez votre nom');
   if (phone.length < 8) return bad('Indiquez un numéro de téléphone');
@@ -36,17 +71,25 @@ async function register(request, env, secure) {
     if (!CATEGORIES.some(c => c[0] === category)) return bad('Choisissez la catégorie de la boutique');
   }
   if (await env.DB.prepare('SELECT 1 FROM users WHERE email=?1').bind(email).first()) return bad('Un compte existe déjà avec cet e-mail', 409);
+  if (invite) {
+    // Réserve une utilisation de façon atomique (deux inscriptions simultanées ne dépassent pas la limite)
+    const r = await env.DB.prepare(`UPDATE invites SET uses=uses+1 WHERE id=?1 AND revoked=0 AND (max_uses IS NULL OR uses<max_uses) AND (expires_at IS NULL OR expires_at>?2)`)
+      .bind(invite.id, Date.now()).run();
+    if (!r.meta || !r.meta.changes) return bad('Ce lien d\'invitation vient d\'être utilisé jusqu\'au bout. Demandez-en un nouveau.', 403);
+  }
   const { hash, salt } = await hashPassword(password);
   const id = uid();
   await env.DB.prepare('INSERT INTO users (id,email,name,phone,pass_hash,salt,role,status,created_at) VALUES (?1,?2,?3,?4,?5,?6,?7,\'active\',?8)')
     .bind(id, email, name, phone, hash, salt, role, now()).run();
   if (role === 'seller') {
     const slug = slugify(shopName) + '-' + rand(2);
-    await env.DB.prepare(`INSERT INTO shops (id,owner_id,name,slug,category,address,phone,status,created_at) VALUES (?1,?2,?3,?4,?5,?6,?7,'pending',?8)`)
-      .bind(uid(), id, shopName, slug, category, address, phone, now()).run();
+    const approved = !!(invite && invite.auto_approve);
+    await env.DB.prepare(`INSERT INTO shops (id,owner_id,name,slug,category,address,phone,status,created_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)`)
+      .bind(uid(), id, shopName, slug, category, address, phone, approved ? 'active' : 'pending', now()).run();
     const { results: admins } = await env.DB.prepare(`SELECT id FROM users WHERE role='admin'`).all();
-    for (const a of admins) await notify(env, a.id, 'Nouvelle boutique à valider', `${shopName} (${name})`, '/admin.html');
+    for (const a of admins) await notify(env, a.id, approved ? 'Nouvelle boutique (invitation)' : 'Nouvelle boutique à valider', `${shopName} (${name})`, '/admin.html');
   }
+  if (invite) await env.DB.prepare('INSERT INTO invite_uses (invite_id,user_id,created_at) VALUES (?1,?2,?3)').bind(invite.id, id, now()).run();
   if (role === 'courier') await env.DB.prepare('INSERT INTO couriers (user_id,available) VALUES (?1,0)').bind(id).run();
   const cookie = await createSession(env, id, secure);
   return json({ ok: true, user: { id, email, name, role } }, 201, { 'set-cookie': cookie });
@@ -150,7 +193,7 @@ export default {
         const s = await loadSettings(env);
         return json({
           site_name: s.site_name, tagline: s.tagline, categories: CATEGORIES, delivery_base: s.delivery_base,
-          delivery_per_km: s.delivery_per_km, online_payment: singpayOn(env)
+          delivery_per_km: s.delivery_per_km, online_payment: singpayOn(env), invite_required: s.invite_required
         });
       }
       if (method === 'GET' && p === '/api/shops') {
@@ -172,6 +215,11 @@ export default {
         const { results } = await env.DB.prepare(
           `SELECT id,name,description,price,stock,photo_id FROM products WHERE shop_id=?1 AND active=1 ORDER BY created_at DESC`).bind(s.id).all();
         return json({ shop: s, products: results });
+      }
+      if (method === 'GET' && (m = p.match(/^\/api\/invites\/([a-f0-9]{12})$/))) {
+        const inv = await env.DB.prepare('SELECT role,label,max_uses,uses,expires_at,auto_approve,revoked FROM invites WHERE code=?1').bind(m[1]).first();
+        const state = inviteState(inv);
+        return json(state === 'valide' ? { state, role: inv.role, autoApprove: !!inv.auto_approve, expiresAt: inv.expires_at } : { state });
       }
       if (method === 'GET' && (m = p.match(/^\/api\/photos\/([a-f0-9]{16})$/))) {
         const ph = await env.DB.prepare('SELECT mime,data FROM photos WHERE id=?1').bind(m[1]).first();
@@ -552,10 +600,49 @@ export default {
         if (method === 'POST' && (m = p.match(/^\/api\/admin\/shops\/([a-f0-9]{16})\/status$/))) {
           const b = await readJson(request);
           if (!b || !['active', 'suspended', 'pending'].includes(b.status)) return bad('Statut invalide');
-          const s = await env.DB.prepare('SELECT owner_id,name FROM shops WHERE id=?1').bind(m[1]).first();
+          const s = await env.DB.prepare('SELECT owner_id,name,status FROM shops WHERE id=?1').bind(m[1]).first();
           if (!s) return bad('Boutique introuvable', 404);
+          const reason = cleanText(b.reason, 300);
+          if (b.status === 'suspended') {
+            if (reason.length < 5) return bad('Indiquez le motif de la suspension (5 caractères minimum)');
+            const err = await confirmAdmin(env, user, b.password);
+            if (err) return bad(err, 403);
+          }
           await env.DB.prepare('UPDATE shops SET status=?2 WHERE id=?1').bind(m[1], b.status).run();
+          await logAction(env, user, b.status === 'suspended' ? 'Boutique suspendue' : b.status === 'active' ? (s.status === 'pending' ? 'Boutique validée' : 'Boutique réactivée') : 'Boutique remise en attente', 'shop', m[1], s.name, reason);
           if (b.status === 'active') await notify(env, s.owner_id, 'Boutique validée', `${s.name} est maintenant visible par les clients.`, '/vendeur.html');
+          if (b.status === 'suspended') await notify(env, s.owner_id, 'Boutique suspendue', `${s.name} n'est plus visible par les clients. Motif : ${reason}`, '/vendeur.html');
+          return json({ ok: true });
+        }
+        if (method === 'GET' && p === '/api/admin/actions') {
+          const { results } = await env.DB.prepare('SELECT admin_name,action,target_type,target_name,reason,created_at FROM admin_actions ORDER BY created_at DESC LIMIT 50').all();
+          return json(results);
+        }
+        if (method === 'GET' && p === '/api/admin/invites') {
+          const { results } = await env.DB.prepare('SELECT * FROM invites ORDER BY created_at DESC LIMIT 200').all();
+          const { results: used } = await env.DB.prepare(
+            `SELECT iu.invite_id,u.name,u.role,iu.created_at FROM invite_uses iu JOIN users u ON u.id=iu.user_id ORDER BY iu.created_at DESC LIMIT 1000`).all();
+          return json(results.map(i => ({ id: i.id, code: i.code, role: i.role, label: i.label, maxUses: i.max_uses, uses: i.uses, expiresAt: i.expires_at,
+            autoApprove: !!i.auto_approve, createdAt: i.created_at, state: inviteState(i), people: used.filter(x => x.invite_id === i.id).map(x => x.name) })));
+        }
+        if (method === 'POST' && p === '/api/admin/invites') {
+          const b = await readJson(request);
+          if (!b || !ROLES_PUBLIC.includes(b.role)) return bad('Choisissez le type de compte');
+          const maxUses = b.maxUses === null || b.maxUses === '' || b.maxUses === undefined ? null : Math.round(num(b.maxUses));
+          if (maxUses !== null && !(maxUses >= 1 && maxUses <= 10000)) return bad('Nombre d\'utilisations invalide');
+          const days = Math.round(num(b.days));
+          const expiresAt = Number.isFinite(days) && days > 0 && days <= 365 ? Date.now() + days * 86400000 : null;
+          const id = uid(), code = rand(6);
+          await env.DB.prepare('INSERT INTO invites (id,code,role,label,max_uses,uses,expires_at,auto_approve,revoked,created_by,created_at) VALUES (?1,?2,?3,?4,?5,0,?6,?7,0,?8,?9)')
+            .bind(id, code, b.role, cleanText(b.label, 80), maxUses, expiresAt, b.role === 'seller' && b.autoApprove ? 1 : 0, user.id, now()).run();
+          await logAction(env, user, 'Lien d\'invitation créé', 'invite', id, cleanText(b.label, 80) || b.role, '');
+          return json({ id, code, path: '/compte.html?invite=' + code }, 201);
+        }
+        if (method === 'POST' && (m = p.match(/^\/api\/admin\/invites\/([a-f0-9]{16})\/revoke$/))) {
+          const inv = await env.DB.prepare('SELECT label,role FROM invites WHERE id=?1').bind(m[1]).first();
+          if (!inv) return bad('Invitation introuvable', 404);
+          await env.DB.prepare('UPDATE invites SET revoked=1 WHERE id=?1').bind(m[1]).run();
+          await logAction(env, user, 'Lien d\'invitation révoqué', 'invite', m[1], inv.label || inv.role, '');
           return json({ ok: true });
         }
         if (method === 'GET' && p === '/api/admin/users') {
@@ -564,9 +651,16 @@ export default {
         }
         if (method === 'POST' && (m = p.match(/^\/api\/admin\/users\/([a-f0-9]{16})\/status$/))) {
           const b = await readJson(request);
-          const t = await env.DB.prepare('SELECT role FROM users WHERE id=?1').bind(m[1]).first();
+          const t = await env.DB.prepare('SELECT role,name FROM users WHERE id=?1').bind(m[1]).first();
           if (!t || t.role === 'admin' || !b || !['active', 'suspended'].includes(b.status)) return bad('Action impossible');
+          const reason = cleanText(b.reason, 300);
+          if (b.status === 'suspended') {
+            if (reason.length < 5) return bad('Indiquez le motif de la suspension (5 caractères minimum)');
+            const err = await confirmAdmin(env, user, b.password);
+            if (err) return bad(err, 403);
+          }
           await env.DB.prepare('UPDATE users SET status=?2 WHERE id=?1').bind(m[1], b.status).run();
+          await logAction(env, user, b.status === 'suspended' ? 'Compte suspendu' : 'Compte réactivé', 'user', m[1], t.name, reason);
           if (b.status === 'suspended') await env.DB.prepare('DELETE FROM sessions WHERE user_id=?1').bind(m[1]).run();
           return json({ ok: true });
         }
@@ -610,7 +704,8 @@ export default {
             airtel_number: cleanText(b.airtel_number, 30), merchant_name: cleanText(b.merchant_name, 60) || cur.merchant_name,
             payment_instructions: cleanText(b.payment_instructions, 400) || cur.payment_instructions,
             delivery_base: nn(b.delivery_base, cur.delivery_base, 0, 100000), delivery_per_km: nn(b.delivery_per_km, cur.delivery_per_km, 0, 10000),
-            courier_radius_km: nn(b.courier_radius_km, cur.courier_radius_km, 1, 200)
+            courier_radius_km: nn(b.courier_radius_km, cur.courier_radius_km, 1, 200),
+            invite_required: ['none', 'pro', 'all'].includes(b.invite_required) ? b.invite_required : cur.invite_required
           });
           return json({ ok: true });
         }

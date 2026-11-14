@@ -25,5 +25,16 @@ SMS ; l'administrateur valide dans l'onglet Paiements.
 - Livreur : inscription « livreur » → se mettre disponible (partage de position) → accepter une course proche → récupérer → livré.
 - Livraison : frais de base + prix au km (valeurs de départ, à ajuster). Les livreurs dans le rayon (15 km) sont notifiés.
 
+## Sécurité de l'administration
+- **Suspendre une boutique ou un compte** demande un motif et le mot de passe de l'administrateur (5 essais au plus par 15 minutes).
+  Le gestionnaire reçoit le motif par notification. Valider ou réactiver se fait en un clic.
+- **Journal des actions** (Admin → Vue d'ensemble) : suspensions, réactivations, validations, liens créés ou révoqués, avec date, motif et auteur.
+
+## Liens d'inscription (invitations)
+- Admin → Invitations : choisir le type de compte (boutique, livreur, client), pour qui, le nombre d'inscriptions (1, 5, 20, sans limite)
+  et la durée (7, 30, 90 jours, sans fin). Pour une boutique, option « validation automatique ».
+- Le lien `https://VOTRE-SITE/compte.html?invite=…` s'envoie par WhatsApp (bouton dédié) ou se copie. Le rôle est imposé par le lien.
+- Admin → Réglages → « Qui peut créer un compte ? » : inscription libre, invitation obligatoire pour boutiques et livreurs, ou pour tous.
+
 ## Développement local
 `npm install` puis `npx wrangler dev --local --var ADMIN_SETUP_CODE:essai`.
