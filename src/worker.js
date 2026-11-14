@@ -302,7 +302,7 @@ export default {
       if (!user) return bad('Connexion requise', 401);
 
       if (method === 'GET' && p === '/api/notifications') {
-        const { results } = await env.DB.prepare('SELECT id,title,body,url,read,created_at FROM notifications WHERE user_id=?1 ORDER BY created_at DESC LIMIT 30').bind(user.id).all();
+        const { results } = await env.DB.prepare('SELECT id,title,body,url,read,created_at,kind FROM notifications WHERE user_id=?1 ORDER BY created_at DESC LIMIT 30').bind(user.id).all();
         return json({ items: results, unread: results.filter(n => !n.read).length });
       }
       if (method === 'POST' && p === '/api/notifications/read') {

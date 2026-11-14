@@ -200,6 +200,84 @@
     if (b && !b.closest('[data-own-add]')) { e.preventDefault(); MG.addToCart(b); }
   });
 
+  // ---------- Sonneries (générées par le navigateur, aucun fichier à télécharger) ----------
+  let actx = null;
+  const ac = () => { actx = actx || new (window.AudioContext || window.webkitAudioContext)(); if (actx.state === 'suspended') actx.resume(); return actx; };
+  // Les navigateurs n'autorisent le son qu'après un premier geste : on prépare le moteur au premier clic
+  addEventListener('pointerdown', () => { try { ac(); } catch { /* pas de son */ } }, { once: true, capture: true });
+  function tone(c, out, { f = 440, f2, type = 'sine', at = 0, dur = .3, vol = .5, attack = .005 }) {
+    const o = c.createOscillator(), g = c.createGain(), t = c.currentTime + at;
+    o.type = type; o.frequency.setValueAtTime(f, t); if (f2) o.frequency.exponentialRampToValueAtTime(f2, t + dur);
+    g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(vol, t + attack); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    o.connect(g); g.connect(out); o.start(t); o.stop(t + dur + .05);
+  }
+  function noise(c, out, { at = 0, dur = .12, vol = .3, freq = 900 }) {
+    const n = c.createBuffer(1, c.sampleRate * dur, c.sampleRate), d = n.getChannelData(0);
+    for (let i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / d.length);
+    const src = c.createBufferSource(), f = c.createBiquadFilter(), g = c.createGain(), t = c.currentTime + at;
+    f.type = 'bandpass'; f.frequency.value = freq; g.gain.value = vol; src.buffer = n;
+    src.connect(f); f.connect(g); g.connect(out); src.start(t);
+  }
+  const SOUNDS = {
+    balafon: { label: 'Balafon', play: (c, o) => [523, 659, 784, 1047].forEach((f, i) => { tone(c, o, { f, at: i * .11, dur: .35, vol: .55 }); tone(c, o, { f: f * 4, at: i * .11, dur: .08, vol: .12 }); }) },
+    clochette: { label: 'Clochette', play: (c, o) => { tone(c, o, { f: 1319, dur: .9, vol: .4 }); tone(c, o, { f: 1760, at: .16, dur: 1.1, vol: .32 }); tone(c, o, { f: 3520, at: .16, dur: .3, vol: .06 }); } },
+    carillon: { label: 'Carillon', play: (c, o) => [784, 988, 1175, 1568].forEach((f, i) => tone(c, o, { f, type: 'triangle', at: i * .17, dur: 1.4, vol: .4 })) },
+    tamtam: { label: 'Tam-tam', play: (c, o) => [0, .18, .36, .62].forEach((at, i) => { tone(c, o, { f: i === 3 ? 110 : 160, f2: 60, at, dur: .32, vol: .9 }); noise(c, o, { at, dur: .05, vol: .25, freq: 600 }); }) },
+    klaxon: { label: 'Klaxon de moto', play: (c, o) => [0, .3].forEach(at => { tone(c, o, { f: 440, type: 'square', at, dur: .22, vol: .32, attack: .01 }); tone(c, o, { f: 554, type: 'square', at, dur: .22, vol: .26, attack: .01 }); }) },
+    sifflet: { label: 'Sifflet', play: (c, o) => { tone(c, o, { f: 1800, f2: 2600, dur: .18, vol: .5 }); tone(c, o, { f: 2600, f2: 1900, at: .2, dur: .28, vol: .5 }); } },
+    bip: { label: 'Bip discret', play: (c, o) => { tone(c, o, { f: 880, dur: .16, vol: .55 }); tone(c, o, { f: 1320, at: .02, dur: .1, vol: .12 }); } },
+    aucun: { label: 'Silencieux', play: () => {} }
+  };
+  const EVENTS = {
+    order: ['Nouvelle commande', 'balafon'], payment: ['Paiement', 'carillon'], courier: ['Livreur et courses', 'klaxon'],
+    delivered: ['Commande livrée', 'tamtam'], message: ['Nouveau message', 'clochette'], loyalty: ['Bonnes nouvelles (bons d\'achat, retour en stock)', 'sifflet'],
+    stock: ['Alerte de stock', 'bip'], info: ['Autres notifications', 'bip']
+  };
+  const ROLE_EVENTS = { customer: ['payment', 'courier', 'delivered', 'message', 'loyalty', 'info'], seller: ['order', 'courier', 'message', 'stock', 'info'],
+    courier: ['courier', 'message', 'info'], admin: ['payment', 'order', 'stock', 'info'] };
+  MG.soundPrefs = () => {
+    let p = {}; try { p = JSON.parse(localStorage.getItem('mg-sounds') || '{}'); } catch { /* défaut */ }
+    const map = {}; for (const k in EVENTS) map[k] = (p.map && SOUNDS[p.map[k]]) ? p.map[k] : EVENTS[k][1];
+    return { enabled: p.enabled !== false, volume: typeof p.volume === 'number' ? p.volume : .8, system: !!p.system, map };
+  };
+  const savePrefs = p => { try { localStorage.setItem('mg-sounds', JSON.stringify(p)); } catch { /* non mémorisé */ } };
+  MG.playSound = (name, force) => {
+    const p = MG.soundPrefs(); if (!force && !p.enabled) return;
+    const snd = SOUNDS[name]; if (!snd) return;
+    try { const c = ac(), g = c.createGain(); g.gain.value = p.volume; g.connect(c.destination); snd.play(c, g); } catch { /* son impossible */ }
+  };
+  let lastSound = { kind: '', at: 0 };
+  MG.notifySound = kind => {
+    const k = EVENTS[kind] ? kind : 'info';
+    if (lastSound.kind === k && Date.now() - lastSound.at < 20000) return; // pas deux fois le même son en 20 s
+    lastSound = { kind: k, at: Date.now() };
+    MG.playSound(MG.soundPrefs().map[k]);
+  };
+  // Panneau de réglage des sons (profil). box = conteneur.
+  MG.soundSettings = function (box) {
+    const p = MG.soundPrefs(), kinds = ROLE_EVENTS[(MG.user || {}).role] || ROLE_EVENTS.customer;
+    const opts = sel => Object.entries(SOUNDS).map(([k, v]) => `<option value="${k}"${k === sel ? ' selected' : ''}>${v.label}</option>`).join('');
+    box.innerHTML = `<div class="card sound-card"><div class="split"><div><h2 style="margin:0">Sons des notifications</h2><p class="muted" style="margin:0">Choisissez une sonnerie pour chaque événement. Réglage gardé sur cet appareil.</p></div>
+        <label class="switch"><input type="checkbox" id="sndOn"${p.enabled ? ' checked' : ''}><span></span> Sons activés</label></div>
+      <div class="sound-rows" id="sndRows">${kinds.map(k => `<div class="sound-row"><span class="ev">${MG.esc(EVENTS[k][0])}</span>
+        <select data-ev="${k}" aria-label="Sonnerie : ${MG.esc(EVENTS[k][0])}">${opts(p.map[k])}</select>
+        <button class="btn small alt" type="button" data-try="${k}" aria-label="Écouter">${MG.icon('bell', 16)}Écouter</button></div>`).join('')}</div>
+      <div class="sound-foot"><label class="vol">Volume <input type="range" id="sndVol" min="0" max="1" step="0.05" value="${p.volume}"></label>
+        ${'Notification' in window ? `<label class="switch"><input type="checkbox" id="sndSys"${p.system && Notification.permission === 'granted' ? ' checked' : ''}><span></span> Aussi dans les notifications du téléphone</label>` : ''}</div></div>`;
+    const read = () => { const q = MG.soundPrefs(); q.enabled = box.querySelector('#sndOn').checked; q.volume = Number(box.querySelector('#sndVol').value);
+      box.querySelectorAll('[data-ev]').forEach(sel => (q.map[sel.dataset.ev] = sel.value)); const sys = box.querySelector('#sndSys'); q.system = !!(sys && sys.checked); savePrefs(q); return q; };
+    box.onchange = async e => {
+      if (e.target.id === 'sndSys' && e.target.checked && Notification.permission !== 'granted') {
+        const r = await Notification.requestPermission(); if (r !== 'granted') { e.target.checked = false; MG.toast('Autorisation refusée par le navigateur', true); }
+      }
+      const q = read();
+      if (e.target.dataset.ev) MG.playSound(e.target.value, true);
+      if (e.target.id === 'sndOn') MG.toast(q.enabled ? 'Sons activés' : 'Sons coupés');
+    };
+    box.querySelector('#sndVol').oninput = () => read();
+    box.onclick = e => { const b = e.target.closest('[data-try]'); if (b) MG.playSound(box.querySelector(`[data-ev="${b.dataset.try}"]`).value, true); };
+  };
+
   const ROLE_HOME = { seller: ['/vendeur.html', 'Ma boutique'], courier: ['/livreur.html', 'Mes livraisons'], admin: ['/admin.html', 'Administration'] };
 
   async function renderHeader() {
@@ -231,7 +309,7 @@
     label();
     if (u) {
       MG.$('#bell').onclick = toggleNotifs;
-      pollNotifs(); setInterval(pollNotifs, 30000);
+      pollNotifs(); setInterval(pollNotifs, 15000);
     }
     if (!u || u.role === 'customer') refreshCartBadge();
   }
@@ -253,7 +331,20 @@
       MG.notifs = d.items;
       const b = MG.$('#bellBadge');
       if (b) { b.textContent = d.unread; b.hidden = !d.unread; }
-      if (d.unread > (MG._lastUnread ?? d.unread)) MG.toast('Nouvelle notification : ' + (d.items[0] || {}).title);
+      const seen = MG._seenNotifs;
+      MG._seenNotifs = new Set(d.items.map(n => n.id));
+      if (seen) {
+        const fresh = d.items.filter(n => !n.read && !seen.has(n.id));
+        if (fresh.length) {
+          const n = fresh[0];
+          MG.toast('Nouvelle notification : ' + n.title);
+          MG.notifySound(n.kind);
+          const p = MG.soundPrefs();
+          if (p.system && 'Notification' in window && Notification.permission === 'granted' && document.visibilityState !== 'visible') {
+            try { const sn = new Notification(n.title, { body: n.body || '', tag: n.id, icon: '/img/produits/panier-tresse.svg' }); sn.onclick = () => { focus(); if (n.url) location.href = n.url; }; } catch { /* non pris en charge */ }
+          }
+        }
+      }
       MG._lastUnread = d.unread;
     } catch { /* hors ligne */ }
   }
@@ -262,7 +353,7 @@
     const box = MG.$('#notifBox');
     if (!box.hidden) { box.hidden = true; return; }
     const items = MG.notifs || [];
-    box.innerHTML = '<div class="notif-head"><strong>Notifications</strong><button class="link" id="markRead">Tout marquer comme lu</button></div>' +
+    box.innerHTML = '<div class="notif-head"><strong>Notifications</strong><span class="row" style="gap:.8rem"><a class="link" href="/compte.html#sons">Sons</a><button class="link" id="markRead">Tout marquer comme lu</button></span></div>' +
       (items.length ? items.map(n => `<a class="notif${n.read ? '' : ' unread'}" href="${MG.esc(n.url || '#')}"><b>${MG.esc(n.title)}</b><span>${MG.esc(n.body || '')}</span><small>${MG.date(n.created_at)}</small></a>`).join('')
         : '<p class="muted pad">Aucune notification.</p>');
     box.hidden = false;
@@ -342,6 +433,7 @@
           const mine = m.sender_id === me;
           div.className = 'msg ' + (mine ? 'me' : 'them');
           div.innerHTML = `<small><b>${mine ? 'Vous' : MG.esc(m.sender_name)}</b><span class="role ${MG.esc(m.sender_role)}">${ROLE_NAME[m.sender_role] || ''}</span></small>${MG.esc(m.body)}<time>${MG.date(m.created_at)}</time>`;
+          if (!mine && log.dataset.init) MG.notifySound('message');
           if (!mine) { const row = document.createElement('div'); row.className = 'msg-row'; row.innerHTML = MG.avatar({ name: m.sender_name, avatar_id: m.avatar_id }, 32); row.appendChild(div); log.appendChild(row); }
           else log.appendChild(div);
           last = m.created_at;

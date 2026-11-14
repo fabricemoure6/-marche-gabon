@@ -150,6 +150,7 @@ const SCHEMA = [
 // Colonnes ajoutées après la première version : créées sur les bases existantes
 const MIGRATIONS = {
   users: [['avatar_id', 'TEXT']],
+  notifications: [['kind', 'TEXT']],
   products: [['promo_price', 'INTEGER'], ['promo_until', 'INTEGER'], ['promo_start', 'INTEGER'], ['stock_updated_at', 'INTEGER']],
   shops: [['loyalty_enabled', 'INTEGER NOT NULL DEFAULT 0'], ['loyalty_every', 'INTEGER'], ['loyalty_kind', 'TEXT'], ['loyalty_value', 'INTEGER'],
     ['loyalty_min', 'INTEGER'], ['loyalty_days', 'INTEGER']],
