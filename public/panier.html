@@ -16,7 +16,12 @@
     <h2>Livraison et paiement</h2>
     <label for="address">Adresse de livraison (quartier, repère)</label>
     <input id="address" required minlength="5" maxlength="250" placeholder="Ex. : Akanda, derrière la pharmacie">
-    <div class="row" style="margin-top:.5rem"><button type="button" class="btn alt small" id="geo">Utiliser ma position</button><span class="muted" id="geoState">Position non partagée : frais de base uniquement.</span></div>
+    <div class="row" style="margin-top:.5rem"><button type="button" class="btn alt small" id="geo">Utiliser ma position</button><button type="button" class="btn alt small" id="mapBtn">🗺️ Choisir sur la carte</button><span class="muted" id="geoState">Position non partagée : frais de base uniquement.</span></div>
+    <div id="mapBox" hidden style="margin-top:.6rem">
+      <input id="mapSearch" type="search" placeholder="Rechercher un quartier, une rue, un repère…" autocomplete="off">
+      <div id="pickMap" style="height:300px;border-radius:12px;margin-top:.4rem"></div>
+      <p class="muted" id="mapAddr" style="font-size:.85rem">Touchez la carte ou déplacez le repère rouge sur votre porte.</p>
+    </div>
     <label for="phone">Téléphone</label>
     <input id="phone" type="tel" required minlength="8" maxlength="30">
     <label for="note">Précision pour le livreur (facultatif)</label>
@@ -31,6 +36,7 @@
   <div id="pay" class="card" hidden></div>
 </main>
 <script src="/common.js"></script>
+<script src="/osm-map.js"></script>
 <script>
 (async () => {
   if (!(await MG.require(['customer']))) return;
@@ -82,8 +88,28 @@
     try { const r = await MG.api('/api/cart', { method: 'PUT', body: { productId: it.product_id, qty: Math.max(0, qty) } }); if (r.adjusted) MG.toast(`Il n'en reste que ${r.stock}`, true); load(); }
     catch (er) { MG.fail(er); load(); }
   };
+  // Carte OpenStreetMap : le client place le repère sur son adresse (remplace/complète le GPS)
+  let picker = null;
+  const setPos = p => { pos = p; MG.$('#geoState').textContent = '✅ Position enregistrée : livraison calculée selon la distance.'; };
+  async function openMap(start) {
+    MG.$('#mapBox').hidden = false;
+    try { await GabonMap.load(); } catch (er) { MG.fail(er); return; }
+    if (picker) { if (start) picker.set(start.lat, start.lng, null, true); picker.map.invalidateSize(); return; }
+    picker = GabonMap.pickLocation(MG.$('#pickMap'), {
+      searchInput: MG.$('#mapSearch'), value: start ? [start.lat, start.lng] : null,
+      onChange: v => {
+        // le repère de départ n'est qu'un point par défaut : on n'enregistre que si le client le place ou si on a déjà sa position
+        if (!pos && !start && !v.moved) return;
+        setPos({ lat: v.lat, lng: v.lng });
+        MG.$('#mapAddr').textContent = v.address ? '📍 ' + v.address : 'Recherche de l\'adresse…';
+        const a = MG.$('#address');
+        if (v.address && (!a.value || a.dataset.auto === '1')) { a.value = v.address.split(',').slice(0, 3).join(',').slice(0, 240); a.dataset.auto = '1'; }
+      } });
+  }
+  MG.$('#address').addEventListener('input', e => { e.target.dataset.auto = '0'; });
+  MG.$('#mapBtn').onclick = () => openMap(pos);
   MG.$('#geo').onclick = async () => {
-    try { pos = await MG.getPosition(); MG.$('#geoState').textContent = '✅ Position enregistrée : livraison calculée selon la distance.'; } catch (er) { MG.fail(er); }
+    try { const p = await MG.getPosition(); setPos(p); openMap(p); } catch (er) { MG.fail(er); }
   };
   MG.$('#order').onsubmit = async e => {
     e.preventDefault(); MG.$('#err').textContent = '';

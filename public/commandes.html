@@ -16,6 +16,7 @@
   <div id="detail"></div>
 </main>
 <script src="/common.js"></script>
+<script src="/osm-map.js"></script>
 <script>
 (async () => {
   if (!(await MG.require())) return;
@@ -43,7 +44,7 @@
   MG.$('#list').onclick = e => { const b = e.target.closest('[data-ref]'); if (b) open(b.dataset.ref); };
 
   async function open(ref) {
-    clearInterval(trackTimer);
+    stopTrack();
     const { order: o, items } = await MG.api('/api/orders/' + ref);
     const idx = FLOW.indexOf(o.status);
     const d = MG.$('#detail');
@@ -67,19 +68,41 @@
     const c = MG.$('#cancel');
     if (c) c.onclick = async () => { if (!confirm('Annuler cette commande ?')) return; try { await MG.api('/api/orders/' + ref + '/cancel', { method: 'POST', body: {} }); list(); open(ref); } catch (er) { MG.fail(er); } };
     if (MG.$('#chat')) MG.chat(MG.$('#chat'), ref);
-    if (['ready', 'delivering'].includes(o.status)) { track(ref); trackTimer = setInterval(() => track(ref), 15000); }
+    if (['ready', 'delivering'].includes(o.status)) { track(ref); trackTimer = setInterval(() => track(ref), 5000); }
   }
 
+  // Suivi en direct : carte OpenStreetMap créée une seule fois, le livreur se déplace dessus
+  let tracker = null, starting = false, lastPos = null;
+  function stopTrack() {
+    clearInterval(trackTimer);
+    if (tracker) { tracker.stop(); tracker.map.remove(); tracker = null; }
+    starting = false; lastPos = null;
+  }
   async function track(ref) {
     try {
       const t = await MG.api('/api/orders/' + ref + '/track');
       const box = MG.$('#track'); if (!box) return;
-      if (!t.courier) { box.innerHTML = '<p class="muted">Recherche d\'un livreur proche…</p>'; return; }
+      if (!MG.$('#trackCard')) box.innerHTML = '<div id="trackCard"></div><p id="trackEta" style="font-weight:700;margin:.5rem 0"></p><div id="trackMap" style="height:340px;border-radius:12px" hidden></div>';
+      const card = MG.$('#trackCard');
+      if (!t.courier) { card.innerHTML = '<p class="muted">Recherche d\'un livreur proche…</p>'; return; }
       const c = t.courier;
-      box.innerHTML = `<div class="courier-card">${MG.avatar(c, 64)}<div class="tx"><span class="muted" style="font-size:.85rem">Votre livreur</span><br><b style="font:700 1.15rem var(--font-display)">${MG.esc(c.name)}</b>
-        ${c.lat != null ? `<br><a target="_blank" rel="noopener" href="https://www.openstreetmap.org/?mlat=${c.lat}&mlon=${c.lng}#map=16/${c.lat}/${c.lng}">Voir sa position sur la carte</a> <span class="muted">(il y a ${c.ageSec} s)</span>` : ''}</div>
+      card.innerHTML = `<div class="courier-card">${MG.avatar(c, 64)}<div class="tx"><span class="muted" style="font-size:.85rem">Votre livreur</span><br><b style="font:700 1.15rem var(--font-display)">${MG.esc(c.name)}</b>
+        ${c.lat != null ? `<br><span class="muted">Position mise à jour il y a ${c.ageSec} s</span>` : '<br><span class="muted">Position du livreur pas encore partagée</span>'}</div>
         ${c.phone ? `<div class="row"><a class="btn small alt" href="tel:${MG.esc(c.phone)}">Appeler</a><a class="btn small green" target="_blank" rel="noopener" href="${MG.waLink(c.phone)}">WhatsApp</a></div>` : ''}</div>`;
-    } catch { /* ignoré */ }
+      if (c.lat == null) return;
+      lastPos = [c.lat, c.lng];
+      const hasDest = t.dest && t.dest.lat != null;
+      if (!hasDest) { MG.$('#trackEta').textContent = 'Vous n\'avez pas partagé de position : la carte du trajet est indisponible.'; return; }
+      if (tracker || starting) return;
+      starting = true;
+      await GabonMap.load();
+      if (!MG.$('#trackMap')) { starting = false; return; }
+      MG.$('#trackMap').hidden = false;
+      tracker = GabonMap.track(MG.$('#trackMap'), {
+        destination: [t.dest.lat, t.dest.lng], pollMs: 4000, getDriverPosition: () => lastPos,
+        onUpdate: u => { const e = MG.$('#trackEta'); if (e) e.textContent = u.arrived ? '✅ Votre livreur est arrivé !' : `🛵 Livreur à ${GabonMap.fmtDist(u.distance)} · arrivée dans ~${GabonMap.fmtTime(u.duration)}`; }
+      });
+    } catch { starting = false; /* ignoré */ }
   }
 
   await list();

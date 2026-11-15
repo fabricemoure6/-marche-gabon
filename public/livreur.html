@@ -20,6 +20,7 @@
   <div id="detail"></div>
 </main>
 <script src="/common.js"></script>
+<script src="/osm-map.js"></script>
 <script>
 (async () => {
   if (!(await MG.require(['courier']))) return;
@@ -29,6 +30,7 @@
   function startWatch() {
     if (watchId !== null || !navigator.geolocation) return;
     watchId = navigator.geolocation.watchPosition(async p => {
+      myPos = [p.coords.latitude, p.coords.longitude];
       S('posState').textContent = '📍 Position partagée (précision ' + Math.round(p.coords.accuracy) + ' m)';
       if (Date.now() - lastSent < 15000) return;
       lastSent = Date.now();
@@ -59,7 +61,28 @@
         ${o.lat != null ? `<a class="btn small alt" target="_blank" rel="noopener" href="https://www.openstreetmap.org/?mlat=${o.lat}&mlon=${o.lng}#map=16/${o.lat}/${o.lng}">Position client</a>` : ''}
         ${o.status === 'ready' ? `<button class="btn small" data-do="pickup" data-r="${o.ref}">J'ai récupéré le colis</button>` : ''}
         ${o.status === 'delivering' ? `<button class="btn small green" data-do="deliver" data-r="${o.ref}">Livré</button>` : ''}
+        ${o.slat != null || o.lat != null ? `<button class="btn small" data-map="${o.ref}">🗺️ Carte</button>` : ''}
         <button class="btn small alt" data-chat="${o.ref}">Discuter</button></div></div>`).join('') : '<p class="muted">Aucune course acceptée.</p>';
+    ORDERS = list;
+  }
+
+  // Carte du trajet : ma position → boutique (course prête) puis → client (en livraison)
+  let ORDERS = [], myPos = null, tracker = null;
+  async function showMap(ref) {
+    const o = ORDERS.find(x => x.ref === ref); if (!o) return;
+    if (tracker) { tracker.stop(); tracker.map.remove(); tracker = null; }
+    const toShop = o.status === 'ready' && o.slat != null;
+    const dest = toShop ? [o.slat, o.slng] : o.lat != null ? [o.lat, o.lng] : null;
+    if (!dest) return MG.toast('Pas de position pour cette étape', true);
+    S('detail').innerHTML = `<div class="card"><h3>${toShop ? '🏪 Vers la boutique' : '🏠 Vers le client'} · ${MG.esc(o.ref)}</h3><p id="mapEta" style="font-weight:700"></p><div id="drvMap" style="height:340px;border-radius:12px"></div></div>`;
+    S('detail').scrollIntoView({ behavior: 'smooth' });
+    try { await GabonMap.load(); } catch (er) { return MG.fail(er); }
+    tracker = GabonMap.track(S('drvMap'), {
+      shop: o.slat != null ? [o.slat, o.slng] : null, destination: dest, pollMs: 3000,
+      getDriverPosition: () => myPos,
+      onUpdate: u => { S('mapEta').textContent = u.arrived ? '✅ Vous êtes arrivé' : `À ${GabonMap.fmtDist(u.distance)} · environ ${GabonMap.fmtTime(u.duration)}`; }
+    });
+    if (!myPos) S('mapEta').textContent = 'En attente de votre position GPS…';
   }
 
   S('toggle').onclick = async () => {
@@ -74,7 +97,8 @@
     try { await MG.api('/api/courier/jobs/' + b.dataset.acc + '/accept', { method: 'POST', body: {} }); MG.toast('Course acceptée'); jobs(); mine(); } catch (er) { MG.fail(er); jobs(); }
   };
   S('mine').onclick = async e => {
-    const a = e.target.closest('[data-do]'), c = e.target.closest('[data-chat]');
+    const a = e.target.closest('[data-do]'), c = e.target.closest('[data-chat]'), mp = e.target.closest('[data-map]');
+    if (mp) showMap(mp.dataset.map);
     if (a) { try { await MG.api('/api/courier/orders/' + a.dataset.r + '/' + a.dataset.do, { method: 'POST', body: {} }); mine(); } catch (er) { MG.fail(er); } }
     if (c) {
       const { order: o } = await MG.api('/api/orders/' + c.dataset.chat);
