@@ -780,7 +780,7 @@ export default {
             const { results: admins } = await env.DB.prepare(`SELECT id FROM users WHERE role='admin'`).all();
             for (const a of admins) await notify(env, a.id, 'Rupture : remboursement à faire', `Commande ${o.ref} (${shop.name}) annulée pour rupture de stock, ${o.total} FCFA à rembourser.`, '/admin.html');
           }
-          if (next === 'ready') await pushCouriers(env, shop, o, await loadSettings(env));
+          if (next === 'ready' && !o.courier_id) await pushCouriers(env, shop, o, await loadSettings(env));
           return json({ ok: true });
         }
       }
@@ -807,18 +807,20 @@ export default {
         if (method === 'GET' && p === '/api/courier/jobs') {
           const settings = await loadSettings(env);
           const { results } = await env.DB.prepare(
-            `SELECT o.ref,o.total,o.delivery_fee,o.address,o.distance_km,s.name AS shop_name,s.address AS shop_address,s.lat AS slat,s.lng AS slng
-             FROM orders o JOIN shops s ON s.id=o.shop_id WHERE o.status='ready' AND o.courier_id IS NULL ORDER BY o.updated_at`).all();
+            `SELECT o.ref,o.total,o.delivery_fee,o.address,o.distance_km,s.name AS shop_name,s.address AS shop_address,s.lat AS slat,s.lng AS slng,o.status,o.created_at,
+               (SELECT COALESCE(SUM(qty),0) FROM order_items WHERE order_id=o.id) AS items
+             FROM orders o JOIN shops s ON s.id=o.shop_id WHERE o.status IN ('paid','preparing','ready') AND o.courier_id IS NULL ORDER BY o.created_at`).all();
           const jobs = results.map(j => {
             const d = validCoord(me.lat, me.lng) && validCoord(j.slat, j.slng) ? Math.round(distanceKm(me.lat, me.lng, j.slat, j.slng) * 10) / 10 : null;
-            return { ref: j.ref, shop: j.shop_name, shopAddress: j.shop_address, address: j.address, fee: j.delivery_fee, tripKm: j.distance_km, toShopKm: d };
-          }).filter(j => j.toShopKm === null || j.toShopKm <= settings.courier_radius_km)
-            .sort((a, b) => (a.toShopKm ?? 1e9) - (b.toShopKm ?? 1e9));
+            return { ref: j.ref, shop: j.shop_name, shopAddress: j.shop_address, address: j.address, fee: j.delivery_fee, tripKm: j.distance_km, toShopKm: d,
+              status: j.status, statusLabel: { paid: 'Commande reçue', preparing: 'En préparation', ready: 'Prête à récupérer' }[j.status], items: j.items, slat: j.slat, slng: j.slng,
+              far: d !== null && d > settings.courier_radius_km };
+          }).sort((a, b) => (b.status === 'ready') - (a.status === 'ready') || (a.toShopKm ?? 1e9) - (b.toShopKm ?? 1e9));
           return json({ jobs, available: !!me.available, hasPosition: validCoord(me.lat, me.lng) });
         }
         if (method === 'POST' && (m = p.match(/^\/api\/courier\/jobs\/(CMD-[A-F0-9]{6})\/accept$/))) {
           if (!me.available) return bad('Activez d\'abord votre disponibilité');
-          const r = await env.DB.prepare(`UPDATE orders SET courier_id=?2, updated_at=?3 WHERE ref=?1 AND status='ready' AND courier_id IS NULL`).bind(m[1], user.id, now()).run();
+          const r = await env.DB.prepare(`UPDATE orders SET courier_id=?2, updated_at=?3 WHERE ref=?1 AND status IN ('paid','preparing','ready') AND courier_id IS NULL`).bind(m[1], user.id, now()).run();
           if (!r.meta.changes) return bad('Cette course vient d\'être prise par un autre livreur', 409);
           const o = await env.DB.prepare('SELECT o.customer_id,o.ref,s.owner_id FROM orders o JOIN shops s ON s.id=o.shop_id WHERE o.ref=?1').bind(m[1]).first();
           await notify(env, o.customer_id, 'Un livreur arrive à la boutique', `${user.name} va récupérer votre commande ${o.ref}.`, `/commandes.html?ref=${o.ref}`);
