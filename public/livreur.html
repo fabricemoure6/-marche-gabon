@@ -44,10 +44,11 @@
     S('avail').textContent = available ? '🟢 Vous êtes disponible' : '⚪ Vous êtes indisponible';
     S('toggle').textContent = available ? 'Me mettre indisponible' : 'Me mettre disponible';
     if (available) startWatch();
-    S('jobs').innerHTML = !available ? '<p class="muted">Activez votre disponibilité pour recevoir des courses.</p>'
-      : d.jobs.length ? d.jobs.map(j => `<div class="card"><div class="split"><div><b>${MG.esc(j.shop)}</b> → ${MG.esc(j.address)}<br>
-        <span class="muted">Boutique : ${MG.esc(j.shopAddress || '—')}${j.toShopKm != null ? ' · à ' + j.toShopKm + ' km de vous' : ''}${j.tripKm ? ' · trajet ' + j.tripKm + ' km' : ''}</span></div>
-        <div><b>${MG.fcfa(j.fee)}</b> <button class="btn small green" data-acc="${j.ref}">Accepter</button></div></div></div>`).join('')
+    S('jobs').innerHTML = !available ? '<p class="muted">Activez votre disponibilité pour prendre des courses.</p>'
+      : d.jobs.length ? d.jobs.map(j => `<div class="card"><div class="split"><div><span class="tag ${j.status === 'ready' ? 'ready' : 'preparing'}">${MG.esc(j.statusLabel)}</span> <b>${MG.esc(j.shop)}</b> → ${MG.esc(j.address)}<br>
+        <span class="muted">Boutique : ${MG.esc(j.shopAddress || '—')}${j.toShopKm != null ? ' · à ' + j.toShopKm + ' km de vous' + (j.far ? ' (loin)' : '') : ''}${j.items ? ' · ' + j.items + ' article' + (j.items > 1 ? 's' : '') : ''}${j.tripKm ? ' · trajet ' + j.tripKm + ' km' : ''}</span></div>
+        <div><b>${MG.fcfa(j.fee)}</b> <button class="btn small green" data-acc="${j.ref}">${j.status === 'ready' ? 'Accepter' : 'Je prends cette course'}</button></div></div>
+        ${j.slat != null ? `<div class="row" style="margin-top:.5rem"><a class="btn small alt" target="_blank" rel="noopener" href="https://www.openstreetmap.org/?mlat=${j.slat}&mlon=${j.slng}#map=16/${j.slat}/${j.slng}">Voir la boutique sur la carte</a></div>` : ''}</div>`).join('')
       : '<p class="muted">Aucune course pour le moment.' + (d.hasPosition ? '' : ' Votre position n\'est pas encore connue.') + '</p>';
   }
 
@@ -59,6 +60,7 @@
       <div class="row" style="margin-top:.5rem">
         ${o.slat != null ? `<a class="btn small alt" target="_blank" rel="noopener" href="https://www.openstreetmap.org/?mlat=${o.slat}&mlon=${o.slng}#map=16/${o.slat}/${o.slng}">Itinéraire boutique</a>` : ''}
         ${o.lat != null ? `<a class="btn small alt" target="_blank" rel="noopener" href="https://www.openstreetmap.org/?mlat=${o.lat}&mlon=${o.lng}#map=16/${o.lat}/${o.lng}">Position client</a>` : ''}
+        ${o.status === 'paid' || o.status === 'preparing' ? '<span class="muted">La boutique prépare la commande : allez-y, vous pourrez confirmer la récupération dès qu\'elle est prête.</span>' : ''}
         ${o.status === 'ready' ? `<button class="btn small" data-do="pickup" data-r="${o.ref}">J'ai récupéré le colis</button>` : ''}
         ${o.status === 'delivering' ? `<button class="btn small green" data-do="deliver" data-r="${o.ref}">Livré</button>` : ''}
         ${o.slat != null || o.lat != null ? `<button class="btn small" data-map="${o.ref}">🗺️ Carte</button>` : ''}
