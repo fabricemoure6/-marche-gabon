@@ -93,8 +93,9 @@
         <p class="muted">Mot de passe oublié ? Contactez l'administrateur : il vous enverra un lien de réinitialisation.</p>`;
       f.onsubmit = async e => {
         e.preventDefault();
-        try { await MG.api('/api/auth/login', { method: 'POST', body: { email: MG.$('#email').value, password: MG.$('#pw').value } }); go(dest()); }
-        catch (er) { MG.$('#err').textContent = er.message; }
+        MG.splash('Connexion en cours…');
+        try { await MG.api('/api/auth/login', { method: 'POST', body: { email: MG.$('#email').value, password: MG.$('#pw').value } }); MG.splash('Bienvenue ! Ouverture de votre espace…'); go(dest()); }
+        catch (er) { MG.splashHide(); MG.$('#err').textContent = er.message; }
       };
     } else {
       f.innerHTML = `<label for="role">Je suis</label>

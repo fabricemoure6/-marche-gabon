@@ -619,6 +619,33 @@
     botWidget();
   })();
 
+
+  // ----- Écran de bienvenue : barre de chargement jusqu'à ce que le site soit prêt -----
+  MG.splash = function (msg) {
+    let el = document.getElementById('mg-splash');
+    if (!el) {
+      el = document.createElement('div'); el.id = 'mg-splash'; el.setAttribute('role', 'status');
+      el.innerHTML = '<div class="lg"><i></i><i></i></div><b>Bienvenue sur Marché Gabon</b><small></small><div class="bar"><span></span></div>';
+      (document.body || document.documentElement).appendChild(el);
+    }
+    el.className = ''; el.querySelector('small').textContent = msg || 'Chargement…';
+    const bar = el.querySelector('.bar span'); bar.style.animation = 'none'; void bar.offsetWidth; bar.style.animation = '';
+    return el;
+  };
+  MG.splashHide = function () {
+    const el = document.getElementById('mg-splash'); if (!el) return;
+    el.classList.add('done'); setTimeout(() => el.classList.add('out'), 250); setTimeout(() => el.remove(), 800);
+  };
+
+  // Affiché dès le début du chargement, retiré quand le site est prêt (500 ms mini, 1,2 s à la première visite)
+  (function () {
+    let first = true; try { first = !sessionStorage.getItem('mg-welcomed'); sessionStorage.setItem('mg-welcomed', '1'); } catch (e) {}
+    const t0 = Date.now(), min = first ? 1200 : 500;
+    MG.splash(first ? 'Bienvenue, nous préparons le marché…' : 'Chargement…');
+    const done = () => setTimeout(MG.splashHide, Math.max(0, min - (Date.now() - t0)));
+    MG.ready.then(done, done);
+    setTimeout(MG.splashHide, 8000); // filet de sécurité
+  })();
   // Pour les pages réservées à un rôle
   MG.require = async function (roles) {
     await MG.ready;
