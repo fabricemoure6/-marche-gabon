@@ -646,6 +646,20 @@
     MG.ready.then(done, done);
     setTimeout(MG.splashHide, 8000); // filet de sécurité
   })();
+
+  // ----- Pied de page (lien Confidentialité) et bandeau d'information, une fois par appareil -----
+  MG.ready.then(() => {
+    if (!document.querySelector('.site-foot')) {
+      const f = document.createElement('footer'); f.className = 'site-foot noprint';
+      f.innerHTML = `<a href="/confidentialite.html">Confidentialité et cookies</a><span>© ${new Date().getFullYear()} ${MG.esc(MG.config.site_name)}</span>`;
+      document.body.appendChild(f);
+    }
+    try { if (localStorage.getItem('mg-info-ok') === '1' || /confidentialite/.test(location.pathname)) return; } catch (e) { /* stockage indisponible : on affiche */ }
+    const b = document.createElement('div'); b.className = 'info-bar noprint'; b.setAttribute('role', 'region'); b.setAttribute('aria-label', 'Information sur vos données');
+    b.innerHTML = '<p>Nous utilisons un cookie pour vous garder connecté, et des services extérieurs (cartes OpenStreetMap, polices Google). Aucune publicité, aucun suivi. <a href="/confidentialite.html">En savoir plus</a></p><button type="button" class="btn small">OK</button>';
+    b.querySelector('button').onclick = () => { try { localStorage.setItem('mg-info-ok', '1'); } catch (e) { /* non mémorisé */ } b.remove(); };
+    document.body.appendChild(b);
+  }).catch(() => {});
   // Pour les pages réservées à un rôle
   MG.require = async function (roles) {
     await MG.ready;

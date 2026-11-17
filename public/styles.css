@@ -669,3 +669,19 @@ body.cd-lock{overflow:hidden}
  .cta{padding:14px;margin-top:20px;gap:10px}.cta h2{font-size:1.15rem}.cta p{font-size:.85rem}
  .cta .btn{min-height:40px;padding:0 14px;font-size:.88rem}
 }
+/* ---------- Pied de page, bandeau d'information, page légale ---------- */
+.site-foot{display:flex;flex-wrap:wrap;gap:8px 20px;justify-content:center;align-items:center;padding:20px 16px 110px;margin-top:32px;border-top:1px solid var(--line);font-size:.85rem;color:var(--ink-muted)}
+.site-foot a{color:var(--ink-muted);text-decoration:underline}
+.info-bar{position:fixed;left:8px;right:8px;bottom:8px;z-index:9000;display:flex;gap:12px;align-items:center;background:var(--nuit);color:var(--on-nuit);border-radius:var(--radius-m);padding:10px 12px;box-shadow:var(--shadow-3);font-size:.82rem;line-height:1.35}
+.info-bar p{margin:0;flex:1}
+.info-bar a{color:var(--soleil);text-decoration:underline}
+.info-bar .btn{flex:none;min-height:36px}
+@media(min-width:721px){.info-bar{left:50%;right:auto;transform:translateX(-50%);width:min(720px,calc(100vw - 32px))}}
+label.consent{display:flex;gap:10px;align-items:flex-start;font-size:.9rem;font-weight:500;margin-top:var(--space-3)}
+label.consent input{width:20px;height:20px;min-height:0;flex:none;margin-top:2px}
+.legal .card{margin-bottom:var(--space-4)}
+.legal h2{font-size:1.15rem;margin:0 0 var(--space-2)}
+.legal table{width:100%;font-size:.9rem}
+.legal th,.legal td{text-align:left;vertical-align:top;padding:8px 6px}
+.legal code{background:var(--surface-300);border-radius:6px;padding:1px 6px}
+@media print{.site-foot,.info-bar{display:none!important}}

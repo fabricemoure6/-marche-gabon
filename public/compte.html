@@ -111,6 +111,7 @@
           <p class="muted">${invite && invite.autoApprove ? 'Votre boutique sera visible dès la création du compte.' : 'Votre boutique sera visible après validation par l\'administrateur.'}</p>
         </div>
         <label for="pw">Mot de passe (8 caractères minimum)</label><input id="pw" type="password" required minlength="8" autocomplete="new-password">
+        <label class="consent"><input type="checkbox" id="consent" required> <span>J'ai lu la <a href="/confidentialite.html" target="_blank" rel="noopener">politique de confidentialité</a> et je consens au traitement de mes données comme indiqué. Je peux retirer mon consentement à tout moment.</span></label>
         <p class="err" id="err"></p><button class="btn">Créer mon compte</button>`;
       const sel = MG.$('#role'); sel.value = role;
       if (invite) sel.disabled = true;
