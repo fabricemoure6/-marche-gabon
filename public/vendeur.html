@@ -349,6 +349,9 @@
       <label for="p">Téléphone</label><input id="p" value="${MG.esc(s.phone || '')}" maxlength="30">
       <label for="w">Numéro WhatsApp (avec l'indicatif, ex. 241…)</label><input id="w" value="${MG.esc(s.whatsapp || '')}" maxlength="30">
       <label>Photo de la boutique</label>${s.photo_id ? `<img class="thumb" src="${MG.photo(s.photo_id)}" alt="">` : ''}<input id="ph" type="file" accept="image/*">
+      <label>Photo de couverture (fond de la page de votre boutique)</label>
+      ${s.cover_photo ? `<div id="cvBox"><img src="${MG.photo(s.cover_photo)}" alt="" style="width:100%;max-height:140px;object-fit:cover;border-radius:var(--radius-m);display:block"><label style="display:flex;gap:.4rem;align-items:center;margin:.4rem 0"><input type="checkbox" id="cvDel" style="width:auto"> Retirer la couverture</label></div>` : ''}
+      <input id="cv" type="file" accept="image/*"><p class="muted" style="margin:.3rem 0 0;font-size:.85rem">Conseil : une photo large (paysage) de votre boutique ou de vos produits. Sans couverture, la page utilise une photo de vos produits.</p>
       <div class="row" style="margin-top:.8rem"><button type="button" class="btn alt small" id="gp">📍 Enregistrer la position de la boutique</button><span class="muted" id="gs">${s.lat != null ? '✅ Position enregistrée' : 'Nécessaire pour calculer la livraison et trouver les livreurs proches.'}</span></div>
       <p><button class="btn">Enregistrer</button></p></form>`;
     let pos = null;
@@ -359,6 +362,8 @@
         const f = S('ph').files[0];
         const body = { name: S('n').value, category: S('c').value, description: S('d').value, address: S('a').value, phone: S('p').value, whatsapp: S('w').value, lat: pos && pos.lat, lng: pos && pos.lng };
         if (f) body.photo_id = await MG.uploadPhoto(f);
+        const cf = S('cv').files[0];
+        if (cf) body.cover_photo = await MG.uploadPhoto(cf); else if (S('cvDel') && S('cvDel').checked) body.cover_photo = null;
         await MG.api('/api/seller/shop', { method: 'PUT', body }); MG.toast('Boutique enregistrée'); shopTab();
       } catch (er) { MG.fail(er); }
     };

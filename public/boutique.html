@@ -43,8 +43,9 @@
   const { shop, products } = data;
   if (!document.title.includes(shop.name)) document.title = shop.name + ' · ' + MG.config.site_name; // garde le titre complet préparé par le serveur
   const promos = products.filter(p => p.promo_pct && p.stock > 0);
-  // Photo de couverture : la photo d'un produit en fond (sinon un motif coloré par défaut)
-  const coverId = (products.find(p => p.photo_id && /^[\w-]+$/.test(String(p.photo_id))) || {}).photo_id || null;
+  // Photo de couverture : celle choisie par la boutique, sinon une photo de produit, sinon un motif coloré
+  const okId = v => (v && /^[\w-]+$/.test(String(v)) ? v : null);
+  const coverId = okId(shop.cover_photo) || (products.find(p => p.photo_id && /^[\w-]+$/.test(String(p.photo_id))) || {}).photo_id || null;
   const order = products.map(p => p.id); // ordre du serveur : promotions puis nouveautés
 
   $('#head').innerHTML = `<a href="/?cat=${encodeURIComponent(shop.category)}" style="display:inline-block;margin-bottom:var(--space-3)">← ${MG.esc(MG.catName(shop.category))}</a>

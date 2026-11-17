@@ -636,3 +636,36 @@ body.cd-lock{overflow:hidden}
 #mg-splash .bar span{display:block;height:100%;width:0;border-radius:99px;background:linear-gradient(90deg,#f76707,#ffc53d);animation:mgbar 1.6s cubic-bezier(.3,.6,.3,1) forwards}
 #mg-splash.done .bar span{animation:none;width:100%;transition:width .25s}
 @keyframes mgbar{to{width:88%}}
+
+/* ---------- Accueil mobile : réduction légère (2e passe) ---------- */
+@media(max-width:720px){
+ .hero{padding:14px 14px 16px;margin-bottom:12px}
+ .hero .content{gap:8px}
+ .hero h1{font-size:1.45rem}
+ .hero p{font-size:.85rem;line-height:1.35}
+ .hero .kicker{font-size:.66rem;padding:3px 9px}
+ .hero form,.search{padding:2px 2px 2px 12px}
+ .hero .search input{min-height:38px;font-size:.9rem}
+ .hero .search .btn{min-height:36px;padding:0 14px;font-size:.88rem}
+ .promo-band{padding:10px 12px 8px;margin-top:12px}
+ .promo-band .kick{font-size:.62rem;padding:2px 9px;margin-bottom:.2rem}
+ .promo-band h2{font-size:1rem}
+ .promo-band .head{margin-bottom:6px}
+ .promo-band .head p{font-size:.74rem;margin:.1rem 0 0}
+ .rail{grid-auto-columns:minmax(112px,124px);gap:8px}
+ .rail .product{padding:5px}
+ .rail .product .pname{font-size:.8rem}
+ .rail .product .pshop{font-size:.68rem}
+ .rail .product .pfoot{padding-top:4px}
+ .rail .product .price{font-size:.88rem}
+ .rail .product .add{width:30px;height:30px}
+ .rail .product .pbody{padding:6px 4px 2px}
+ .rail .tag,.rail .pbadges span{font-size:.62rem;padding:2px 6px}
+ .section-head{margin:18px 0 8px}
+ .section-head h2{font-size:1.15rem}
+ .cat{width:78px;padding:6px 4px;gap:4px;font-size:.78rem}
+ .cat .bub{width:48px;height:48px}
+ .empty-state{padding:14px 12px}.empty-state img{width:84px}.empty-state h3{font-size:1rem}
+ .cta{padding:14px;margin-top:20px;gap:10px}.cta h2{font-size:1.15rem}.cta p{font-size:.85rem}
+ .cta .btn{min-height:40px;padding:0 14px;font-size:.88rem}
+}
