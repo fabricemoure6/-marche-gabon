@@ -53,7 +53,7 @@ async function activeShops(env) {
             (SELECT COUNT(*) FROM products p WHERE p.shop_id=s.id AND p.active=1) AS products,
             (SELECT COUNT(*) FROM products p WHERE p.shop_id=s.id AND p.active=1 AND p.stock>0 AND ${EFFECTIVE_PRICE} < p.price) AS promos,
             (SELECT MAX(ROUND(100 - 100.0 * p.promo_price / p.price)) FROM products p WHERE p.shop_id=s.id AND p.active=1 AND p.stock>0 AND ${EFFECTIVE_PRICE} < p.price) AS best_pct,
-            (SELECT p.photo_id FROM products p WHERE p.shop_id=s.id AND p.active=1 AND p.photo_id IS NOT NULL ORDER BY p.created_at DESC LIMIT 1) AS cover_id,
+            COALESCE(s.cover_photo, (SELECT p.photo_id FROM products p WHERE p.shop_id=s.id AND p.active=1 AND p.photo_id IS NOT NULL ORDER BY p.created_at DESC LIMIT 1)) AS cover_id,
             (SELECT MAX(p.created_at) FROM products p WHERE p.shop_id=s.id) AS last_product
      FROM shops s WHERE s.status='active' ORDER BY promos > 0 DESC, s.name`).all();
   return results;
@@ -99,7 +99,7 @@ async function homePage(env, url) {
 
 async function shopPage(env, url, slug) {
   const st = await loadSettings(env);
-  const s = await env.DB.prepare(`SELECT id,name,slug,category,description,address,photo_id,phone,created_at,loyalty_enabled,loyalty_every,loyalty_kind,loyalty_value,loyalty_min FROM shops WHERE slug=?1 AND status='active'`).bind(slug).first();
+  const s = await env.DB.prepare(`SELECT id,name,slug,category,description,address,photo_id,cover_photo,phone,created_at,loyalty_enabled,loyalty_every,loyalty_kind,loyalty_value,loyalty_min FROM shops WHERE slug=?1 AND status='active'`).bind(slug).first();
   if (!s) return null;
   const { results } = await env.DB.prepare(`SELECT id,name,description,price,promo_price,promo_until,stock,photo_id,photos,created_at FROM products WHERE shop_id=?1 AND active=1 ORDER BY created_at DESC`).bind(s.id).all();
   const products = results.map(publicProduct).sort((a, b) => (b.promo_pct ? 1 : 0) - (a.promo_pct ? 1 : 0) || (b.stock > 0) - (a.stock > 0));
@@ -124,14 +124,15 @@ async function shopPage(env, url, slug) {
       { '@type': 'ListItem', position: 2, name: cat, item: `${origin}/?cat=${s.category}` },
       { '@type': 'ListItem', position: 3, name: s.name, item: pageUrl }] }
   ];
+  const coverId = s.cover_photo || (products.find(p => p.photo_id) || {}).photo_id || null;
   const hero = `<a href="/?cat=${encodeURIComponent(s.category)}" style="display:inline-block;margin-bottom:var(--space-3)">← ${esc(cat)}</a>
-    <section class="card shop-hero"><img class="avatar-xl" src="${s.photo_id ? photo(s.photo_id) : illu(s.category)}" alt="" width="104" height="104">
+    <section class="card shop-hero${coverId ? ' has-cover' : ''}"${coverId ? `  style="--cover-img:url('${photo(coverId)}')"` : ''}><img class="avatar-xl" src="${s.photo_id ? photo(s.photo_id) : illu(s.category)}" alt="" width="104" height="104">
       <div style="flex:1;min-width:220px"><h1 style="margin:0 0 .3rem">${esc(s.name)}</h1>
         <div class="stats"><span class="tag">${esc(cat)}</span><span class="tag">${products.length} produit${products.length > 1 ? 's' : ''}</span>${promos.length ? `<span class="tag promo">${promos.length} en promo</span>` : ''}</div>
         ${s.description ? `<p style="margin:.7rem 0 0">${esc(s.description)}</p>` : ''}${s.address ? `<p class="muted" style="margin:.4rem 0 0">${icon('pin', 18)} ${esc(s.address)}</p>` : ''}</div></section>`;
   // Données pour le navigateur : évite un second appel réseau au chargement
   const loyalty = s.loyalty_enabled ? { every: s.loyalty_every, kind: s.loyalty_kind, value: s.loyalty_value, min: s.loyalty_min || 0 } : null;
-  const shopPub = { id: s.id, name: s.name, slug: s.slug, category: s.category, description: s.description, address: s.address, photo_id: s.photo_id, phone: s.phone, loyalty };
+  const shopPub = { id: s.id, name: s.name, slug: s.slug, category: s.category, description: s.description, address: s.address, photo_id: s.photo_id, cover_photo: s.cover_photo, phone: s.phone, loyalty };
   const boot = `<script>window.__SHOP__=${JSON.stringify({ shop: shopPub, products, mine: null }).replace(/</g, '\\u003c')};</script>`;
   const res = await page(env, url, '/boutique');
   return new HTMLRewriter()

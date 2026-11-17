@@ -262,7 +262,7 @@ export default {
                   (SELECT COUNT(*) FROM products p WHERE p.shop_id=s.id AND p.active=1) AS products,
                   (SELECT COUNT(*) FROM products p WHERE p.shop_id=s.id AND p.active=1 AND p.stock>0 AND ${EFFECTIVE_PRICE} < p.price) AS promos,
                   (SELECT MAX(ROUND(100 - 100.0 * p.promo_price / p.price)) FROM products p WHERE p.shop_id=s.id AND p.active=1 AND p.stock>0 AND ${EFFECTIVE_PRICE} < p.price) AS best_pct,
-                  (SELECT p.photo_id FROM products p WHERE p.shop_id=s.id AND p.active=1 AND p.photo_id IS NOT NULL ORDER BY p.created_at DESC LIMIT 1) AS cover_id,
+                  COALESCE(s.cover_photo, (SELECT p.photo_id FROM products p WHERE p.shop_id=s.id AND p.active=1 AND p.photo_id IS NOT NULL ORDER BY p.created_at DESC LIMIT 1)) AS cover_id,
                   s.loyalty_enabled
            FROM shops s WHERE s.status='active' ORDER BY promos > 0 DESC, s.name`).all();
         return json(results.filter(s => (!cat || s.category === cat) && (!q || (s.name + ' ' + (s.description || '')).toLowerCase().includes(q))));
@@ -281,7 +281,7 @@ export default {
         return json(await searchProducts(env, { cat, q, limit }));
       }
       if (method === 'GET' && (m = p.match(/^\/api\/shops\/([a-z0-9-]{1,60})$/))) {
-        const s = await env.DB.prepare(`SELECT id,name,slug,category,description,address,photo_id,phone,loyalty_enabled,loyalty_every,loyalty_kind,loyalty_value,loyalty_min,loyalty_days
+        const s = await env.DB.prepare(`SELECT id,name,slug,category,description,address,photo_id,cover_photo,phone,loyalty_enabled,loyalty_every,loyalty_kind,loyalty_value,loyalty_min,loyalty_days
           FROM shops WHERE slug=?1 AND status='active'`).bind(m[1]).first();
         if (!s) return bad('Boutique introuvable', 404);
         const loyalty = loyaltyProgram(s);
@@ -615,9 +615,14 @@ export default {
             photo = null;
             if (b.photo_id && await env.DB.prepare('SELECT 1 FROM photos WHERE id=?1 AND owner_id=?2').bind(String(b.photo_id), user.id).first()) photo = String(b.photo_id);
           }
-          await env.DB.prepare('UPDATE shops SET name=?2,category=?3,description=?4,address=?5,phone=?6,whatsapp=?7,lat=?8,lng=?9,photo_id=?10 WHERE id=?1')
+          let cover = shop.cover_photo || null;
+          if (b.cover_photo !== undefined) {
+            cover = null;
+            if (b.cover_photo && await env.DB.prepare('SELECT 1 FROM photos WHERE id=?1 AND owner_id=?2').bind(String(b.cover_photo), user.id).first()) cover = String(b.cover_photo);
+          }
+          await env.DB.prepare('UPDATE shops SET name=?2,category=?3,description=?4,address=?5,phone=?6,whatsapp=?7,lat=?8,lng=?9,photo_id=?10,cover_photo=?11 WHERE id=?1')
             .bind(shop.id, name, cat, cleanText(b.description, 600), cleanText(b.address, 200), cleanText(b.phone, 30), cleanText(b.whatsapp, 30),
-              pos ? lat : shop.lat, pos ? lng : shop.lng, photo).run();
+              pos ? lat : shop.lat, pos ? lng : shop.lng, photo, cover).run();
           return json({ ok: true });
         }
         if (method === 'GET' && p === '/api/seller/products') {
