@@ -20,7 +20,7 @@
   try {
     const { order: o, items } = await MG.api('/api/orders/' + encodeURIComponent(MG.param('ref') || ''));
     if (['awaiting_payment', 'cancelled'].includes(o.status)) { MG.$('#receipt').innerHTML = '<p>Le reçu est disponible une fois la commande payée.</p>'; return; }
-    MG.$('#receipt').innerHTML = `<div class="split"><h1>Reçu</h1><div style="text-align:right"><b>${MG.esc(MG.config.site_name)}</b><br>N° ${MG.esc(o.ref)}<br>${MG.date(o.created_at)}</div></div>
+    MG.$('#receipt').innerHTML = `<div class="split"><div style="display:flex;align-items:center;gap:.8rem"><img src="/logo/marche-gabon-icone.svg" alt="" width="72" height="72"><h1 style="margin:0">Reçu</h1></div><div style="text-align:right"><b>${MG.esc(MG.config.site_name)}</b><br>N° ${MG.esc(o.ref)}<br>${MG.date(o.created_at)}</div></div>
       <p><b>Client :</b> ${MG.esc(o.customer.name)}${o.customer.phone ? ' · ' + MG.esc(o.customer.phone) : ''}<br><b>Boutique :</b> ${MG.esc(o.shop.name)}<br><b>Livraison :</b> ${MG.esc(o.address)}</p>
       <div class="scroll"><table><thead><tr><th>Produit</th><th>Qté</th><th>Prix unitaire</th><th style="text-align:right">Montant</th></tr></thead>
       <tbody>${items.map(i => `<tr><td>${MG.esc(i.name)}</td><td>${i.qty}</td><td>${MG.fcfa(i.price)}</td><td style="text-align:right">${MG.fcfa(i.price * i.qty)}</td></tr>`).join('')}</tbody></table></div>

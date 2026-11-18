@@ -126,7 +126,7 @@ async function shopPage(env, url, slug) {
   ];
   const coverId = s.cover_photo || (products.find(p => p.photo_id) || {}).photo_id || null;
   const hero = `<a href="/?cat=${encodeURIComponent(s.category)}" style="display:inline-block;margin-bottom:var(--space-3)">← ${esc(cat)}</a>
-    <section class="card shop-hero${coverId ? ' has-cover' : ''}"${coverId ? `  style="--cover-img:url('${photo(coverId)}')"` : ''}><img class="avatar-xl" src="${s.photo_id ? photo(s.photo_id) : illu(s.category)}" alt="" width="104" height="104">
+    <section class="card shop-hero${coverId ? ' has-cover' : ''}"${coverId ? `  style="--cover-img:url('${photo(coverId)}')"` : ''}><span class="av"><img class="avatar-xl" src="${s.photo_id ? photo(s.photo_id) : illu(s.category)}" alt="" width="104" height="104"></span>
       <div style="flex:1;min-width:220px"><h1 style="margin:0 0 .3rem">${esc(s.name)}</h1>
         <div class="stats"><span class="tag">${esc(cat)}</span><span class="tag">${products.length} produit${products.length > 1 ? 's' : ''}</span>${promos.length ? `<span class="tag promo">${promos.length} en promo</span>` : ''}</div>
         ${s.description ? `<p style="margin:.7rem 0 0">${esc(s.description)}</p>` : ''}${s.address ? `<p class="muted" style="margin:.4rem 0 0">${icon('pin', 18)} ${esc(s.address)}</p>` : ''}</div></section>`;

@@ -61,7 +61,7 @@ main{max-width:1180px;margin:0 auto;padding:var(--space-5) var(--space-4) 7rem}
 header#top{background:var(--nuit);color:var(--on-nuit);position:sticky;top:0;z-index:20}
 .bar{max-width:1180px;margin:0 auto;display:flex;align-items:center;justify-content:space-between;padding:var(--space-3) var(--space-4);gap:1rem}
 .brand{display:inline-flex;align-items:center;color:var(--on-nuit);font:800 1.35rem/1 var(--font-display);text-decoration:none;letter-spacing:-.01em}
-.brand::before{content:"";width:36px;height:36px;margin-right:10px;background:url(/logo/marche-gabon-icone-fond-sombre.svg) center/contain no-repeat;flex:none}
+.brand::before{content:"";width:52px;height:52px;margin-right:12px;background:url(/logo/marche-gabon-icone-fond-sombre.svg) center/contain no-repeat;flex:none}
 nav{display:flex;align-items:center;gap:var(--space-1)}
 nav a,nav .bell{display:inline-flex;align-items:center;gap:var(--space-2);min-height:40px;padding:0 14px;border-radius:var(--radius-pill);color:var(--on-nuit);text-decoration:none;font-size:.95rem;font-weight:600}
 nav a:hover,nav .bell:hover{background:rgba(255,248,238,.1)}
@@ -284,7 +284,12 @@ th{font-size:.78rem;text-transform:uppercase;letter-spacing:.04em;color:var(--in
  .hero .shapes span:first-child{width:220px!important;height:220px!important;right:-90px!important;top:-90px!important}
  .hero .shapes span:nth-child(3){display:none}
 }
-@media print{header#top,#bot,.noprint{display:none!important}body{background:#fff;color:#000}.card{border:0;box-shadow:none}}
+.tile.shop .cover{position:relative}
+.tile.shop .cover::after,.shop-hero .av::after{content:"";position:absolute;right:-6px;bottom:-4px;width:26px;height:26px;border-radius:50%;background:var(--nuit) url(/logo/marche-gabon-icone-fond-sombre.svg) center/78% no-repeat;border:2px solid var(--surface-200)}
+.tile.shop .cover::after{right:8px;bottom:8px;width:32px;height:32px}
+.shop-hero .av{position:relative;flex:none;display:inline-block;line-height:0}
+.shop-hero .av::after{width:34px;height:34px;right:2px;bottom:2px;border-width:3px}
+@media print{header#top,#bot,.noprint{display:none!important}.brand-recu{display:block!important}body{background:#fff;color:#000}.card{border:0;box-shadow:none}}
 
 /* ---------- Fenêtre de confirmation ---------- */
 .modal{width:min(480px,calc(100vw - 2rem));border:0;border-radius:var(--radius-l);padding:var(--space-5);background:var(--surface-200);color:var(--ink);box-shadow:var(--shadow-3)}
@@ -628,7 +633,7 @@ body.cd-lock{overflow:hidden}
 #mg-splash{position:fixed;inset:0;z-index:99999;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;background:#1f1a17;color:#fff8ee;font-family:Figtree,system-ui,sans-serif;text-align:center;padding:24px;transition:opacity .35s}
 #mg-splash.out{opacity:0;pointer-events:none}
 #mg-splash .lg{display:flex}
-#mg-splash .lg i{width:84px;height:84px;display:block;background:url(/logo/marche-gabon-icone-fond-sombre.svg) center/contain no-repeat}
+#mg-splash .lg i{width:150px;height:150px;display:block;background:url(/logo/marche-gabon-icone-fond-sombre.svg) center/contain no-repeat}
 #mg-splash .lg i+i{display:none}
 #mg-splash b{font-size:1.35rem;font-weight:800}
 #mg-splash small{opacity:.8;font-size:.95rem;min-height:1.2em}
