@@ -81,6 +81,7 @@ export const ORDER_STATUS = {
 export const DEFAULT_SETTINGS = {
   site_name: 'Marché Gabon',
   tagline: 'Toutes vos boutiques au même endroit, livrées chez vous',
+  payment_mode: 'direct',   // 'direct' : le client paie la boutique (et le livreur) ; 'marketplace' : le client paie le marché
   airtel_number: '',
   merchant_name: 'Marché Gabon',
   payment_instructions: 'Envoyez le montant par Airtel Money au numéro indiqué avec la référence en motif, puis saisissez la référence de la transaction reçue par SMS.',
@@ -162,9 +163,10 @@ const MIGRATIONS = {
   products: [['unit', "TEXT NOT NULL DEFAULT 'piece'"], ['qty_step', 'REAL NOT NULL DEFAULT 1'], ['promo_price', 'INTEGER'], ['promo_until', 'INTEGER'], ['promo_start', 'INTEGER'], ['stock_updated_at', 'INTEGER'], ['photos', 'TEXT']],
   shops: [['loyalty_enabled', 'INTEGER NOT NULL DEFAULT 0'], ['loyalty_every', 'INTEGER'], ['loyalty_kind', 'TEXT'], ['loyalty_value', 'INTEGER'],
     ['loyalty_min', 'INTEGER'], ['loyalty_days', 'INTEGER'], ['cover_photo', 'TEXT'],
-    ['payout_method', 'TEXT'], ['payout_number', 'TEXT'], ['payout_name', 'TEXT'], ['payout_code', 'TEXT']],
+    ['payout_method', 'TEXT'], ['payout_number', 'TEXT'], ['payout_name', 'TEXT'], ['payout_code', 'TEXT'], ['payout_bank', 'TEXT']],
+  couriers: [['pay_method', 'TEXT'], ['pay_number', 'TEXT'], ['pay_name', 'TEXT'], ['pay_code', 'TEXT'], ['pay_bank', 'TEXT']],
   order_items: [['unit', "TEXT NOT NULL DEFAULT 'piece'"]],
-  orders: [['discount', 'INTEGER NOT NULL DEFAULT 0'], ['voucher_id', 'TEXT'], ['commission', 'INTEGER NOT NULL DEFAULT 0']]
+  orders: [['pay_direct', 'INTEGER NOT NULL DEFAULT 0'], ['pay_ref', 'TEXT'], ['pay_submitted_at', 'TEXT'], ['fee_state', 'TEXT'], ['fee_ref', 'TEXT'], ['discount', 'INTEGER NOT NULL DEFAULT 0'], ['voucher_id', 'TEXT'], ['commission', 'INTEGER NOT NULL DEFAULT 0']]
 };
 async function migrate(db) {
   for (const [table, cols] of Object.entries(MIGRATIONS)) {
@@ -181,6 +183,23 @@ export function ensureSchema(db) {
   }
   return ready;
 }
+
+// ---------- Comptes de paiement (boutiques et livreurs) ----------
+// Mobile Money (Airtel, Moov) ou compte bancaire. Renvoie { error } ou { method, number, name, code, bank } (number vide = compte effacé).
+export function cleanAccount(b, clean) {
+  const method = ['airtel_money', 'moov_money', 'bank'].includes(b && b.method) ? b.method : 'airtel_money';
+  const raw = String((b && b.number) || '').replace(/[\s.\-]/g, '');
+  if (!raw) return { method: null, number: null, name: null, code: null, bank: null };
+  if (method === 'bank') {
+    if (!/^[A-Za-z0-9]{8,34}$/.test(raw)) return { error: 'Numéro de compte bancaire invalide (8 à 34 caractères, ex. IBAN ou RIB)' };
+    const bank = clean(b.bank, 60);
+    if (bank.length < 2) return { error: 'Indiquez le nom de la banque' };
+    return { method, number: raw.toUpperCase(), name: clean(b.name, 80) || null, code: null, bank };
+  }
+  if (!/^\+?\d{8,15}$/.test(raw)) return { error: 'Numéro Mobile Money invalide : 8 à 15 chiffres (ex. 077 12 34 56)' };
+  return { method, number: raw, name: clean(b.name, 80) || null, code: clean(b.code, 30) || null, bank: null };
+}
+export const METHOD_LABEL = { airtel_money: 'Airtel Money', moov_money: 'Moov Money', bank: 'Compte bancaire' };
 
 // ---------- Unités de vente ----------
 // Chaque produit se vend à la pièce, au kilo, au litre, au tas, au sachet ou à la botte ; le vendeur choisit.

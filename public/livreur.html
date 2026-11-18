@@ -17,6 +17,7 @@
   <div id="jobs"></div>
   <h2>Mes courses</h2>
   <div id="mine"></div>
+  <div id="acct" style="margin-top:var(--space-5)"></div>
   <div id="docs" style="margin-top:var(--space-5)"></div>
   <div id="detail"></div>
 </main>
@@ -62,6 +63,7 @@
         ${o.slat != null ? `<a class="btn small alt" target="_blank" rel="noopener" href="https://www.openstreetmap.org/?mlat=${o.slat}&mlon=${o.slng}#map=16/${o.slat}/${o.slng}">Itinéraire boutique</a>` : ''}
         ${o.lat != null ? `<a class="btn small alt" target="_blank" rel="noopener" href="https://www.openstreetmap.org/?mlat=${o.lat}&mlon=${o.lng}#map=16/${o.lat}/${o.lng}">Position client</a>` : ''}
         ${o.status === 'paid' || o.status === 'preparing' ? '<span class="muted">La boutique prépare la commande : allez-y, vous pourrez confirmer la récupération dès qu\'elle est prête.</span>' : ''}
+        ${o.pay_direct ? (o.fee_state === 'paid' ? '<span class="tag active">Frais reçus</span>' : o.fee_state === 'submitted' ? `<span class="muted">Le client dit avoir payé (réf. ${MG.esc(o.fee_ref || '')})</span> <button class="btn small green" data-fee="${o.ref}">J\'ai reçu les frais</button>` : `<span class="muted">Frais à recevoir du client : ${MG.fcfa(o.delivery_fee)}</span>`) : ''}
         ${o.status === 'ready' ? `<button class="btn small" data-do="pickup" data-r="${o.ref}">J'ai récupéré le colis</button>` : ''}
         ${o.status === 'delivering' ? `<button class="btn small green" data-do="deliver" data-r="${o.ref}">Livré</button>` : ''}
         ${o.slat != null || o.lat != null ? `<button class="btn small" data-map="${o.ref}">🗺️ Carte</button>` : ''}
@@ -88,6 +90,23 @@
     if (!myPos) S('mapEta').textContent = 'En attente de votre position GPS…';
   }
 
+  // Compte où les clients envoient les frais de livraison
+  async function account() {
+    const me = await MG.api('/api/courier/me'), m = me.pay_method || 'airtel_money';
+    S('acct').innerHTML = `<form class="card" id="af"><h3 style="margin:0 0 .3rem">Où les clients vous paient</h3>
+      <p class="muted" style="margin:0 0 var(--space-3)">Quand vous acceptez une course, le client voit ce compte et vous envoie les frais de livraison. Il est invisible pour tous les autres.</p>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:0 var(--space-3)">
+        <div><label for="am">Moyen de paiement</label><select id="am"><option value="airtel_money"${m === 'airtel_money' ? ' selected' : ''}>Airtel Money</option><option value="moov_money"${m === 'moov_money' ? ' selected' : ''}>Moov Money</option><option value="bank"${m === 'bank' ? ' selected' : ''}>Compte bancaire</option></select></div>
+        <div><label for="an" id="anl">Numéro de téléphone</label><input id="an" maxlength="40" value="${MG.esc(me.pay_number || '')}" placeholder="Ex. 077 12 34 56"></div>
+        <div><label for="anm">Nom du titulaire</label><input id="anm" maxlength="80" value="${MG.esc(me.pay_name || '')}"></div>
+        <div id="acw"><label for="ac">Code agent (facultatif)</label><input id="ac" maxlength="30" value="${MG.esc(me.pay_code || '')}"></div>
+        <div id="abw" hidden><label for="ab">Nom de la banque</label><input id="ab" maxlength="60" value="${MG.esc(me.pay_bank || '')}"></div></div>
+      <p><button class="btn">Enregistrer</button> ${me.pay_number ? '<span class="tag active">Compte renseigné</span>' : '<span class="tag pending">À renseigner</span>'}</p></form>`;
+    const sync = () => { const b = S('am').value === 'bank'; S('abw').hidden = !b; S('acw').hidden = b; S('anl').textContent = b ? 'Numéro de compte (IBAN ou RIB)' : 'Numéro de téléphone'; };
+    S('am').onchange = sync; sync();
+    S('af').onsubmit = async e => { e.preventDefault(); try { await MG.api('/api/courier/account', { method: 'POST', body: { method: S('am').value, number: S('an').value, name: S('anm').value, code: S('ac').value, bank: S('ab').value } }); MG.toast('Compte enregistré'); account(); } catch (er) { MG.fail(er); } };
+  }
+  account().catch(() => {});
   S('toggle').onclick = async () => {
     try {
       await MG.api('/api/courier/availability', { method: 'POST', body: { available: !available } });
@@ -100,8 +119,9 @@
     try { await MG.api('/api/courier/jobs/' + b.dataset.acc + '/accept', { method: 'POST', body: {} }); MG.toast('Course acceptée'); jobs(); mine(); } catch (er) { MG.fail(er); jobs(); }
   };
   S('mine').onclick = async e => {
-    const a = e.target.closest('[data-do]'), c = e.target.closest('[data-chat]'), mp = e.target.closest('[data-map]');
+    const a = e.target.closest('[data-do]'), c = e.target.closest('[data-chat]'), mp = e.target.closest('[data-map]'), fe = e.target.closest('[data-fee]');
     if (mp) showMap(mp.dataset.map);
+    if (fe) { try { await MG.api('/api/courier/orders/' + fe.dataset.fee + '/fee', { method: 'POST', body: {} }); MG.toast('Frais confirmés'); mine(); } catch (er) { MG.fail(er); } return; }
     if (a) { try { await MG.api('/api/courier/orders/' + a.dataset.r + '/' + a.dataset.do, { method: 'POST', body: {} }); mine(); } catch (er) { MG.fail(er); } }
     if (c) {
       const { order: o } = await MG.api('/api/orders/' + c.dataset.chat);

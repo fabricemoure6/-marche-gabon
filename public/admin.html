@@ -52,6 +52,7 @@
     };
     d.showModal(); d.querySelector('#cfReason').focus();
   }
+  const MLAB = { airtel_money: 'Airtel Money', moov_money: 'Moov Money', bank: 'Compte bancaire' };
   const ROLE = { customer: 'Client', seller: 'Boutique', courier: 'Livreur', admin: 'Admin' };
 
   async function overview() {
@@ -80,7 +81,7 @@
   async function shops() {
     const list = await MG.api('/api/admin/shops');
     pane.innerHTML = `<div class="card scroll"><table><thead><tr><th>Boutique</th><th>Gestionnaire</th><th>Catégorie</th><th>État</th><th></th></tr></thead><tbody>${list.map(s => `<tr>
-      <td>${MG.esc(s.name)}<br><small class="muted">${MG.esc(s.address || '')}</small><br><small>${s.payout_number ? (s.payout_method === 'moov_money' ? 'Moov' : 'Airtel') + ' Money : ' + MG.esc(s.payout_number) : '<span class="muted">Numéro de versement : non renseigné</span>'}</small></td><td>${MG.esc(s.owner)}<br><small>${MG.esc(s.phone || '')}</small></td><td>${MG.esc(MG.catName(s.category))}</td>
+      <td>${MG.esc(s.name)}<br><small class="muted">${MG.esc(s.address || '')}</small><br><small>${s.payout_number ? (MLAB[s.payout_method] || 'Airtel Money') + ' : ' + MG.esc(s.payout_number) : '<span class="muted">Numéro de versement : non renseigné</span>'}</small></td><td>${MG.esc(s.owner)}<br><small>${MG.esc(s.phone || '')}</small></td><td>${MG.esc(MG.catName(s.category))}</td>
       <td><span class="tag ${s.status}">${s.status}</span><br><small class="muted">${{ verified: 'Document vérifié', pending: 'Document à vérifier', rejected: 'Document refusé' }[s.doc_status] || 'Pas de document'}</small></td>
       <td>${s.status !== 'active' ? `<button class="btn small green" data-s="active" data-id="${s.id}">${s.status === 'pending' ? 'Valider' : 'Réactiver'}</button>` : `<button class="btn small red" data-s="suspended" data-id="${s.id}">Suspendre</button>`}</td></tr>`).join('')}</tbody></table></div>`;
     pane.onclick = async e => {
@@ -233,7 +234,7 @@
         ${kpi(t.discounts, 'Bons fidélité accordés')}${kpi(t.due, 'À verser aux boutiques', t.due > 0 ? 'bad' : 'good', 'ventes livrées non encore versées')}
         ${kpi(a.refunds.v, 'Remboursements à faire', a.refunds.n ? 'bad' : '', `${a.refunds.n} commande${a.refunds.n > 1 ? 's' : ''} payée${a.refunds.n > 1 ? 's' : ''} puis annulée${a.refunds.n > 1 ? 's' : ''}`)}</div></div>
       <div class="card scroll"><h3 style="margin:0 0 var(--space-3)">Par boutique</h3><table><thead><tr><th>Boutique</th><th>Ventes</th><th>Bons</th><th>Commission</th><th>Net boutique</th><th>Solde à verser</th><th></th></tr></thead><tbody>
-        ${a.rows.map(r => `<tr><td><b>${MG.esc(r.name)}</b><br><small class="muted">${r.orders} commande${r.orders > 1 ? 's' : ''}</small><br>${r.payout_number ? `<small>${r.payout_method === 'moov_money' ? 'Moov' : 'Airtel'} Money : <b>${MG.esc(r.payout_number)}</b></small>` : '<small class="tag pending">Numéro de versement manquant</small>'}</td><td>${MG.fcfa(r.gross)}</td><td>${MG.fcfa(r.discounts)}</td><td>${MG.fcfa(r.commission)}</td><td>${MG.fcfa(r.net)}</td>
+        ${a.rows.map(r => `<tr><td><b>${MG.esc(r.name)}</b><br><small class="muted">${r.orders} commande${r.orders > 1 ? 's' : ''}</small><br>${r.payout_number ? `<small>${MLAB[r.payout_method] || 'Airtel Money'} : <b>${MG.esc(r.payout_number)}</b>${r.payout_bank ? ' (' + MG.esc(r.payout_bank) + ')' : ''}</small>` : '<small class="tag pending">Numéro de versement manquant</small>'}</td><td>${MG.fcfa(r.gross)}</td><td>${MG.fcfa(r.discounts)}</td><td>${MG.fcfa(r.commission)}${r.commission_owed ? `<br><small class="muted">dont ${MG.fcfa(r.commission_owed)} à encaisser auprès de la boutique</small>` : ''}</td><td>${MG.fcfa(r.net)}</td>
           <td><b style="color:${r.due > 0 ? 'var(--danger)' : 'var(--foret)'}">${MG.fcfa(r.due)}</b><br><small class="muted">versé : ${MG.fcfa(r.paid)}</small></td>
           <td>${r.due > 0 ? `<button class="btn small green" data-pay="${r.id}">Verser</button>` : ''}</td></tr>`).join('')}
         <tr class="tot"><td>Total</td><td>${MG.fcfa(t.gross)}</td><td>${MG.fcfa(t.discounts)}</td><td>${MG.fcfa(t.commission)}</td><td>${MG.fcfa(t.net)}</td><td>${MG.fcfa(t.due)}</td><td></td></tr></tbody></table></div>`;
@@ -243,9 +244,9 @@
       const b = e.target.closest('[data-pay]'); if (!b) return;
       const r = a.rows.find(x => x.id === b.dataset.pay);
       const m = MG.modal(`<form id="vf"><h2>Verser à ${MG.esc(r.name)}</h2><p class="muted" style="margin-top:0">Solde dû : <b>${MG.fcfa(r.due)}</b> (ventes livrées, nettes de bons et de commission).</p>
-        ${r.payout_number ? `<div class="notice"><b>Faire le dépôt sur :</b> ${r.payout_method === 'moov_money' ? 'Moov Money' : 'Airtel Money'} <b>${MG.esc(r.payout_number)}</b>${r.payout_name ? ' · ' + MG.esc(r.payout_name) : ''}${r.payout_code ? ' · code marchand ' + MG.esc(r.payout_code) : ''}</div>` : '<div class="notice">Cette boutique n\'a pas encore indiqué son numéro de versement : demandez-lui de le renseigner dans « Ma boutique ».</div>'}
+        ${r.payout_number ? `<div class="notice"><b>Faire le dépôt sur :</b> ${MLAB[r.payout_method] || 'Airtel Money'} <b>${MG.esc(r.payout_number)}</b>${r.payout_bank ? ' (' + MG.esc(r.payout_bank) + ')' : ''}${r.payout_name ? ' · ' + MG.esc(r.payout_name) : ''}${r.payout_code ? ' · code marchand ' + MG.esc(r.payout_code) : ''}</div>` : '<div class="notice">Cette boutique n\'a pas encore indiqué son numéro de versement : demandez-lui de le renseigner dans « Ma boutique ».</div>'}
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 var(--space-3)"><div><label for="vAmt">Montant (FCFA)</label><input id="vAmt" type="number" min="1" value="${r.due}" required></div>
-        <div><label for="vM">Moyen</label><select id="vM"><option value="airtel_money"${r.payout_method !== 'moov_money' ? ' selected' : ''}>Airtel Money</option><option value="moov_money"${r.payout_method === 'moov_money' ? ' selected' : ''}>Moov Money</option><option value="virement">Virement</option><option value="especes">Espèces</option></select></div></div>
+        <div><label for="vM">Moyen</label><select id="vM"><option value="airtel_money"${r.payout_method !== 'moov_money' ? ' selected' : ''}>Airtel Money</option><option value="moov_money"${r.payout_method === 'moov_money' ? ' selected' : ''}>Moov Money</option><option value="virement"${r.payout_method === 'bank' ? ' selected' : ''}>Virement</option><option value="especes">Espèces</option></select></div></div>
         <label for="vRef">Référence de la transaction</label><input id="vRef" maxlength="60" placeholder="Ex. : MP2411.1530.A12345">
         <label for="vNote">Note (facultatif)</label><input id="vNote" maxlength="200">
         <div class="modal-actions"><button type="button" class="btn alt" data-close>Annuler</button><button class="btn green">Enregistrer le versement</button></div></form>`);
@@ -262,7 +263,9 @@
     const f = (id, label, v, type = 'text') => `<label for="${id}">${label}</label><input id="${id}" type="${type}" value="${MG.esc(v)}">`;
     pane.innerHTML = `<form class="card" id="sf" style="max-width:600px"><h3>Réglages du site</h3>
       ${f('site_name', 'Nom du site', s.site_name)}${f('tagline', 'Slogan', s.tagline)}
-      <h3 style="margin-top:1rem">Paiement manuel (Airtel Money)</h3>
+      <h3 style="margin-top:1rem">Comment les clients paient</h3>
+      <label for="payment_mode">Mode de paiement</label><select id="payment_mode"><option value="direct"${s.payment_mode !== 'marketplace' ? ' selected' : ''}>Direct : le client paie la boutique, puis le livreur</option><option value="marketplace"${s.payment_mode === 'marketplace' ? ' selected' : ''}>Via le marché : le client paie le numéro ci-dessous, vous reversez aux boutiques</option></select>
+      <h3 style="margin-top:1rem">Paiement via le marché (Airtel Money)</h3>
       ${f('airtel_number', 'Numéro Airtel Money qui reçoit les paiements', s.airtel_number, 'tel')}${f('merchant_name', 'Nom affiché du bénéficiaire', s.merchant_name)}
       <label for="payment_instructions">Instructions montrées au client</label><textarea id="payment_instructions">${MG.esc(s.payment_instructions)}</textarea>
       <h3 style="margin-top:1rem">Livraison <small class="muted">(valeurs de départ à ajuster)</small></h3>
@@ -280,7 +283,7 @@
     S('invite_required').value = s.invite_required || 'none';
     S('sf').onsubmit = async e => {
       e.preventDefault();
-      const body = {}; ['site_name', 'tagline', 'airtel_number', 'merchant_name', 'payment_instructions', 'delivery_base', 'delivery_per_km', 'courier_radius_km', 'invite_required', 'promo_max_pct', 'promo_max_days', 'loyalty_max_pct', 'commission_pct'].forEach(k => (body[k] = S(k).value));
+      const body = {}; ['site_name', 'tagline', 'payment_mode', 'airtel_number', 'merchant_name', 'payment_instructions', 'delivery_base', 'delivery_per_km', 'courier_radius_km', 'invite_required', 'promo_max_pct', 'promo_max_days', 'loyalty_max_pct', 'commission_pct'].forEach(k => (body[k] = S(k).value));
       try { await MG.api('/api/admin/settings', { method: 'PUT', body }); MG.toast('Réglages enregistrés'); } catch (er) { MG.fail(er); }
     };
     S('chk').onclick = async () => { try { S('chkOut').textContent = JSON.stringify(await MG.api('/api/admin/singpay-check'), null, 2); } catch (er) { MG.fail(er); } };

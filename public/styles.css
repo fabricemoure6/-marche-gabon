@@ -696,3 +696,8 @@ label.consent input{width:20px;height:20px;min-height:0;flex:none;margin-top:2px
 
 .docrow{display:flex;justify-content:space-between;align-items:center;gap:var(--space-3);flex-wrap:wrap;padding:.8rem 0;border-top:1px solid var(--line)}
 .docs h3 .tag{vertical-align:middle;margin-left:.4rem}
+
+.payacc{display:grid;gap:.3rem;padding:var(--space-3);border-radius:var(--radius-m);background:var(--soleil-tint);margin:.4rem 0 var(--space-3)}
+.payno{display:flex;align-items:center;gap:.6rem;flex-wrap:wrap}.payno b{font-size:1.25rem;letter-spacing:.02em}
+.payamt{padding-top:.3rem;border-top:1px dashed var(--line)}
+.paycard{margin-top:var(--space-3)}

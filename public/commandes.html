@@ -63,8 +63,14 @@
         ${o.status === 'awaiting_payment' ? '<button class="btn small red" id="cancel">Annuler</button>' : ''}
       </div>
       <div id="track"></div></div>
+      ${o.pay ? `<div id="pays">${MG.payBlock('Paiement de la boutique', o.pay.shop, 'à ' + MG.esc(o.shop.name), o.ref, 'proof')}${o.pay.fee ? MG.payBlock('Frais de livraison', o.pay.fee, o.pay.fee.courier ? 'à ' + MG.esc(o.pay.fee.courier) + ' (livreur)' : 'au livreur', o.ref, 'fee-proof') : ''}</div>` : ''}
       ${o.status !== 'awaiting_payment' && o.status !== 'cancelled' ? '<div class="card"><h3>Discussion avec la boutique et le livreur</h3><div id="chat"></div></div>' : ''}`;
     d.scrollIntoView({ behavior: 'smooth' });
+    if (MG.$('#pays')) MG.$('#pays').onclick = async e => {
+      const b = e.target.closest('[data-sendproof]'); if (!b) return;
+      try { await MG.api('/api/my/orders/' + b.dataset.ref + '/' + b.dataset.sendproof, { method: 'POST', body: { txnRef: MG.$('#ref-' + b.dataset.sendproof).value } }); MG.toast('Merci, c\'est noté'); list(); open(ref); }
+      catch (er) { MG.fail(er); }
+    };
     const c = MG.$('#cancel');
     if (c) c.onclick = async () => { if (!confirm('Annuler cette commande ?')) return; try { await MG.api('/api/orders/' + ref + '/cancel', { method: 'POST', body: {} }); list(); open(ref); } catch (er) { MG.fail(er); } };
     if (MG.$('#chat')) MG.chat(MG.$('#chat'), ref);

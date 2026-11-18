@@ -28,6 +28,7 @@
   }
   S('tabs').onclick = e => { const b = e.target.closest('[data-t]'); if (!b) return; tab = b.dataset.t; [...S('tabs').children].forEach(x => x.classList.toggle('on', x === b)); show(); };
   if (location.hash === '#compta') { tab = 'compta'; [...S('tabs').children].forEach(x => x.classList.toggle('on', x.dataset.t === 'compta')); }
+  if (location.hash === '#boutique') { tab = 'shop'; [...S('tabs').children].forEach(x => x.classList.toggle('on', x.dataset.t === 'shop')); }
   if (location.hash === '#produits') { tab = 'products'; [...S('tabs').children].forEach(x => x.classList.toggle('on', x.dataset.t === 'products')); }
   function show() { clearInterval(timer); S('detail').innerHTML = ''; ({ orders, products, loyalty, compta, shop: shopTab })[tab](); }
 
@@ -40,14 +41,25 @@
         ${o.note ? `<p class="muted">Note : ${MG.esc(o.note)}</p>` : ''}
         <div class="split"><b>${MG.fcfa(o.subtotal - (o.discount || 0))} <span class="muted">${o.discount ? `(bon fidélité −${MG.fcfa(o.discount)}) ` : ''}(+ livraison ${MG.fcfa(o.delivery_fee)})</span></b>
         <div class="row">
+          ${o.status === 'awaiting_payment' && o.pay_direct ? (o.pay_ref ? `<span class="muted">Réf. client : <b>${MG.esc(o.pay_ref)}</b></span> <button class="btn small green" data-pay="confirm" data-r="${o.ref}">Paiement reçu</button><button class="btn small red" data-pay="reject" data-r="${o.ref}">Non reçu</button>` : '<span class="muted">En attente du paiement du client</span>') : ''}
           ${o.status === 'paid' ? `<button class="btn small" data-st="preparing" data-r="${o.ref}">Préparer</button>` : ''}
           ${o.status === 'preparing' ? `<button class="btn small green" data-st="ready" data-r="${o.ref}">Prête : appeler un livreur</button>` : ''}
           ${['paid', 'preparing'].includes(o.status) ? `<button class="btn small red" data-st="cancelled" data-r="${o.ref}">Annuler</button>` : ''}
-          <button class="btn small alt" data-chat="${o.ref}">Discuter</button></div></div></div>`).join('') : '<div class="card"><p>Aucune commande payée pour le moment. Vous serez notifié dès qu\'un client paie.</p></div>';
+          <button class="btn small alt" data-chat="${o.ref}">Discuter</button></div></div></div>`).join('') : '<div class="card"><p>Aucune commande pour le moment. Vous serez notifié dès qu\'un client commande ou paie.</p></div>';
     }
     await draw(); timer = setInterval(draw, 20000);
     S('pane').onclick = async e => {
-      const st = e.target.closest('[data-st]'), ch = e.target.closest('[data-chat]');
+      const st = e.target.closest('[data-st]'), ch = e.target.closest('[data-chat]'), pay = e.target.closest('[data-pay]');
+      if (pay) {
+        try {
+          if (pay.dataset.pay === 'confirm' && !confirm('Confirmer que vous avez bien reçu cet argent sur votre compte ?')) return;
+          let reason = '';
+          if (pay.dataset.pay === 'reject') { reason = prompt('Pourquoi ? (ex. : montant incorrect, paiement introuvable)', 'paiement introuvable sur mon compte'); if (reason === null) return; }
+          await MG.api('/api/seller/orders/' + pay.dataset.r + '/payment', { method: 'POST', body: { action: pay.dataset.pay, reason } });
+          MG.toast(pay.dataset.pay === 'confirm' ? 'Paiement confirmé : vous pouvez préparer la commande' : 'Commande annulée'); draw();
+        } catch (er) { MG.fail(er); }
+        return;
+      }
       if (st && st.dataset.st === 'cancelled') {
         const m = MG.modal(`<form id="cf"><h2>Annuler la commande ${MG.esc(st.dataset.r)}</h2><p class="muted" style="margin-top:0">Le client est prévenu et l'équipe du marché s'occupe du remboursement.</p>
           <label style="display:flex;gap:.6rem;align-items:flex-start;font-weight:600"><input type="radio" name="why" value="out_of_stock" checked style="width:auto;margin-top:4px"><span><b>Produit épuisé</b><br><span class="muted" style="font-weight:500">Le stock du produit passe à 0 pour éviter d'autres commandes.</span></span></label>
@@ -313,13 +325,14 @@
         ${kpi(-s.expenses, 'Dépenses', 'neg', `${a.expenses.length} dépense${a.expenses.length > 1 ? 's' : ''}`)}
         ${kpi(s.profit, 'Bénéfice', s.profit >= 0 ? 'good' : 'bad', s.profit >= 0 ? 'recettes − dépenses' : 'les dépenses dépassent les recettes')}
       </div></div>
-    ${!a.payout_set && bal.due > 0 ? `<div class="notice">Indiquez votre numéro Mobile Money pour recevoir vos <b>${MG.fcfa(bal.due)}</b> : <button type="button" class="link" id="goPay">renseigner mon numéro</button>.</div>` : ''}
+    ${!a.payout_set ? `<div class="notice">Indiquez votre numéro Mobile Money ou votre compte bancaire pour que vos clients puissent vous payer : <button type="button" class="link" id="goPay">renseigner mon compte</button>.</div>` : ''}
     <div class="acc-grid">
       <div class="card"><h3 style="margin:0">Recettes nettes ${long ? 'par mois' : 'par jour'}</h3><div id="chart" style="margin-top:var(--space-3)"></div></div>
       <div class="card"><h3 style="margin:0 0 var(--space-3)">Mon solde</h3>
         <div class="bal"><span>Gagné (ventes livrées)</span><b>${MG.fcfa(bal.earned)}</b></div>
         <div class="bal"><span>Déjà versé par le marché</span><b>−${MG.fcfa(bal.paid)}</b></div>
-        <div class="bal due"><span>Reste à recevoir</span><b>${MG.fcfa(bal.due)}</b></div>
+        <div class="bal due"><span>Reste à recevoir du marché</span><b>${MG.fcfa(bal.due)}</b></div>
+        ${bal.direct_orders ? `<div class="bal"><span>Encaissé directement (clients → vous)</span><b>${MG.fcfa(bal.direct_net)}</b></div>${bal.commission_owed ? `<div class="bal"><span>Commission due au marché</span><b>${MG.fcfa(bal.commission_owed)}</b></div>` : ''}` : ''}
         ${a.payouts.length ? `<details style="margin-top:var(--space-3)"><summary class="muted">Versements reçus (${a.payouts.length})</summary>${a.payouts.map(p => `<div class="bal small"><span>${MG.fmtDay(p.created_at.slice(0, 10))} · ${MG.esc({ airtel_money: 'Airtel Money', moov_money: 'Moov Money', virement: 'Virement', especes: 'Espèces' }[p.method] || p.method)}${p.reference ? ' · ' + MG.esc(p.reference) : ''}</span><b>${MG.fcfa(p.amount)}</b></div>`).join('')}</details>` : ''}
         ${s.cancelled ? `<p class="muted" style="font-size:.85rem;margin:var(--space-3) 0 0">${s.cancelled} commande${s.cancelled > 1 ? 's' : ''} annulée${s.cancelled > 1 ? 's' : ''} (${MG.fcfa(s.cancelled_value)}) non comptée${s.cancelled > 1 ? 's' : ''}.</p>` : ''}</div>
     </div>
@@ -367,24 +380,27 @@
       <label>Photo de couverture (fond de la page de votre boutique)</label>
       ${s.cover_photo ? `<div id="cvBox"><img src="${MG.photo(s.cover_photo)}" alt="" style="width:100%;max-height:140px;object-fit:cover;border-radius:var(--radius-m);display:block"><label style="display:flex;gap:.4rem;align-items:center;margin:.4rem 0"><input type="checkbox" id="cvDel" style="width:auto"> Retirer la couverture</label></div>` : ''}
       <input id="cv" type="file" accept="image/*"><p class="muted" style="margin:.3rem 0 0;font-size:.85rem">Conseil : une photo large (paysage) de votre boutique ou de vos produits. Sans couverture, la page utilise une photo de vos produits.</p>
-      <h3 style="margin:var(--space-5) 0 var(--space-2)">Où vous verser votre argent</h3>
-      <p class="muted" style="margin:0 0 var(--space-3)">Le marché vous verse vos ventes livrées sur ce numéro Mobile Money. <b>Seule l'équipe du marché le voit</b> : jamais les clients.</p>
+      <h3 style="margin:var(--space-5) 0 var(--space-2)">Où vos clients vous paient</h3>
+      <p class="muted" style="margin:0 0 var(--space-3)">Au moment de payer, le client voit ce compte et y envoie l'argent de ses achats. Vous confirmez ensuite la réception dans « Commandes ». Les autres personnes ne voient jamais ces informations.</p>
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:0 var(--space-3)">
-        <div><label for="pm">Moyen de paiement</label><select id="pm"><option value="airtel_money"${s.payout_method !== 'moov_money' ? ' selected' : ''}>Airtel Money</option><option value="moov_money"${s.payout_method === 'moov_money' ? ' selected' : ''}>Moov Money</option></select></div>
-        <div><label for="pn">Numéro où faire le dépôt</label><input id="pn" type="tel" inputmode="tel" maxlength="20" value="${MG.esc(s.payout_number || '')}" placeholder="Ex. 077 12 34 56"></div>
+        <div><label for="pm">Moyen de paiement</label><select id="pm"><option value="airtel_money"${(s.payout_method || 'airtel_money') === 'airtel_money' ? ' selected' : ''}>Airtel Money</option><option value="moov_money"${s.payout_method === 'moov_money' ? ' selected' : ''}>Moov Money</option><option value="bank"${s.payout_method === 'bank' ? ' selected' : ''}>Compte bancaire</option></select></div>
+        <div><label for="pn" id="pnl">Numéro où faire le dépôt</label><input id="pn" maxlength="40" value="${MG.esc(s.payout_number || '')}" placeholder="Ex. 077 12 34 56"></div>
         <div><label for="pnm">Nom du titulaire</label><input id="pnm" maxlength="80" value="${MG.esc(s.payout_name || '')}" placeholder="Nom inscrit sur le compte"></div>
-        <div><label for="pc">Code marchand (facultatif)</label><input id="pc" maxlength="30" value="${MG.esc(s.payout_code || '')}" placeholder="Si vous en avez un"></div></div>
+        <div id="pcw"><label for="pc">Code marchand (facultatif)</label><input id="pc" maxlength="30" value="${MG.esc(s.payout_code || '')}" placeholder="Si vous en avez un"></div>
+        <div id="pbw" hidden><label for="pb">Nom de la banque</label><input id="pb" maxlength="60" value="${MG.esc(s.payout_bank || '')}" placeholder="Ex. BGFI, UGB, Ecobank"></div></div>
       <div class="row" style="margin-top:.8rem"><button type="button" class="btn alt small" id="gp">📍 Enregistrer la position de la boutique</button><span class="muted" id="gs">${s.lat != null ? '✅ Position enregistrée' : 'Nécessaire pour calculer la livraison et trouver les livreurs proches.'}</span></div>
       <p><button class="btn">Enregistrer</button></p></form>`;
     const dbox = document.createElement('div'); dbox.style.marginTop = 'var(--space-4)'; S('pane').appendChild(dbox);
     MG.docsCard(dbox, { title: 'Document administratif de la boutique', intro: 'L\'autorisation d\'ouverture de votre commerce délivrée par l\'administration, en photo ou en PDF.' }).catch(() => {});
+    const syncPay = () => { const bank = S('pm').value === 'bank'; S('pbw').hidden = !bank; S('pcw').hidden = bank; S('pnl').textContent = bank ? 'Numéro de compte (IBAN ou RIB)' : 'Numéro où faire le dépôt'; };
+    S('pm').onchange = syncPay; syncPay();
     let pos = null;
     S('gp').onclick = async () => { try { pos = await MG.getPosition(); S('gs').textContent = '✅ Position prise, pensez à enregistrer'; } catch (er) { MG.fail(er); } };
     S('sf').onsubmit = async e => {
       e.preventDefault();
       try {
         const f = S('ph').files[0];
-        const body = { name: S('n').value, category: S('c').value, description: S('d').value, address: S('a').value, phone: S('p').value, whatsapp: S('w').value, payout_method: S('pm').value, payout_number: S('pn').value, payout_name: S('pnm').value, payout_code: S('pc').value, lat: pos && pos.lat, lng: pos && pos.lng };
+        const body = { name: S('n').value, category: S('c').value, description: S('d').value, address: S('a').value, phone: S('p').value, whatsapp: S('w').value, payout_method: S('pm').value, payout_number: S('pn').value, payout_name: S('pnm').value, payout_code: S('pc').value, payout_bank: S('pb').value, lat: pos && pos.lat, lng: pos && pos.lng };
         if (f) body.photo_id = await MG.uploadPhoto(f);
         const cf = S('cv').files[0];
         if (cf) body.cover_photo = await MG.uploadPhoto(cf); else if (S('cvDel') && S('cvDel').checked) body.cover_photo = null;

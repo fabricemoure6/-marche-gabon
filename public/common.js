@@ -43,6 +43,32 @@
     return out.id;
   };
 
+  // ---------- Paiement direct : où envoyer l'argent ----------
+  // acc = { method, methodLabel, number, name, code, bank }
+  MG.accountBox = function (acc, amount) {
+    if (!acc) return '';
+    const bank = acc.method === 'bank';
+    return `<div class="payacc"><div><span class="muted">${bank ? 'Compte bancaire' : 'Envoyer par'}</span> <b>${MG.esc(acc.methodLabel || '')}</b>${bank && acc.bank ? ` · ${MG.esc(acc.bank)}` : ''}</div>
+      <div class="payno"><span>${bank ? 'N° de compte' : 'Numéro'}</span><b>${MG.esc(acc.number)}</b><button type="button" class="btn small alt" data-copy="${MG.esc(acc.number)}">Copier</button></div>
+      ${acc.name ? `<div><span class="muted">Titulaire</span> <b>${MG.esc(acc.name)}</b></div>` : ''}${acc.code ? `<div><span class="muted">Code marchand</span> <b>${MG.esc(acc.code)}</b></div>` : ''}
+      ${amount != null ? `<div class="payamt">Montant à envoyer : <b>${MG.fcfa(amount)}</b></div>` : ''}</div>`;
+  };
+  document.addEventListener('click', e => {
+    const b = e.target.closest('[data-copy]'); if (!b) return;
+    const v = b.dataset.copy;
+    (navigator.clipboard ? navigator.clipboard.writeText(v) : Promise.reject()).then(() => MG.toast('Numéro copié'), () => { const t = document.createElement('input'); t.value = v; document.body.appendChild(t); t.select(); try { document.execCommand('copy'); MG.toast('Numéro copié'); } catch (er) { /* ignoré */ } t.remove(); });
+  });
+  // Bloc « payer la boutique » / « payer le livreur » d'une commande (p = order.pay.shop ou order.pay.fee)
+  MG.payBlock = function (title, p, who, ref, kind) {
+    const S = { to_pay: ['À payer', 'pending'], submitted: ['Paiement déclaré, en attente de confirmation', 'pending'], paid: ['Payé et confirmé', 'active'], cancelled: ['Annulé', 'cancelled'], waiting_courier: ['En attente d\'un livreur', 'cancelled'] }[p.state];
+    return `<div class="card paycard"><h3 style="margin:0 0 .4rem">${MG.esc(title)} <span class="tag ${S[1]}">${S[0]}</span></h3>
+      ${p.state === 'waiting_courier' ? `<p class="muted" style="margin:0">Dès qu'un livreur accepte votre commande, vous verrez ici son numéro pour lui envoyer les ${MG.fcfa(p.amount)} de frais de livraison.</p>`
+        : p.state === 'to_pay' ? `<p style="margin:0 0 .5rem">Envoyez ${MG.fcfa(p.amount)} ${who}, puis saisissez la référence de la transaction.</p>${p.account ? MG.accountBox(p.account, p.amount) : '<p class="muted">Le compte de paiement n\'est pas renseigné.</p>'}
+          <label for="ref-${kind}">Référence de la transaction (SMS de confirmation)</label><div class="row"><input id="ref-${kind}" maxlength="60" placeholder="Ex. : MP240101.1234.A12345"><button type="button" class="btn" data-sendproof="${kind}" data-ref="${ref}">J'ai payé</button></div>`
+        : p.state === 'submitted' ? `<p class="muted" style="margin:0">Référence envoyée : <b>${MG.esc(p.ref || '')}</b>. ${kind === 'proof' ? 'La boutique vérifie son compte puis confirme.' : 'Le livreur confirmera la réception.'}</p>`
+        : p.state === 'paid' ? '<p class="muted" style="margin:0">Merci, tout est en ordre.</p>' : '<p class="muted" style="margin:0">Cette commande a été annulée.</p>'}</div>`;
+  };
+
   // ---------- Pièces justificatives (facultatives, privées) ----------
   // Une photo est réduite à 1600 px ; un PDF part tel quel (1 Mo maximum).
   const DOC_STATE = { pending: ['En attente de vérification', 'pending'], verified: ['Vérifiée', 'active'], rejected: ['Refusée', 'suspended'] };
