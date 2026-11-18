@@ -339,7 +339,7 @@
     const box = S('bk'); if (!box) return;
     const st = await MG.api('/api/admin/backups');
     const size = n => n > 1048576 ? (n / 1048576).toFixed(1) + ' Mo' : Math.max(1, Math.round(n / 1024)) + ' Ko';
-    if (!st.enabled) { box.innerHTML = '<div class="card" style="max-width:600px;margin-top:var(--space-4)"><h3>Sauvegardes</h3><p class="notice">Le stockage des sauvegardes n\'est pas encore actif sur ce site. Il s\'active au prochain déploiement ; si ce message reste, le service R2 doit être activé dans le compte Cloudflare.</p></div>'; return; }
+    if (!st.enabled) { box.innerHTML = '<div class="card" style="max-width:600px;margin-top:var(--space-4)"><h3>Sauvegardes</h3><p class="notice">Le stockage des sauvegardes n\'est pas encore relié au site : il faut d\'abord activer R2 dans le compte Cloudflare, puis relier le stockage (voir le README, « Sauvegardes »). La base reste protégée par l\'historique intégré de Cloudflare (Time Travel) en attendant.</p></div>'; return; }
     const last = st.backups[0], age = last ? Math.round((Date.now() - new Date(last.created)) / 36e5) : null;
     box.innerHTML = `<div class="card" style="max-width:760px;margin-top:var(--space-4)"><h3 style="margin-top:0">Sauvegardes de la base</h3>
       <p class="muted" style="margin-top:0">Une copie complète est faite chaque nuit et les 30 dernières sont gardées. ${st.encrypted ? '<span class="tag active">Chiffrées</span>' : '<span class="tag pending">Non chiffrées</span> Pour les chiffrer, ajoutez le secret <code>BACKUP_KEY</code> dans Cloudflare.'}</p>

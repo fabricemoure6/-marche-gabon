@@ -11,11 +11,11 @@
   // Base de données D1 créée automatiquement au premier déploiement (wrangler >= 4.45)
   "d1_databases": [
     { "binding": "DB", "database_name": "marche-gabon-db" }
-  ],
-  // Sauvegardes : le bucket R2 est créé automatiquement au déploiement (sans nom de bucket)
-  "r2_buckets": [
-    { "binding": "BACKUPS" }
-  ],
-  // Fait avancer la sauvegarde du jour (reprise par morceaux) et vérifie qu'elle n'est pas en retard
-  "triggers": { "crons": ["*/15 * * * *"] }
+  ]
+
+  // --- Sauvegardes : le code est en place (src/backup.js) mais le stockage R2 n'est pas encore relié. ---
+  // Quand R2 est activé sur le compte Cloudflare, ajouter une virgule après le bloc d1_databases ci-dessus,
+  // puis décommenter ces deux lignes :
+  //   "r2_buckets": [ { "binding": "BACKUPS" } ],        // le bucket est créé automatiquement au déploiement
+  //   "triggers": { "crons": ["*/15 * * * *"] }          // fait avancer la sauvegarde du jour
 }
