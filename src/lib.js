@@ -136,6 +136,9 @@ const SCHEMA = [
   `CREATE TABLE IF NOT EXISTS admin_actions (id TEXT PRIMARY KEY, admin_id TEXT NOT NULL, admin_name TEXT, action TEXT NOT NULL, target_type TEXT,
      target_id TEXT, target_name TEXT, reason TEXT, created_at TEXT)`,
   `CREATE INDEX IF NOT EXISTS idx_admin_actions ON admin_actions(created_at)`,
+  // Pièces justificatives (facultatives) : visibles seulement par leur propriétaire et par l'administrateur
+  `CREATE TABLE IF NOT EXISTS documents (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, kind TEXT NOT NULL, mime TEXT NOT NULL, data TEXT NOT NULL, size INTEGER,
+     status TEXT NOT NULL DEFAULT 'pending', note TEXT, created_at TEXT, reviewed_at TEXT, reviewed_by TEXT, UNIQUE (user_id, kind))`,
   `CREATE TABLE IF NOT EXISTS loyalty_cards (user_id TEXT NOT NULL, shop_id TEXT NOT NULL, stamps INTEGER NOT NULL DEFAULT 0, orders INTEGER NOT NULL DEFAULT 0,
      spent INTEGER NOT NULL DEFAULT 0, updated_at TEXT, PRIMARY KEY (user_id, shop_id))`,
   `CREATE TABLE IF NOT EXISTS vouchers (id TEXT PRIMARY KEY, code TEXT UNIQUE NOT NULL, user_id TEXT NOT NULL, shop_id TEXT NOT NULL, kind TEXT NOT NULL,
@@ -235,6 +238,16 @@ export function fromBase64(b64) {
   const out = new Uint8Array(s.length);
   for (let i = 0; i < s.length; i++) out[i] = s.charCodeAt(i);
   return out;
+}
+// Pièces justificatives : un livreur peut fournir carte d'identité, permis ou passeport ; une boutique, son document administratif d'ouverture.
+export const DOC_KINDS = {
+  cni: { label: 'Carte d\'identité', roles: ['courier'] }, permis: { label: 'Permis de conduire', roles: ['courier'] },
+  passeport: { label: 'Passeport', roles: ['courier'] }, autorisation: { label: 'Autorisation d\'ouverture du commerce', roles: ['seller'] }
+};
+export function sniffDocument(buf) {
+  const b = new Uint8Array(buf.slice(0, 5));
+  if (b[0] === 0x25 && b[1] === 0x50 && b[2] === 0x44 && b[3] === 0x46 && b[4] === 0x2d) return 'application/pdf';
+  return sniffImage(buf);
 }
 export function sniffImage(buf) {
   const b = new Uint8Array(buf.slice(0, 12));

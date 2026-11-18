@@ -13,7 +13,7 @@
   <h1>Administration</h1>
   <div class="tabs" id="tabs">
     <button data-t="overview" class="on">Vue d'ensemble</button><button data-t="payments">Paiements</button><button data-t="shops">Boutiques</button>
-    <button data-t="orders">Commandes</button><button data-t="users">Utilisateurs</button><button data-t="invites">Invitations</button><button data-t="compta">Comptabilité</button><button data-t="settings">Réglages</button></div>
+    <button data-t="orders">Commandes</button><button data-t="users">Utilisateurs</button><button data-t="docs">Pièces</button><button data-t="invites">Invitations</button><button data-t="compta">Comptabilité</button><button data-t="settings">Réglages</button></div>
   <div id="pane"></div>
 </main>
 <script src="/common.js"></script>
@@ -23,7 +23,7 @@
   const S = id => MG.$('#' + id), pane = S('pane');
   let tab = 'overview';
   S('tabs').onclick = e => { const b = e.target.closest('[data-t]'); if (!b) return; tab = b.dataset.t; [...S('tabs').children].forEach(x => x.classList.toggle('on', x === b)); show(); };
-  const T = { overview, payments, shops, orders, users, invites, compta, settings };
+  const T = { overview, payments, shops, orders, users, docs, invites, compta, settings };
   const show = () => T[tab]().catch(MG.fail);
 
   // Fenêtre de confirmation sécurisée : motif + mot de passe de l'administrateur.
@@ -81,7 +81,7 @@
     const list = await MG.api('/api/admin/shops');
     pane.innerHTML = `<div class="card scroll"><table><thead><tr><th>Boutique</th><th>Gestionnaire</th><th>Catégorie</th><th>État</th><th></th></tr></thead><tbody>${list.map(s => `<tr>
       <td>${MG.esc(s.name)}<br><small class="muted">${MG.esc(s.address || '')}</small></td><td>${MG.esc(s.owner)}<br><small>${MG.esc(s.phone || '')}</small></td><td>${MG.esc(MG.catName(s.category))}</td>
-      <td><span class="tag ${s.status}">${s.status}</span></td>
+      <td><span class="tag ${s.status}">${s.status}</span><br><small class="muted">${{ verified: 'Document vérifié', pending: 'Document à vérifier', rejected: 'Document refusé' }[s.doc_status] || 'Pas de document'}</small></td>
       <td>${s.status !== 'active' ? `<button class="btn small green" data-s="active" data-id="${s.id}">${s.status === 'pending' ? 'Valider' : 'Réactiver'}</button>` : `<button class="btn small red" data-s="suspended" data-id="${s.id}">Suspendre</button>`}</td></tr>`).join('')}</tbody></table></div>`;
     pane.onclick = async e => {
       const b = e.target.closest('[data-s]'); if (!b) return;
@@ -102,6 +102,35 @@
       <td>${MG.esc(o.ref)}<br><small class="muted">${MG.date(o.created_at)}</small></td><td>${MG.esc(o.shop)}</td><td>${MG.esc(o.customer)}</td><td>${MG.fcfa(o.total)}</td><td><span class="tag ${o.status}">${MG.esc(o.statusLabel)}</span></td></tr>`).join('')}</tbody></table></div>`;
   }
 
+  // Pièces justificatives envoyées par les livreurs et les boutiques (facultatives, privées)
+  async function docs() {
+    const list = await MG.api('/api/admin/documents');
+    const ST = { pending: ['À vérifier', 'pending'], verified: ['Vérifiée', 'active'], rejected: ['Refusée', 'suspended'] };
+    const todo = list.filter(d => d.status === 'pending').length;
+    pane.innerHTML = `<p class="muted">Ces pièces ne sont visibles que par vous et par la personne concernée. Chaque consultation est enregistrée dans le journal.</p>
+      ${list.length ? `<div class="card scroll"><table><thead><tr><th>Personne</th><th>Pièce</th><th>État</th><th></th></tr></thead><tbody>${list.map(d => `<tr>
+        <td><b>${MG.esc(d.name)}</b><br><small>${d.role === 'courier' ? 'Livreur' : 'Boutique' + (d.shop ? ' : ' + MG.esc(d.shop) : '')} · ${MG.esc(d.phone || d.email)}</small></td>
+        <td>${MG.esc(d.label)}<br><small>${MG.date(d.created_at)}</small></td>
+        <td><span class="tag ${ST[d.status][1]}">${ST[d.status][0]}</span>${d.note ? `<br><small>${MG.esc(d.note)}</small>` : ''}</td>
+        <td><button class="btn small alt" data-v="${d.id}">Voir</button> ${d.status !== 'verified' ? `<button class="btn small green" data-ok="${d.id}">Valider</button>` : ''} ${d.status !== 'rejected' ? `<button class="btn small red" data-no="${d.id}">Refuser</button>` : ''}</td></tr>`).join('')}</tbody></table></div>`
+      : '<div class="card"><p>Aucune pièce envoyée pour le moment. Les livreurs et les boutiques peuvent en ajouter, mais ce n\'est pas obligatoire.</p></div>'}`;
+    if (todo) pane.insertAdjacentHTML('afterbegin', `<div class="notice">${todo} pièce${todo > 1 ? 's' : ''} à vérifier.</div>`);
+    pane.onclick = async e => {
+      const v = e.target.closest('[data-v]'), ok = e.target.closest('[data-ok]'), no = e.target.closest('[data-no]');
+      try {
+        if (v) await MG.openDocument(v.dataset.v);
+        if (ok) { await MG.api('/api/admin/documents/' + ok.dataset.ok + '/review', { method: 'POST', body: { status: 'verified' } }); MG.toast('Pièce validée'); docs(); }
+        if (no) {
+          const m = MG.modal(`<form id="rf"><h2>Refuser la pièce</h2><p class="muted">Le message sera envoyé à la personne pour qu'elle puisse en fournir une nouvelle.</p>
+            <label for="rn">Motif</label><textarea id="rn" required maxlength="300" placeholder="Ex. : photo floue, document expiré…"></textarea><p class="err" id="re"></p>
+            <div class="row"><button type="button" class="btn alt" data-close>Annuler</button><button class="btn red">Refuser</button></div></form>`);
+          m.el.querySelector('#rf').onsubmit = async ev => { ev.preventDefault();
+            try { await MG.api('/api/admin/documents/' + no.dataset.no + '/review', { method: 'POST', body: { status: 'rejected', note: m.el.querySelector('#rn').value } }); m.close(); MG.toast('Pièce refusée, la personne est prévenue'); docs(); }
+            catch (er) { m.el.querySelector('#re').textContent = er.message; } };
+        }
+      } catch (er) { MG.fail(er); }
+    };
+  }
   async function users() {
     const list = await MG.api('/api/admin/users');
     const R = ROLE;

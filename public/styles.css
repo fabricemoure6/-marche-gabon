@@ -693,3 +693,6 @@ label.consent input{width:20px;height:20px;min-height:0;flex:none;margin-top:2px
 .ord-id{display:flex;align-items:center;gap:.7rem}.ord-id img{flex:none}
 .per{font-weight:600;color:var(--muted);font-size:.7em}
 .weigh-band{background:var(--foret);color:var(--on-foret)}
+
+.docrow{display:flex;justify-content:space-between;align-items:center;gap:var(--space-3);flex-wrap:wrap;padding:.8rem 0;border-top:1px solid var(--line)}
+.docs h3 .tag{vertical-align:middle;margin-left:.4rem}

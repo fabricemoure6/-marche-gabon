@@ -85,3 +85,7 @@ Le logo (un éventail de feuilles : orange, vert, bleu et un cœur jaune) a ét�
 ## Produits vendus au kilo, au litre, au tas…
 
 Chaque produit a une **unité de vente** choisie par le vendeur dans « Ajouter un produit » : à la pièce (par défaut), au kilo, au litre, au tas, au sachet ou à la botte. Kilo et litre acceptent les quantités décimales ; le vendeur règle la quantité minimale (0,25, 0,5 ou 1) et le client commande par paliers. Le prix est celui d'une unité (« 3 500 FCFA / kg »), le stock est compté dans la même unité, le total d'une ligne est arrondi au franc. Les produits non vendus à la pièce apparaissent aussi dans la rubrique « Vendus au kilo et à la mesure » de l'accueil (`GET /api/by-weight`). Colonnes ajoutées : `products.unit`, `products.qty_step`, `order_items.unit` (migration automatique).
+
+## Pièces justificatives (facultatives)
+
+Un livreur peut ajouter sa carte d'identité, son permis ou son passeport ; une boutique, son document administratif d'ouverture du commerce (photo ou PDF, 1 Mo). Rien n'est obligatoire. Les pièces sont stockées dans la table `documents` (une par type et par personne), servies uniquement par `GET /api/documents/:id` à leur propriétaire et à l'administrateur (`cache-control: private, no-store`, jamais par la route publique des photos). L'administrateur les valide ou les refuse avec un motif dans l'onglet « Pièces » ; chaque consultation est inscrite au journal des actions et la personne est prévenue de la décision.

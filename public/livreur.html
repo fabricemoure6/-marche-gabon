@@ -17,6 +17,7 @@
   <div id="jobs"></div>
   <h2>Mes courses</h2>
   <div id="mine"></div>
+  <div id="docs" style="margin-top:var(--space-5)"></div>
   <div id="detail"></div>
 </main>
 <script src="/common.js"></script>
@@ -111,6 +112,7 @@
       MG.chat(S('chat'), o.ref); S('detail').scrollIntoView({ behavior: 'smooth' });
     }
   };
+  MG.docsCard(S('docs'), { title: 'Mes pièces d\'identité', intro: 'Carte d\'identité, permis de conduire ou passeport : une pièce vérifiée renforce la confiance de l\'équipe du marché.' }).catch(() => {});
   await jobs(); await mine();
   setInterval(() => { jobs(); mine(); }, 20000);
 })();
