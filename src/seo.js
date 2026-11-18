@@ -1,6 +1,6 @@
 // Référencement : pages rendues côté serveur (contenu, titres, aperçus de partage, données structurées),
 // sitemap.xml et robots.txt. Le JavaScript du navigateur reprend ensuite la main sur les mêmes éléments.
-import { CATEGORIES, loadSettings, publicProduct, EFFECTIVE_PRICE, LOW_STOCK } from './lib.js';
+import { CATEGORIES, loadSettings, publicProduct, EFFECTIVE_PRICE, LOW_STOCK, UNITS, fmtQty } from './lib.js';
 
 const ILLU = { habits: 'pagne-wax', parfumerie: 'parfum', alimentation: 'bananes-plantain', quincaillerie: 'sac-riz', electronique: 'smartphone', maison: 'marmite', autres: 'panier-tresse' };
 const illu = cat => '/img/produits/' + (ILLU[cat] || 'panier-tresse') + '.svg';
@@ -31,13 +31,13 @@ function headTags({ title, description, url, image, imageAlt, type = 'website', 
 function productCard(p, cat, eager) {
   const out = !(p.stock > 0);
   const badge = out ? '<span class="tag out">Épuisé</span>' : p.promo_pct ? `<span class="tag promo">−${p.promo_pct} %</span>` : '';
-  const stock = out ? '<span class="stock-info out">Épuisé</span>' : p.stock <= LOW_STOCK ? `<span class="stock-info low">Plus que ${p.stock} en stock</span>` : '<span class="stock-info ok">En stock</span>';
+  const stock = out ? '<span class="stock-info out">Épuisé</span>' : p.stock <= LOW_STOCK ? `<span class="stock-info low">Plus que ${fmtQty(p.stock, p.unit)} en stock</span>` : '<span class="stock-info ok">En stock</span>';
   const n = (p.photos || []).length;
   return `<article class="tile product${out ? ' out' : ''}${p.promo_pct ? ' is-promo' : ''}">
     <div class="pimg" data-gal="${esc(p.id)}" role="button" tabindex="0" aria-label="Voir ${esc(p.name)}"><img src="${p.photo_id ? photo(p.photo_id) : illu(p.category || cat)}" alt="${esc(p.name)}" width="400" height="300"${eager ? ' fetchpriority="high"' : ' loading="lazy"'}><div class="pbadges" aria-hidden="true">${badge}</div>${n > 1 ? `<span class="pcount" aria-hidden="true">${n}</span>` : ''}</div>
     <div class="pbody">${p.shop_name ? `<a class="pshop" href="/boutique/${encodeURIComponent(p.slug)}">${esc(p.shop_name)}</a>` : ''}<h3 class="pname">${esc(p.name)}</h3>${p.description && !p.shop_name ? `<p class="pdesc">${esc(p.description)}</p>` : ''}${stock}
-      <div class="pfoot"><div>${p.old_price ? `<span class="old">${fcfa(p.old_price)}</span>` : ''}<span class="price">${fcfa(p.price)}</span></div>
-      ${out ? `<button class="btn small alt notify" data-alert="${esc(p.id)}" data-on="0">${icon('bell', 16)}Me prévenir</button>` : `<button class="add" data-add="${esc(p.id)}" data-stock="${p.stock}" aria-label="Ajouter ${esc(p.name)} au panier">${icon('plus')}</button>`}</div></div></article>`;
+      <div class="pfoot"><div>${p.old_price ? `<span class="old">${fcfa(p.old_price)}</span>` : ''}<span class="price">${fcfa(p.price)}</span>${(UNITS[p.unit] || UNITS.piece).short ? `<small class="per"> / ${UNITS[p.unit].short}</small>` : ''}</div>
+      ${out ? `<button class="btn small alt notify" data-alert="${esc(p.id)}" data-on="0">${icon('bell', 16)}Me prévenir</button>` : `<button class="add" data-add="${esc(p.id)}" data-stock="${p.stock}" data-step="${p.qty_step || 1}" data-unit="${p.unit || 'piece'}" aria-label="Ajouter ${esc(p.name)} au panier">${icon('plus')}</button>`}</div></div></article>`;
 }
 function shopCard(s) {
   const cover = s.cover_id ? photo(s.cover_id) : s.photo_id ? photo(s.photo_id) : illu(s.category);
@@ -66,7 +66,7 @@ async function page(env, url, path) {
 async function homePage(env, url) {
   const [st, shops] = await Promise.all([loadSettings(env), activeShops(env)]);
   const { results: promoRows } = await env.DB.prepare(
-    `SELECT p.id,p.name,p.description,p.price,p.promo_price,p.promo_until,p.stock,p.photo_id,p.photos,s.name AS shop_name,s.slug,s.category
+    `SELECT p.id,p.name,p.description,p.price,p.promo_price,p.promo_until,p.stock,p.unit,p.qty_step,p.photo_id,p.photos,s.name AS shop_name,s.slug,s.category
      FROM products p JOIN shops s ON s.id=p.shop_id WHERE p.active=1 AND p.stock>0 AND s.status='active' AND ${EFFECTIVE_PRICE} < p.price
      ORDER BY (1.0 * p.promo_price / p.price) ASC, p.promo_until ASC LIMIT 24`).all();
   const promos = promoRows.map(publicProduct);
@@ -101,7 +101,7 @@ async function shopPage(env, url, slug) {
   const st = await loadSettings(env);
   const s = await env.DB.prepare(`SELECT id,name,slug,category,description,address,photo_id,cover_photo,phone,created_at,loyalty_enabled,loyalty_every,loyalty_kind,loyalty_value,loyalty_min FROM shops WHERE slug=?1 AND status='active'`).bind(slug).first();
   if (!s) return null;
-  const { results } = await env.DB.prepare(`SELECT id,name,description,price,promo_price,promo_until,stock,photo_id,photos,created_at FROM products WHERE shop_id=?1 AND active=1 ORDER BY created_at DESC`).bind(s.id).all();
+  const { results } = await env.DB.prepare(`SELECT id,name,description,price,promo_price,promo_until,stock,unit,qty_step,photo_id,photos,created_at FROM products WHERE shop_id=?1 AND active=1 ORDER BY created_at DESC`).bind(s.id).all();
   const products = results.map(publicProduct).sort((a, b) => (b.promo_pct ? 1 : 0) - (a.promo_pct ? 1 : 0) || (b.stock > 0) - (a.stock > 0));
   const origin = url.origin, site = st.site_name, pageUrl = `${origin}/boutique/${encodeURIComponent(s.slug)}`;
   const cat = catName(s.category), promos = products.filter(p => p.promo_pct && p.stock > 0);

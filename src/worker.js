@@ -2,8 +2,7 @@
 import {
   json, bad, rand, uid, now, sha256, safeEqual, hashPassword, createSession, clearCookie, currentUser, destroySession,
   CATEGORIES, ORDER_STATUS, ensureSchema, loadSettings, saveSettings, toBase64, fromBase64, sniffImage,
-  validCoord, distanceKm, slugify, EFFECTIVE_PRICE, promoActive, publicProduct, voucherDiscount, loyaltyProgram, LOW_STOCK, photoList, SOLD, EXPENSE_CATS, period
-} from './lib.js';
+  validCoord, distanceKm, slugify, EFFECTIVE_PRICE, promoActive, publicProduct, voucherDiscount, loyaltyProgram, LOW_STOCK, photoList, SOLD, EXPENSE_CATS, period, UNITS, r3, unitOf, stepOf, fmtQty, lineTotal } from './lib.js';
 import { notify, confirmCheckout, rejectCheckout, cancelOrders, releaseVoucher, createVoucher, awardLoyalty, startOnlinePayment, singpayVerify, singpayOn, singpayCall, sp } from './pay.js';
 import { botReply, searchProducts } from './bot.js';
 import { seoRoute } from './seo.js';
@@ -186,7 +185,7 @@ async function resetPassword(request, env) {
 
 // ---------- Aides communes ----------
 async function itemsOf(env, orderId) {
-  const { results } = await env.DB.prepare('SELECT name,price,qty FROM order_items WHERE order_id=?1').bind(orderId).all();
+  const { results } = await env.DB.prepare('SELECT name,price,qty,unit FROM order_items WHERE order_id=?1').bind(orderId).all();
   return results;
 }
 
@@ -267,9 +266,15 @@ export default {
            FROM shops s WHERE s.status='active' ORDER BY promos > 0 DESC, s.name`).all();
         return json(results.filter(s => (!cat || s.category === cat) && (!q || (s.name + ' ' + (s.description || '')).toLowerCase().includes(q))));
       }
+      if (method === 'GET' && p === '/api/by-weight') { // produits vendus au kilo, au litre, au tas…
+        const { results } = await env.DB.prepare(
+          `SELECT p.id,p.name,p.description,p.price,p.promo_price,p.promo_until,p.stock,p.unit,p.qty_step,p.photo_id,p.photos,s.name AS shop_name,s.slug,s.category
+           FROM products p JOIN shops s ON s.id=p.shop_id WHERE p.active=1 AND p.stock>0 AND s.status='active' AND p.unit!='piece' ORDER BY p.created_at DESC LIMIT 24`).all();
+        return json(results.map(publicProduct));
+      }
       if (method === 'GET' && p === '/api/promotions') {
         const { results } = await env.DB.prepare(
-          `SELECT p.id,p.name,p.description,p.price,p.promo_price,p.promo_until,p.stock,p.photo_id,p.photos,s.name AS shop_name,s.slug,s.category
+          `SELECT p.id,p.name,p.description,p.price,p.promo_price,p.promo_until,p.stock,p.unit,p.qty_step,p.photo_id,p.photos,s.name AS shop_name,s.slug,s.category
            FROM products p JOIN shops s ON s.id=p.shop_id
            WHERE p.active=1 AND p.stock>0 AND s.status='active' AND ${EFFECTIVE_PRICE} < p.price
            ORDER BY (1.0 * p.promo_price / p.price) ASC, p.promo_until ASC LIMIT 24`).all();
@@ -295,7 +300,7 @@ export default {
           mine = { stamps: card ? card.stamps : 0, orders: card ? card.orders : 0, vouchers: v.n, alerts: al.map(x => x.product_id) };
         }
         const { results } = await env.DB.prepare(
-          `SELECT id,name,description,price,promo_price,promo_until,stock,photo_id,photos,created_at FROM products WHERE shop_id=?1 AND active=1 ORDER BY created_at DESC`).bind(s.id).all();
+          `SELECT id,name,description,price,promo_price,promo_until,stock,unit,qty_step,photo_id,photos,created_at FROM products WHERE shop_id=?1 AND active=1 ORDER BY created_at DESC`).bind(s.id).all();
         const list = results.map(publicProduct).sort((a, b) => (b.promo_pct ? 1 : 0) - (a.promo_pct ? 1 : 0) || (b.stock > 0) - (a.stock > 0));
         return json({ shop: { ...s, loyalty }, products: list, mine });
       }
@@ -391,7 +396,7 @@ export default {
       // ----- Panier -----
       if (method === 'GET' && p === '/api/cart') {
         const { results } = await env.DB.prepare(
-          `SELECT c.product_id,c.qty,p.name,${EFFECTIVE_PRICE} AS price,p.price AS base_price,p.stock,p.photo_id,p.active,s.id AS shop_id,s.name AS shop_name,s.slug,s.status AS shop_status
+          `SELECT c.product_id,c.qty,p.name,${EFFECTIVE_PRICE} AS price,p.price AS base_price,p.stock,p.unit,p.qty_step,p.photo_id,p.active,s.id AS shop_id,s.name AS shop_name,s.slug,s.status AS shop_status
            FROM cart_items c JOIN products p ON p.id=c.product_id JOIN shops s ON s.id=p.shop_id WHERE c.user_id=?1`).bind(user.id).all();
         const { results: vouchers } = await env.DB.prepare(
           `SELECT id,code,shop_id,kind,value,min_order,expires_at FROM vouchers WHERE user_id=?1 AND used_at IS NULL AND expires_at>?2 ORDER BY expires_at`).bind(user.id, Date.now()).all();
@@ -399,14 +404,17 @@ export default {
       }
       if (method === 'PUT' && p === '/api/cart') {
         const b = await readJson(request);
-        const qty = Math.floor(num(b && b.qty));
-        const prod = b && await env.DB.prepare(`SELECT p.id,p.stock FROM products p JOIN shops s ON s.id=p.shop_id WHERE p.id=?1 AND p.active=1 AND s.status='active'`).bind(String(b.productId || '')).first();
+        const prod = b && await env.DB.prepare(`SELECT p.id,p.stock,p.unit,p.qty_step FROM products p JOIN shops s ON s.id=p.shop_id WHERE p.id=?1 AND p.active=1 AND s.status='active'`).bind(String(b.productId || '')).first();
         if (!prod) return bad('Produit introuvable', 404);
+        const dec = UNITS[prod.unit].decimal, step = prod.qty_step || 1;
+        let qty = dec ? r3(Math.round(num(b.qty) / step) * step) : Math.floor(num(b.qty));
         if (!Number.isFinite(qty) || qty < 0 || qty > 99) return bad('Quantité invalide');
         if (qty === 0) await env.DB.prepare('DELETE FROM cart_items WHERE user_id=?1 AND product_id=?2').bind(user.id, prod.id).run();
         else {
           if (prod.stock <= 0) return bad('Ce produit est épuisé. Activez « Me prévenir » pour savoir quand il revient.', 409, { stock: 0 });
-          const q = Math.min(qty, prod.stock); // jamais plus que le stock : on ajuste et on prévient
+          let q = Math.min(qty, prod.stock); // jamais plus que le stock : on ajuste et on prévient
+          if (dec) q = r3(Math.floor(q / step + 1e-9) * step);
+          if (q <= 0) return bad(`Il ne reste que ${fmtQty(prod.stock, prod.unit)} : moins que la quantité minimale (${fmtQty(step, prod.unit)}).`, 409, { stock: prod.stock });
           await env.DB.prepare('INSERT INTO cart_items (user_id,product_id,qty) VALUES (?1,?2,?3) ON CONFLICT(user_id,product_id) DO UPDATE SET qty=excluded.qty').bind(user.id, prod.id, q).run();
           return json({ ok: true, qty: q, stock: prod.stock, adjusted: q < qty });
         }
@@ -434,13 +442,13 @@ export default {
         if (address.length < 5) return bad('Indiquez votre adresse de livraison (quartier, repère)');
         if (phone.length < 8) return bad('Indiquez un numéro de téléphone joignable');
         const { results: lines } = await env.DB.prepare(
-          `SELECT c.product_id,c.qty,p.name,${EFFECTIVE_PRICE} AS price,p.stock,p.active,s.id AS shop_id,s.name AS shop_name,s.status AS shop_status,s.lat AS slat,s.lng AS slng
+          `SELECT c.product_id,c.qty,p.name,${EFFECTIVE_PRICE} AS price,p.stock,p.unit,p.active,s.id AS shop_id,s.name AS shop_name,s.status AS shop_status,s.lat AS slat,s.lng AS slng
            FROM cart_items c JOIN products p ON p.id=c.product_id JOIN shops s ON s.id=p.shop_id WHERE c.user_id=?1`).bind(user.id).all();
         if (!lines.length) return bad('Votre panier est vide');
         for (const l of lines) {
           if (!l.active || l.shop_status !== 'active') return bad(`« ${l.name} » n'est plus disponible. Retirez-le du panier.`);
           if (l.stock <= 0) return bad(`« ${l.name} » vient d'être épuisé. Retirez-le du panier pour continuer.`, 409);
-          if (l.qty > l.stock) return bad(`« ${l.name} » : il n'en reste que ${l.stock}. Ajustez la quantité dans le panier.`, 409);
+          if (l.qty > l.stock) return bad(`« ${l.name} » : il n'en reste que ${fmtQty(l.stock, l.unit)}. Ajustez la quantité dans le panier.`, 409);
         }
         const settings = await loadSettings(env);
         const byShop = new Map();
@@ -454,7 +462,7 @@ export default {
         for (const vid of wanted) {
           const v = await env.DB.prepare('SELECT * FROM vouchers WHERE id=?1 AND user_id=?2 AND used_at IS NULL AND expires_at>?3').bind(vid, user.id, Date.now()).first();
           if (!v || !byShop.has(v.shop_id) || useVoucher.has(v.shop_id)) continue;
-          const sub = byShop.get(v.shop_id).reduce((t, l) => t + l.price * l.qty, 0);
+          const sub = byShop.get(v.shop_id).reduce((t, l) => t + lineTotal(l.price, l.qty), 0);
           if (!voucherDiscount(v, sub)) return bad(`Le bon ${v.code} demande au moins ${v.min_order.toLocaleString('fr-FR')} FCFA d'achats dans cette boutique`);
           useVoucher.set(v.shop_id, v);
         }
@@ -465,7 +473,7 @@ export default {
           reserved.push(orderIds.get(shopId));
         }
         for (const [shopId, ls] of byShop) {
-          const subtotal = ls.reduce((t, l) => t + l.price * l.qty, 0);
+          const subtotal = ls.reduce((t, l) => t + lineTotal(l.price, l.qty), 0);
           const voucher = useVoucher.get(shopId) || null, discount = voucher ? voucherDiscount(voucher, subtotal) : 0;
           const commission = Math.round(((subtotal - discount) * (settings.commission_pct || 0)) / 100);
           let km = null, fee = settings.delivery_base;
@@ -480,8 +488,8 @@ export default {
              VALUES (?1,?2,?3,?4,?5,'awaiting_payment',?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?15,?16,?17,?18)`)
             .bind(orderId, oref, checkoutId, user.id, shopId, subtotal, fee, subtotal - discount + fee, address, hasPos ? lat : null, hasPos ? lng : null, phone, note, km, now(), discount, voucher ? voucher.id : null, commission));
           for (const l of ls) {
-            stmts.push(env.DB.prepare('INSERT INTO order_items (id,order_id,product_id,name,price,qty) VALUES (?1,?2,?3,?4,?5,?6)').bind(uid(), orderId, l.product_id, l.name, l.price, l.qty));
-            stmts.push(env.DB.prepare('UPDATE products SET stock = stock - ?2, stock_updated_at=?3 WHERE id=?1').bind(l.product_id, l.qty, Date.now()));
+            stmts.push(env.DB.prepare('INSERT INTO order_items (id,order_id,product_id,name,price,qty,unit) VALUES (?1,?2,?3,?4,?5,?6,?7)').bind(uid(), orderId, l.product_id, l.name, l.price, l.qty, l.unit));
+            stmts.push(env.DB.prepare('UPDATE products SET stock = ROUND(stock - ?2, 3), stock_updated_at=?3 WHERE id=?1').bind(l.product_id, l.qty, Date.now()));
           }
         }
         const method2 = ['airtel_money', 'moov_money', 'card'].includes(b.method) ? b.method : 'airtel_money';
@@ -496,10 +504,10 @@ export default {
         }
         // Alerte au vendeur : stock faible ou épuisé après cette commande
         const ids = [...new Set(lines.map(l => l.product_id))];
-        const { results: after } = await env.DB.prepare(`SELECT p.name,p.stock,s.owner_id FROM products p JOIN shops s ON s.id=p.shop_id WHERE p.id IN (${ids.map((_, i) => '?' + (i + 1)).join(',')})`).bind(...ids).all();
+        const { results: after } = await env.DB.prepare(`SELECT p.name,p.stock,p.unit,s.owner_id FROM products p JOIN shops s ON s.id=p.shop_id WHERE p.id IN (${ids.map((_, i) => '?' + (i + 1)).join(',')})`).bind(...ids).all();
         for (const a of after) {
           if (a.stock <= 0) await notify(env, a.owner_id, 'Produit épuisé', `« ${a.name} » n'a plus de stock : il n'est plus commandable. Réapprovisionnez-le dans Ma boutique → Produits.`, '/vendeur.html#produits');
-          else if (a.stock <= LOW_STOCK) await notify(env, a.owner_id, 'Stock faible', `Il ne reste que ${a.stock} « ${a.name} ». Pensez à mettre le stock à jour.`, '/vendeur.html#produits');
+          else if (a.stock <= LOW_STOCK) await notify(env, a.owner_id, 'Stock faible', `Il ne reste que ${fmtQty(a.stock, a.unit)} de « ${a.name} ». Pensez à mettre le stock à jour.`, '/vendeur.html#produits');
         }
         const co = { id: checkoutId, ref, amount };
         const online = await startOnlinePayment(env, co, url.origin);
@@ -555,7 +563,7 @@ export default {
         const r = await loadOrderFor(env, user, m[1]);
         if (!r || r.role !== 'customer') return bad('Commande introuvable', 404);
         if (r.o.status !== 'awaiting_payment') return bad('Seule une commande non payée peut être annulée ici. Écrivez à la boutique.');
-        await env.DB.prepare(`UPDATE products SET stock = stock + COALESCE((SELECT qty FROM order_items WHERE order_id=?1 AND product_id=products.id),0)
+        await env.DB.prepare(`UPDATE products SET stock = ROUND(stock + COALESCE((SELECT qty FROM order_items WHERE order_id=?1 AND product_id=products.id),0), 3)
           WHERE id IN (SELECT product_id FROM order_items WHERE order_id=?1)`).bind(r.o.id).run();
         await env.DB.prepare(`UPDATE orders SET status='cancelled', updated_at=?2 WHERE id=?1`).bind(r.o.id, now()).run();
         await releaseVoucher(env, r.o.id);
@@ -651,7 +659,8 @@ export default {
         }
         if (method === 'POST' && p === '/api/seller/products') {
           const b = await readJson(request);
-          const name = cleanText(b && b.name, 100), price = Math.round(num(b && b.price)), stock = Math.floor(num(b && b.stock));
+          const unit = unitOf(b && b.unit), step = stepOf(unit, b && b.qty_step);
+          const name = cleanText(b && b.name, 100), price = Math.round(num(b && b.price)), stock = UNITS[unit].decimal ? r3(num(b && b.stock)) : Math.floor(num(b && b.stock));
           if (name.length < 2) return bad('Indiquez le nom du produit');
           if (!Number.isFinite(price) || price < 50 || price > 50000000) return bad('Prix invalide');
           if (!Number.isFinite(stock) || stock < 0 || stock > 100000) return bad('Stock invalide');
@@ -660,7 +669,7 @@ export default {
           const id = uid();
           await env.DB.prepare('INSERT INTO products (id,shop_id,name,description,price,stock,photo_id,active,created_at) VALUES (?1,?2,?3,?4,?5,?6,?7,1,?8)')
             .bind(id, shop.id, name, cleanText(b.description, 500), price, stock, photo, now()).run();
-          await env.DB.prepare('UPDATE products SET stock_updated_at=?2, photos=?3 WHERE id=?1').bind(id, Date.now(), JSON.stringify(pics)).run();
+          await env.DB.prepare('UPDATE products SET stock_updated_at=?2, photos=?3, unit=?4, qty_step=?5 WHERE id=?1').bind(id, Date.now(), JSON.stringify(pics), unit, step).run();
           return json({ id }, 201);
         }
         if ((method === 'PUT' || method === 'DELETE') && (m = p.match(/^\/api\/seller\/products\/([a-f0-9]{16})$/))) {
@@ -672,14 +681,16 @@ export default {
           }
           const b = await readJson(request);
           const name = cleanText(b && b.name, 100) || prod.name, price = Number.isFinite(num(b && b.price)) ? Math.round(num(b.price)) : prod.price;
-          const stock = Number.isFinite(num(b && b.stock)) ? Math.floor(num(b.stock)) : prod.stock;
+          const unit = b && b.unit !== undefined ? unitOf(b.unit) : prod.unit, step = stepOf(unit, b && b.qty_step !== undefined ? b.qty_step : prod.qty_step);
+          const stock = Number.isFinite(num(b && b.stock)) ? (UNITS[unit].decimal ? r3(num(b.stock)) : Math.floor(num(b.stock))) : prod.stock;
           if (price < 50 || price > 50000000 || stock < 0 || stock > 100000) return bad('Prix ou stock invalide');
           if (promoActive(prod) && price !== prod.price) return bad('Arrêtez la promotion avant de changer le prix normal (le prix barré doit rester honnête)');
           let photo = prod.photo_id, pics = photoList(prod);
           if (b && Array.isArray(b.photos)) { pics = await ownPhotos(env, user, b.photos); photo = pics[0] || null; }
           else if (b && b.photo_id !== undefined) { const one = await ownPhotos(env, user, b.photo_id ? [b.photo_id] : []); pics = one.length ? [one[0], ...pics.filter(x => x !== one[0])].slice(0, 6) : []; photo = pics[0] || null; }
-          await env.DB.prepare('UPDATE products SET name=?2,description=?3,price=?4,stock=?5,photo_id=?6,active=?7,stock_updated_at=?8,photos=?9 WHERE id=?1')
-            .bind(prod.id, name, b && b.description !== undefined ? cleanText(b.description, 500) : prod.description, price, stock, photo, b && b.active === 0 ? 0 : 1, stock !== prod.stock ? Date.now() : prod.stock_updated_at, JSON.stringify(pics)).run();
+          await env.DB.prepare('UPDATE products SET name=?2,description=?3,price=?4,stock=?5,photo_id=?6,active=?7,stock_updated_at=?8,photos=?9,unit=?10,qty_step=?11 WHERE id=?1')
+            .bind(prod.id, name, b && b.description !== undefined ? cleanText(b.description, 500) : prod.description, price, stock, photo, b && b.active === 0 ? 0 : 1, stock !== prod.stock ? Date.now() : prod.stock_updated_at, JSON.stringify(pics), unit, step).run();
+          if (unit !== prod.unit || step !== prod.qty_step) await env.DB.prepare('DELETE FROM cart_items WHERE product_id=?1').bind(prod.id).run(); // les quantités des paniers ne correspondent plus
           if (prod.stock <= 0 && stock > 0) { // de retour en stock : on prévient les clients qui attendaient
             const { results: wait } = await env.DB.prepare('SELECT user_id FROM stock_alerts WHERE product_id=?1').bind(prod.id).all();
             for (const w of wait) await notify(env, w.user_id, 'De retour en stock', `« ${name} » est de nouveau disponible chez ${shop.name}. Faites vite !`, `/boutique/${shop.slug}`);
@@ -774,7 +785,7 @@ export default {
             if (outOfStock) { // le vendeur n'avait plus l'article : le stock passe à 0 pour éviter d'autres commandes
               await env.DB.prepare(`UPDATE products SET stock=0, stock_updated_at=?2 WHERE id IN (SELECT product_id FROM order_items WHERE order_id=?1)`).bind(o.id, Date.now()).run();
             } else {
-              await env.DB.prepare(`UPDATE products SET stock = stock + COALESCE((SELECT qty FROM order_items WHERE order_id=?1 AND product_id=products.id),0)
+              await env.DB.prepare(`UPDATE products SET stock = ROUND(stock + COALESCE((SELECT qty FROM order_items WHERE order_id=?1 AND product_id=products.id),0), 3)
                 WHERE id IN (SELECT product_id FROM order_items WHERE order_id=?1)`).bind(o.id).run();
             }
             await releaseVoucher(env, o.id);

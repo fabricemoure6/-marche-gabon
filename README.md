@@ -81,3 +81,7 @@ SMS ; l'administrateur valide dans l'onglet Paiements.
 ## Logo
 
 Le logo (un éventail de feuilles : orange, vert, bleu et un cœur jaune) a été dessiné dans Adobe Illustrator. Le fichier source `public/logo/marche-gabon-logo.ai` contient 4 plans de travail : icône d'application, icône avec contour sombre, icône avec contour crème et image de partage 1200×630. Les exports SVG et PNG sont dans `public/logo/`. Il sert aussi de favicon, d'icône d'application, d'image de partage et d'icône d'en-tête. Couleurs : papaye #f76707, forêt #0b7a47, lagune #2563a8, soleil #ffc53d, nuit #1f1a17.
+
+## Produits vendus au kilo, au litre, au tas…
+
+Chaque produit a une **unité de vente** choisie par le vendeur dans « Ajouter un produit » : à la pièce (par défaut), au kilo, au litre, au tas, au sachet ou à la botte. Kilo et litre acceptent les quantités décimales ; le vendeur règle la quantité minimale (0,25, 0,5 ou 1) et le client commande par paliers. Le prix est celui d'une unité (« 3 500 FCFA / kg »), le stock est compté dans la même unité, le total d'une ligne est arrondi au franc. Les produits non vendus à la pièce apparaissent aussi dans la rubrique « Vendus au kilo et à la mesure » de l'accueil (`GET /api/by-weight`). Colonnes ajoutées : `products.unit`, `products.qty_step`, `order_items.unit` (migration automatique).

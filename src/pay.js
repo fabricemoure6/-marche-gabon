@@ -85,7 +85,7 @@ export async function cancelOrders(env, checkoutId, restock = true) {
     `SELECT id FROM orders WHERE checkout_id=?1 AND status='awaiting_payment'`).bind(checkoutId).all();
   for (const o of orders) {
     if (restock) {
-      await env.DB.prepare(`UPDATE products SET stock = stock + COALESCE((SELECT qty FROM order_items WHERE order_id=?1 AND product_id=products.id),0)
+      await env.DB.prepare(`UPDATE products SET stock = ROUND(stock + COALESCE((SELECT qty FROM order_items WHERE order_id=?1 AND product_id=products.id),0), 3)
         WHERE id IN (SELECT product_id FROM order_items WHERE order_id=?1)`).bind(o.id).run();
     }
     await env.DB.prepare(`UPDATE orders SET status='cancelled', updated_at=?2 WHERE id=?1`).bind(o.id, now()).run();

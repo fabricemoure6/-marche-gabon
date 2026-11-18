@@ -690,3 +690,5 @@ label.consent input{width:20px;height:20px;min-height:0;flex:none;margin-top:2px
 .legal th,.legal td{text-align:left;vertical-align:top;padding:8px 6px}
 .legal code{background:var(--surface-300);border-radius:6px;padding:1px 6px}
 @media print{.site-foot,.info-bar{display:none!important}}
+.per{font-weight:600;color:var(--muted);font-size:.7em}
+.weigh-band{background:var(--foret);color:var(--on-foret)}
