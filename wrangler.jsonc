@@ -11,5 +11,11 @@
   // Base de données D1 créée automatiquement au premier déploiement (wrangler >= 4.45)
   "d1_databases": [
     { "binding": "DB", "database_name": "marche-gabon-db" }
-  ]
+  ],
+  // Sauvegardes : le bucket R2 est créé automatiquement au déploiement (sans nom de bucket)
+  "r2_buckets": [
+    { "binding": "BACKUPS" }
+  ],
+  // Fait avancer la sauvegarde du jour (reprise par morceaux) et vérifie qu'elle n'est pas en retard
+  "triggers": { "crons": ["*/15 * * * *"] }
 }

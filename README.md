@@ -104,3 +104,22 @@ Confidentialité : le compte d'une boutique n'est montré qu'au client de la com
 - **Preuve :** chaque commande garde une copie du compte de la boutique montré au client (`orders.pay_account`) et de celui du livreur (`orders.fee_account`), même si le compte change ensuite.
 - **« Non reçu » :** la boutique ne peut pas annuler seule. Elle ouvre un litige (`orders.pay_dispute`) ; l'administrateur valide le paiement ou annule la commande (stock et bon d'achat restitués).
 - **Frais de livraison :** le livreur ne peut récupérer le colis que si le client a déclaré avoir payé les frais, et ne peut marquer « Livré » qu'après avoir confirmé les avoir reçus. Il peut relancer le client ou signaler « frais non reçus » (`orders.fee_dispute`) ; l'administrateur valide les frais ou remplace le livreur.
+
+## Sauvegardes et restauration
+
+**Ce qui est sauvegardé.** Le code est dans GitHub. Les données (D1) sont copiées chaque nuit dans un stockage Cloudflare R2 séparé (binding `BACKUPS`, bucket créé automatiquement au déploiement). Une copie complète par jour, découpée en petits fichiers `backups/AAAA-MM-JJ/<table>.<n>.json` ; le fichier `manifest.json` est écrit en dernier et prouve que la copie est complète. Les 30 dernières copies sont gardées. Les sessions, les jetons de réinitialisation et les tentatives de connexion ne sont pas copiés (éphémères).
+
+**Comment ça tourne.** Un déclencheur planifié passe toutes les 15 minutes (`triggers.crons`) : il fait avancer la copie du jour par morceaux, sans jamais dépasser le temps de calcul d'une exécution, puis ne fait plus rien tant que la copie du jour est terminée. Une copie interrompue reprend où elle s'était arrêtée. Si aucune copie complète n'existe depuis plus de 48 h, l'administrateur reçoit une notification (au plus une par jour).
+
+**Chiffrement (recommandé).** Ajouter le secret `BACKUP_KEY` (Cloudflare, Workers, marche-gabon, Settings, Variables and Secrets, type Secret) : chaque fichier est alors chiffré en AES-GCM avant d'être écrit. Gardez cette clé ailleurs (gestionnaire de mots de passe) : sans elle, une copie chiffrée est illisible. La copie contient des comptes, des numéros de paiement et des pièces d'identité.
+
+**Dans l'administration** (Réglages, « Sauvegardes de la base ») : état de la dernière copie, bouton « Sauvegarder maintenant », liste des copies et téléchargement d'une copie (mot de passe de l'administrateur demandé, action inscrite au journal). Le fichier téléchargé (`.jsonl`, déchiffré) se garde hors de Cloudflare : ordinateur, disque, Drive.
+
+**Restaurer.**
+1. Télécharger la copie voulue depuis l'administration (ou en avoir une déjà téléchargée).
+2. `node scripts/restore-backup.mjs sauvegarde-AAAA-MM-JJ.jsonl > restauration.sql`
+3. `npx wrangler d1 execute marche-gabon-db --remote --file restauration.sql`
+
+Les lignes sont remplacées (`INSERT OR REPLACE`) sans toucher aux autres. Pour repartir d'une base vide, créer une nouvelle base D1, la relier au site (binding `DB`), laisser le site créer ses tables à la première visite, puis rejouer le fichier. En complément, D1 sait revenir en arrière à un instant précis (Time Travel : 30 jours avec la formule Workers Payant, 7 jours en gratuit) : `npx wrangler d1 time-travel restore marche-gabon-db --timestamp=...`.
+
+**Essai de restauration.** À refaire de temps en temps sur une base de test : une sauvegarde jamais restaurée n'est pas une garantie.

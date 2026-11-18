@@ -331,6 +331,42 @@
       try { await MG.api('/api/admin/settings', { method: 'PUT', body }); MG.toast('Réglages enregistrés'); } catch (er) { MG.fail(er); }
     };
     S('chk').onclick = async () => { try { S('chkOut').textContent = JSON.stringify(await MG.api('/api/admin/singpay-check'), null, 2); } catch (er) { MG.fail(er); } };
+    pane.insertAdjacentHTML('beforeend', '<div id="bk"></div>'); backups();
+  }
+
+  // Sauvegardes automatiques de la base (une par nuit, 30 jours gardés) : état, copie à la main, téléchargement hors de Cloudflare
+  async function backups() {
+    const box = S('bk'); if (!box) return;
+    const st = await MG.api('/api/admin/backups');
+    const size = n => n > 1048576 ? (n / 1048576).toFixed(1) + ' Mo' : Math.max(1, Math.round(n / 1024)) + ' Ko';
+    if (!st.enabled) { box.innerHTML = '<div class="card" style="max-width:600px;margin-top:var(--space-4)"><h3>Sauvegardes</h3><p class="notice">Le stockage des sauvegardes n\'est pas encore actif sur ce site. Il s\'active au prochain déploiement ; si ce message reste, le service R2 doit être activé dans le compte Cloudflare.</p></div>'; return; }
+    const last = st.backups[0], age = last ? Math.round((Date.now() - new Date(last.created)) / 36e5) : null;
+    box.innerHTML = `<div class="card" style="max-width:760px;margin-top:var(--space-4)"><h3 style="margin-top:0">Sauvegardes de la base</h3>
+      <p class="muted" style="margin-top:0">Une copie complète est faite chaque nuit et les 30 dernières sont gardées. ${st.encrypted ? '<span class="tag active">Chiffrées</span>' : '<span class="tag pending">Non chiffrées</span> Pour les chiffrer, ajoutez le secret <code>BACKUP_KEY</code> dans Cloudflare.'}</p>
+      ${last ? `<p>${age > 36 ? '<span class="tag suspended">En retard</span>' : '<span class="tag active">À jour</span>'} Dernière sauvegarde : <b>${MG.date(last.created)}</b> (il y a ${age < 1 ? 'moins d\'une heure' : age + ' h'}) · ${last.rows} lignes · ${size(last.bytes)}</p>` : '<p><span class="tag pending">Aucune copie pour le moment</span> La première se fait automatiquement cette nuit, ou lancez-la maintenant.</p>'}
+      ${st.running ? `<p class="muted">Copie en cours : ${st.running.tablesDone}/${st.running.tablesTotal} tables…</p>` : ''}
+      <div class="row"><button class="btn small" id="bkRun">Sauvegarder maintenant</button></div>
+      ${st.backups.length ? `<div class="scroll" style="margin-top:var(--space-3)"><table><thead><tr><th>Date</th><th>Contenu</th><th></th></tr></thead><tbody>${st.backups.map(b => `<tr><td>${MG.esc(b.id.replace('h', ':'))}</td><td>${b.rows} lignes · ${b.tables} tables · ${size(b.bytes)}</td><td><button class="btn small alt" data-dl="${MG.esc(b.id)}">Télécharger</button></td></tr>`).join('')}</tbody></table></div>
+      <p class="muted" style="font-size:.85rem">Télécharger une copie et la garder ailleurs (ordinateur, disque, Drive) protège même si le compte Cloudflare avait un problème. Elle contient toutes les données : gardez-la en lieu sûr. Pour restaurer : voir le README, « Restauration ».</p>` : ''}</div>`;
+    S('bkRun').onclick = async () => {
+      const b = S('bkRun'); b.disabled = true; b.textContent = 'Sauvegarde en cours…';
+      try { let r; do { r = await MG.api('/api/admin/backups/run', { method: 'POST', body: {} }); } while (!r.done); MG.toast('Sauvegarde terminée'); backups(); } catch (er) { MG.fail(er); b.disabled = false; b.textContent = 'Sauvegarder maintenant'; }
+    };
+    box.onclick = async e => {
+      const d = e.target.closest('[data-dl]'); if (!d) return;
+      const m = MG.modal(`<form id="df"><h2>Télécharger la sauvegarde</h2><p class="muted">Elle contient toutes les données du marché, y compris les comptes. Confirme avec ton mot de passe.</p>
+        <label for="dp">Ton mot de passe</label><input id="dp" type="password" required autocomplete="current-password"><p class="err" id="de"></p>
+        <div class="row"><button type="button" class="btn alt" data-close>Annuler</button><button class="btn">Télécharger</button></div></form>`);
+      m.el.querySelector('#df').onsubmit = async ev => {
+        ev.preventDefault();
+        try {
+          const r = await fetch('/api/admin/backups/' + d.dataset.dl + '/download', { method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json', 'x-csrf': '1' }, body: JSON.stringify({ password: m.el.querySelector('#dp').value }) });
+          if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'Téléchargement impossible');
+          const url = URL.createObjectURL(await r.blob()), a = document.createElement('a'); a.href = url; a.download = 'sauvegarde-' + d.dataset.dl + '.jsonl'; a.click(); setTimeout(() => URL.revokeObjectURL(url), 60000);
+          m.close(); MG.toast('Sauvegarde téléchargée');
+        } catch (er) { m.el.querySelector('#de').textContent = er.message; }
+      };
+    };
   }
   show();
 })();

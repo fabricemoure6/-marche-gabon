@@ -3,6 +3,7 @@ import {
   json, bad, rand, uid, now, sha256, safeEqual, hashPassword, createSession, clearCookie, currentUser, destroySession,
   CATEGORIES, ORDER_STATUS, ensureSchema, loadSettings, saveSettings, toBase64, fromBase64, sniffImage, sniffDocument, DOC_KINDS,
   validCoord, distanceKm, slugify, EFFECTIVE_PRICE, promoActive, publicProduct, voucherDiscount, loyaltyProgram, LOW_STOCK, photoList, SOLD, EXPENSE_CATS, period, UNITS, r3, unitOf, stepOf, fmtQty, lineTotal, cleanAccount, METHOD_LABEL } from './lib.js';
+import { backupStep, backupStatus, backupStream, backupWatch } from './backup.js';
 import { notify, confirmCheckout, rejectCheckout, cancelOrders, releaseVoucher, createVoucher, awardLoyalty, startOnlinePayment, singpayVerify, singpayOn, singpayCall, sp } from './pay.js';
 import { botReply, searchProducts } from './bot.js';
 import { seoRoute } from './seo.js';
@@ -252,6 +253,13 @@ async function pushCouriers(env, shop, order, settings) {
 
 // ---------- Worker ----------
 export default {
+  // Déclencheur planifié (toutes les 15 min) : fait avancer la sauvegarde du jour puis surveille qu'elle ne prend pas de retard
+  async scheduled(event, env, ctx) {
+    ctx.waitUntil((async () => {
+      try { if (!env.BACKUPS) return; await ensureSchema(env.DB); await backupStep(env); await backupWatch(env); }
+      catch (e) { console.error('sauvegarde', e && e.message); }
+    })());
+  },
   async fetch(request, env) {
     const url = new URL(request.url);
     const p = url.pathname, method = request.method;
@@ -1039,6 +1047,23 @@ export default {
             paymentsToCheck: await c(`SELECT COUNT(*) AS n FROM checkouts WHERE status='submitted'`),
             revenue: await c(`SELECT COALESCE(SUM(total),0) AS n FROM orders WHERE status IN ('paid','preparing','ready','delivering','delivered')`)
           });
+        }
+        // ----- Sauvegardes de la base (R2) -----
+        if (method === 'GET' && p === '/api/admin/backups') return json(await backupStatus(env));
+        if (method === 'POST' && p === '/api/admin/backups/run') {
+          if (!env.BACKUPS) return bad('Le stockage des sauvegardes n\'est pas encore actif sur ce site', 503);
+          const r = await backupStep(env, { force: true });
+          await logAction(env, user, 'Sauvegarde lancée à la main', 'backup', r.id || '', r.id || '', '');
+          return json(r);
+        }
+        if (method === 'POST' && (m = p.match(/^\/api\/admin\/backups\/([0-9Th-]{10,16})\/download$/))) {
+          if (!env.BACKUPS) return bad('Le stockage des sauvegardes n\'est pas encore actif sur ce site', 503);
+          const b = await readJson(request) || {};
+          const err = await confirmAdmin(env, user, b.password); if (err) return bad(err, 403);
+          const stream = await backupStream(env, m[1]);
+          if (!stream) return bad('Sauvegarde introuvable', 404);
+          await logAction(env, user, 'Sauvegarde téléchargée', 'backup', m[1], m[1], '');
+          return new Response(stream, { headers: { 'content-type': 'application/x-ndjson', 'content-disposition': `attachment; filename="sauvegarde-${m[1]}.jsonl"`, 'cache-control': 'no-store' } });
         }
         // ----- Ce que l'administrateur doit valider : changements de compte de paiement et litiges -----
         if (method === 'GET' && p === '/api/admin/review') {
