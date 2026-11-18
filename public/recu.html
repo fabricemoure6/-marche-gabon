@@ -23,7 +23,7 @@
     MG.$('#receipt').innerHTML = `<div class="split"><div style="display:flex;align-items:center;gap:.8rem"><img src="/logo/marche-gabon-icone.svg" alt="" width="72" height="72"><h1 style="margin:0">Reçu</h1></div><div style="text-align:right"><b>${MG.esc(MG.config.site_name)}</b><br>N° ${MG.esc(o.ref)}<br>${MG.date(o.created_at)}</div></div>
       <p><b>Client :</b> ${MG.esc(o.customer.name)}${o.customer.phone ? ' · ' + MG.esc(o.customer.phone) : ''}<br><b>Boutique :</b> ${MG.esc(o.shop.name)}<br><b>Livraison :</b> ${MG.esc(o.address)}</p>
       <div class="scroll"><table><thead><tr><th>Produit</th><th>Qté</th><th>Prix unitaire</th><th style="text-align:right">Montant</th></tr></thead>
-      <tbody>${items.map(i => `<tr><td>${MG.esc(i.name)}</td><td>${i.qty}</td><td>${MG.fcfa(i.price)}</td><td style="text-align:right">${MG.fcfa(i.price * i.qty)}</td></tr>`).join('')}</tbody></table></div>
+      <tbody>${items.map(i => `<tr><td>${MG.esc(i.name)}</td><td>${MG.qty(i.qty, i.unit)}</td><td>${MG.fcfa(i.price)}${MG.per(i.unit)}</td><td style="text-align:right">${MG.fcfa(MG.lineTotal(i.price, i.qty))}</td></tr>`).join('')}</tbody></table></div>
       <div class="total"><span>Sous-total</span><span>${MG.fcfa(o.subtotal)}</span></div>
       ${o.discount ? `<div class="total discount"><span>Bon d'achat fidélité</span><span>−${MG.fcfa(o.discount)}</span></div>` : ''}
       <div class="total"><span>Frais de livraison</span><span>${MG.fcfa(o.delivery_fee)}</span></div>

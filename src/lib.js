@@ -156,9 +156,10 @@ const SCHEMA = [
 const MIGRATIONS = {
   users: [['avatar_id', 'TEXT']],
   notifications: [['kind', 'TEXT']],
-  products: [['promo_price', 'INTEGER'], ['promo_until', 'INTEGER'], ['promo_start', 'INTEGER'], ['stock_updated_at', 'INTEGER'], ['photos', 'TEXT']],
+  products: [['unit', "TEXT NOT NULL DEFAULT 'piece'"], ['qty_step', 'REAL NOT NULL DEFAULT 1'], ['promo_price', 'INTEGER'], ['promo_until', 'INTEGER'], ['promo_start', 'INTEGER'], ['stock_updated_at', 'INTEGER'], ['photos', 'TEXT']],
   shops: [['loyalty_enabled', 'INTEGER NOT NULL DEFAULT 0'], ['loyalty_every', 'INTEGER'], ['loyalty_kind', 'TEXT'], ['loyalty_value', 'INTEGER'],
     ['loyalty_min', 'INTEGER'], ['loyalty_days', 'INTEGER'], ['cover_photo', 'TEXT']],
+  order_items: [['unit', "TEXT NOT NULL DEFAULT 'piece'"]],
   orders: [['discount', 'INTEGER NOT NULL DEFAULT 0'], ['voucher_id', 'TEXT'], ['commission', 'INTEGER NOT NULL DEFAULT 0']]
 };
 async function migrate(db) {
@@ -176,6 +177,20 @@ export function ensureSchema(db) {
   }
   return ready;
 }
+
+// ---------- Unités de vente ----------
+// Chaque produit se vend à la pièce, au kilo, au litre, au tas, au sachet ou à la botte ; le vendeur choisit.
+// Kilo et litre acceptent des quantités décimales (pas de 0,25, 0,5 ou 1 réglé par la boutique).
+export const UNITS = {
+  piece: { label: 'à la pièce', short: '', decimal: false }, kg: { label: 'au kilo', short: 'kg', decimal: true },
+  litre: { label: 'au litre', short: 'L', decimal: true }, tas: { label: 'au tas', short: 'tas', decimal: false },
+  sachet: { label: 'au sachet', short: 'sachet', decimal: false }, botte: { label: 'à la botte', short: 'botte', decimal: false }
+};
+export const r3 = n => Math.round(n * 1000) / 1000;
+export const unitOf = u => (UNITS[u] ? u : 'piece');
+export const stepOf = (unit, step) => (UNITS[unit].decimal && [0.25, 0.5, 1].includes(Number(step)) ? Number(step) : 1);
+export const fmtQty = (q, unit) => { const s = (UNITS[unit] || UNITS.piece).short, n = String(r3(q)).replace('.', ','); return s ? `${n} ${s}` : n; };
+export const lineTotal = (price, qty) => Math.round(price * qty);
 
 // ---------- Promotions ----------
 // Prix réellement facturé (SQL) : le prix promo tant que la promotion court, sinon le prix normal.

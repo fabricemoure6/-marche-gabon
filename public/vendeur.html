@@ -36,7 +36,7 @@
       const list = await MG.api('/api/seller/orders');
       S('pane').innerHTML = list.length ? list.map(o => `<div class="card"><div class="split"><div><b>${MG.esc(o.ref)}</b> · ${MG.esc(o.customer_name)}<br><span class="muted">${MG.date(o.created_at)} · ${MG.esc(o.address)}</span></div>
         <span class="tag ${o.status}">${MG.esc(o.statusLabel)}</span></div>
-        <ul>${o.items.map(i => `<li>${i.qty} × ${MG.esc(i.name)}</li>`).join('')}</ul>
+        <ul>${o.items.map(i => `<li>${MG.qty(i.qty, i.unit)} × ${MG.esc(i.name)}</li>`).join('')}</ul>
         ${o.note ? `<p class="muted">Note : ${MG.esc(o.note)}</p>` : ''}
         <div class="split"><b>${MG.fcfa(o.subtotal - (o.discount || 0))} <span class="muted">${o.discount ? `(bon fidélité −${MG.fcfa(o.discount)}) ` : ''}(+ livraison ${MG.fcfa(o.delivery_fee)})</span></b>
         <div class="row">
@@ -95,8 +95,8 @@
         <span style="position:relative"><img src="${MG.img(p.photo_id, shop.category)}" alt="">${(p.photos || []).length > 1 ? `<span class="pcount" style="right:4px;bottom:4px">${p.photos.length}</span>` : ''}</span>
         <div><div class="pn">${MG.esc(p.name)}</div>
           <div class="pm">${p.promo_active ? `<span class="tag promo">−${p.promo_pct} %</span> jusqu'au ${until(p.promo_until)}` : (p.description ? MG.esc(p.description).slice(0, 80) : '')}</div>
-          <label class="stock" style="margin:.4rem 0 0">Stock <input type="number" min="0" value="${p.stock}" data-stock="${p.id}" aria-label="Stock de ${MG.esc(p.name)}">${p.stock < 1 ? '<span class="tag out">Épuisé</span>' : p.stock <= MG.LOW_STOCK ? '<span class="tag pending">Stock faible</span>' : ''}${p.waiting ? `<span class="waiting">${MG.icon('bell', 12)}${p.waiting} en attente</span>` : ''}</label></div>
-        <div class="pp">${p.promo_active ? `<span class="old">${MG.fcfa(p.price)}</span><span class="price">${MG.fcfa(p.promo_price)}</span>` : `<span class="price">${MG.fcfa(p.price)}</span>`}</div>
+          <label class="stock" style="margin:.4rem 0 0">Stock${p.unit && p.unit !== 'piece' ? ' (' + MG.UNITS[p.unit].short + ')' : ''} <input type="number" min="0" step="${MG.UNITS[p.unit || 'piece'].decimal ? '0.1' : '1'}" value="${p.stock}" data-stock="${p.id}" aria-label="Stock de ${MG.esc(p.name)}">${p.stock < 1 ? '<span class="tag out">Épuisé</span>' : p.stock <= MG.LOW_STOCK ? '<span class="tag pending">Stock faible</span>' : ''}${p.waiting ? `<span class="waiting">${MG.icon('bell', 12)}${p.waiting} en attente</span>` : ''}</label></div>
+        <div class="pp">${p.promo_active ? `<span class="old">${MG.fcfa(p.price)}</span><span class="price">${MG.fcfa(p.promo_price)}</span>` : `<span class="price">${MG.fcfa(p.price)}</span>`}${MG.per(p.unit)}</div>
         <div class="acts">${p.promo_active ? `<button class="btn small alt" data-stop="${p.id}">Arrêter la promo</button>` : `<button class="btn small" data-promo="${p.id}"${p.stock < 1 ? ' disabled title="Ajoutez du stock d\'abord"' : ''}>Promotion</button>`}
           <button class="btn small alt" data-edit="${p.id}">Modifier</button><button class="btn small alt" data-del="${p.id}" aria-label="Retirer ${MG.esc(p.name)}">${MG.icon('trash', 16)}</button></div></div>`).join('')}</div>`
       : `<div class="empty-state"><img src="${MG.illu(shop.category)}" alt=""><h3>Ajoutez votre premier produit</h3><p class="muted">Une belle photo et un prix clair : c'est ce qui fait vendre.</p></div>`}</div>`;
@@ -105,9 +105,14 @@
     function editor(p) {
       const m = MG.modal(`<form id="ef"><h2>${p ? 'Modifier le produit' : 'Ajouter un produit'}</h2>
         <label for="en">Nom du produit</label><input id="en" required maxlength="100" value="${p ? MG.esc(p.name) : ''}" placeholder="Ex. : Pagne wax 6 yards">
+        <label for="eu">Vendu…</label>
+        <select id="eu">${Object.entries(MG.UNITS).map(([k, u]) => `<option value="${k}"${p && p.unit === k ? ' selected' : ''}>${u.label}${k === 'kg' ? ' (poulet, viande, poisson…)' : ''}</option>`).join('')}</select>
+        <div id="estepbox" hidden><label for="est">Quantité minimale à la commande</label>
+          <select id="est">${[0.25, 0.5, 1].map(v => `<option value="${v}"${p && Number(p.qty_step) === v ? ' selected' : (!p || ![0.25, 0.5, 1].includes(Number(p.qty_step))) && v === 0.5 ? ' selected' : ''}>${String(v).replace('.', ',')}</option>`).join('')}</select>
+          <p class="muted" style="margin:.3rem 0 0;font-size:.85rem">Le client choisit par paliers de cette quantité (par exemple 0,5 kg, 1 kg, 1,5 kg…).</p></div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:var(--space-3)">
-          <div><label for="ep">Prix normal (FCFA)</label><input id="ep" type="number" min="50" step="5" required value="${p ? p.price : ''}"${p && p.promo_active ? ' disabled' : ''}></div>
-          <div><label for="es">Stock</label><input id="es" type="number" min="0" required value="${p ? p.stock : ''}"></div></div>
+          <div><label for="ep" id="epl">Prix normal (FCFA)</label><input id="ep" type="number" min="50" step="5" required value="${p ? p.price : ''}"${p && p.promo_active ? ' disabled' : ''}></div>
+          <div><label for="es" id="esl">Stock</label><input id="es" type="number" min="0" step="1" required value="${p ? p.stock : ''}"></div></div>
         ${p && p.promo_active ? '<p class="muted" style="margin:.3rem 0 0;font-size:.85rem">Prix bloqué pendant la promotion.</p>' : ''}
         <label for="ed">Description (facultatif)</label><textarea id="ed" maxlength="500" placeholder="Taille, matière, origine…">${p ? MG.esc(p.description || '') : ''}</textarea>
         <label>Photos <span class="muted" style="font-weight:500">(6 au plus · la première est la photo principale)</span></label>
@@ -136,10 +141,18 @@
         if (rm) pics.splice(Number(rm.dataset.rm), 1);
         drawPics();
       };
+      const syncUnit = () => {
+        const u = MG.UNITS[Q('#eu').value], per = u.short ? ' par ' + (Q('#eu').value === 'litre' ? 'litre' : u.short) : '';
+        Q('#estepbox').hidden = !u.decimal;
+        Q('#epl').textContent = 'Prix normal (FCFA' + per + ')';
+        Q('#esl').textContent = 'Stock' + (u.short ? ' (en ' + u.short + ')' : '');
+        Q('#es').step = u.decimal ? '0.1' : '1';
+      };
+      Q('#eu').onchange = syncUnit; syncUnit();
       Q('#ef').onsubmit = async e => {
         e.preventDefault(); Q('#esave').disabled = true; Q('#eerr').textContent = '';
         try {
-          const body = { name: Q('#en').value, stock: Q('#es').value, description: Q('#ed').value };
+          const body = { name: Q('#en').value, stock: Q('#es').value, description: Q('#ed').value, unit: Q('#eu').value, qty_step: Q('#est').value };
           if (!(p && p.promo_active)) body.price = Q('#ep').value;
           const todo = pics.filter(x => x.file).length; let done = 0;
           for (const x of pics) if (x.file) { Q('#esave').textContent = `Envoi des photos ${++done}/${todo}…`; x.id = await MG.uploadPhoto(x.file); delete x.file; }

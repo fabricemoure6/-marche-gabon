@@ -691,3 +691,5 @@ label.consent input{width:20px;height:20px;min-height:0;flex:none;margin-top:2px
 .legal code{background:var(--surface-300);border-radius:6px;padding:1px 6px}
 @media print{.site-foot,.info-bar{display:none!important}}
 .ord-id{display:flex;align-items:center;gap:.7rem}.ord-id img{flex:none}
+.per{font-weight:600;color:var(--muted);font-size:.7em}
+.weigh-band{background:var(--foret);color:var(--on-foret)}

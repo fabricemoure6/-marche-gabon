@@ -109,9 +109,17 @@
   // Tuile produit partagée (accueil, boutique, recherche).
   // p = {id, name, description, price, old_price?, promo_pct?, promo_until?, stock, photo_id, shop_name?, slug?, category?}
   MG.LOW_STOCK = 5;
+  // Unités de vente : à la pièce, au kilo, au litre, au tas, au sachet, à la botte (kilo et litre acceptent les décimales)
+  MG.UNITS = { piece: { label: 'À la pièce', short: '', decimal: false }, kg: { label: 'Au kilo', short: 'kg', decimal: true }, litre: { label: 'Au litre', short: 'L', decimal: true },
+    tas: { label: 'Au tas', short: 'tas', decimal: false }, sachet: { label: 'Au sachet', short: 'sachet', decimal: false }, botte: { label: 'À la botte', short: 'botte', decimal: false } };
+  MG.r3 = n => Math.round(n * 1000) / 1000;
+  MG.qty = (q, unit) => { const s = (MG.UNITS[unit] || MG.UNITS.piece).short, n = String(MG.r3(q)).replace('.', ','); return s ? n + ' ' + s : n; };
+  MG.per = unit => { const s = (MG.UNITS[unit] || MG.UNITS.piece).short; return s ? `<small class="per"> / ${s}</small>` : ''; };
+  MG.lineTotal = (price, qty) => Math.round(price * qty);
+  MG.cartCount = items => items.reduce((t, i) => t + ((MG.UNITS[i.unit] || MG.UNITS.piece).decimal ? 1 : i.qty), 0);
   // Indication de stock lisible par tous : épuisé, plus que N, en stock
-  MG.stockInfo = n => n <= 0 ? '<span class="stock-info out">Épuisé</span>'
-    : n <= MG.LOW_STOCK ? `<span class="stock-info low">Plus que ${n} en stock</span>` : '<span class="stock-info ok">En stock</span>';
+  MG.stockInfo = (n, unit) => n <= 0 ? '<span class="stock-info out">Épuisé</span>'
+    : n <= MG.LOW_STOCK ? `<span class="stock-info low">Plus que ${MG.qty(n, unit)} en stock</span>` : '<span class="stock-info ok">En stock</span>';
   MG.productCard = function (p, opts = {}) {
     const out = !(p.stock > 0);
     const watching = opts.alerts && opts.alerts.includes(p.id);
@@ -124,10 +132,10 @@
     if (!opts.demo) { MG._prod = MG._prod || {}; MG._prod[p.id] = { ...p, category: p.category || opts.category, watching }; }
     return `<article class="tile product${out ? ' out' : ''}${p.promo_pct ? ' is-promo' : ''}">
       <div class="pimg"${opts.demo ? '' : ` data-gal="${MG.esc(p.id)}" role="button" tabindex="0" aria-label="Voir ${MG.esc(p.name)}${nPics > 1 ? ' (' + nPics + ' photos)' : ''}"`}><img src="${img}" alt="${MG.esc(p.name)}" width="400" height="300"${opts.eager ? ' fetchpriority="high"' : ' loading="lazy"'}>${nPics > 1 ? `<span class="pcount" aria-hidden="true"><svg class="ico" viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>${nPics}</span>` : ''}<div class="pbadges" aria-hidden="true">${badge}</div>${left && !out ? `<span class="ptimer" aria-hidden="true">${left}</span>` : ''}</div>
-      <div class="pbody">${shop}<h3 class="pname">${MG.esc(p.name)}</h3>${opts.desc && p.description ? `<p class="pdesc">${MG.esc(p.description)}</p>` : ''}${opts.demo ? '' : MG.stockInfo(p.stock)}
-        <div class="pfoot"><div>${p.old_price ? `<span class="old">${MG.fcfa(p.old_price)}</span>` : ''}<span class="price">${MG.fcfa(p.price)}</span></div>
+      <div class="pbody">${shop}<h3 class="pname">${MG.esc(p.name)}</h3>${opts.desc && p.description ? `<p class="pdesc">${MG.esc(p.description)}</p>` : ''}${opts.demo ? '' : MG.stockInfo(p.stock, p.unit)}
+        <div class="pfoot"><div>${p.old_price ? `<span class="old">${MG.fcfa(p.old_price)}</span>` : ''}<span class="price">${MG.fcfa(p.price)}</span>${MG.per(p.unit)}</div>
         ${opts.demo ? '' : out ? `<button class="btn small ${watching ? 'green' : 'alt'} notify" data-alert="${MG.esc(p.id)}" data-on="${watching ? 1 : 0}">${MG.icon(watching ? 'check' : 'bell', 16)}${watching ? 'Alerte activée' : 'Me prévenir'}</button>`
-          : `<button class="add" data-add="${MG.esc(p.id)}" data-stock="${p.stock}" aria-label="Ajouter ${MG.esc(p.name)} au panier">${MG.icon('plus')}</button>`}</div></div></article>`;
+          : `<button class="add" data-add="${MG.esc(p.id)}" data-stock="${p.stock}" data-step="${p.qty_step || 1}" data-unit="${p.unit || 'piece'}" aria-label="Ajouter ${(p.qty_step || 1) !== 1 || p.unit && p.unit !== 'piece' ? MG.qty(p.qty_step || 1, p.unit) + ' de ' : ''}${MG.esc(p.name)} au panier">${MG.icon('plus')}</button>`}</div></div></article>`;
   };
 
   // Fiche produit : galerie de photos + informations + ajout au panier
@@ -140,10 +148,10 @@
         ${urls.length > 1 ? `<button type="button" class="gal-nav prev" aria-label="Photo précédente">‹</button><button type="button" class="gal-nav next" aria-label="Photo suivante">›</button><span class="gal-n" id="galN">1 / ${urls.length}</span>` : ''}
         ${p.promo_pct ? `<span class="tag promo" style="position:absolute;top:12px;left:12px">−${p.promo_pct} %</span>` : ''}</div>
         ${urls.length > 1 ? `<div class="gal-thumbs">${urls.map((u, k) => `<button type="button" data-k="${k}" class="${k ? '' : 'on'}" aria-label="Photo ${k + 1}"><img src="${u}" alt=""></button>`).join('')}</div>` : ''}</div>
-      <div class="sheet-info">${p.shop_name ? `<span class="pshop">${MG.esc(p.shop_name)}</span>` : ''}<h2>${MG.esc(p.name)}</h2>${MG.stockInfo(p.stock)}
+      <div class="sheet-info">${p.shop_name ? `<span class="pshop">${MG.esc(p.shop_name)}</span>` : ''}<h2>${MG.esc(p.name)}</h2>${MG.stockInfo(p.stock, p.unit)}
         ${p.description ? `<p class="muted" style="margin:.6rem 0 0">${MG.esc(p.description)}</p>` : ''}
-        <div class="sheet-buy"><div>${p.old_price ? `<span class="old">${MG.fcfa(p.old_price)}</span>` : ''}<span class="price" style="font-size:1.6rem">${MG.fcfa(p.price)}</span></div>
-        ${p.stock > 0 ? `<button class="btn" data-add="${MG.esc(p.id)}">${MG.icon('cart', 18)}Ajouter au panier</button>`
+        <div class="sheet-buy"><div>${p.old_price ? `<span class="old">${MG.fcfa(p.old_price)}</span>` : ''}<span class="price" style="font-size:1.6rem">${MG.fcfa(p.price)}</span>${MG.per(p.unit)}</div>
+        ${p.stock > 0 ? `<button class="btn" data-add="${MG.esc(p.id)}" data-step="${p.qty_step || 1}" data-unit="${p.unit || 'piece'}">${MG.icon('cart', 18)}Ajouter ${p.unit && p.unit !== 'piece' ? MG.qty(p.qty_step || 1, p.unit) : 'au panier'}${p.unit && p.unit !== 'piece' ? ' au panier' : ''}</button>`
           : `<button class="btn ${p.watching ? 'green' : 'alt'}" data-alert="${MG.esc(p.id)}" data-on="${p.watching ? 1 : 0}">${MG.icon(p.watching ? 'check' : 'bell', 16)}${p.watching ? 'Alerte activée' : 'Me prévenir'}</button>`}</div></div></div>`, { wide: true });
     const el = m.el; el.classList.add('sheet-modal');
     const show = k => {
@@ -238,14 +246,14 @@
     if (MG.user.role !== 'customer') return MG.toast('Utilisez un compte client pour acheter', true);
     try {
       const { items } = await MG.api('/api/cart');
-      const cur = (items.find(i => i.product_id === btn.dataset.add) || {}).qty || 0;
-      const r = await MG.api('/api/cart', { method: 'PUT', body: { productId: btn.dataset.add, qty: cur + 1 } });
+      const cur = (items.find(i => i.product_id === btn.dataset.add) || {}).qty || 0, step = Number(btn.dataset.step) || 1, unit = btn.dataset.unit || 'piece';
+      const r = await MG.api('/api/cart', { method: 'PUT', body: { productId: btn.dataset.add, qty: MG.r3(cur + step) } });
       await MG.refreshCartBadge();
       if (!r.adjusted) flyToCart(btn);
-      if (r.adjusted) return MG.toast(`Il n'en reste que ${r.stock} : vous avez déjà tout le stock dans votre panier.`, true);
+      if (r.adjusted) return MG.toast(`Il n'en reste que ${MG.qty(r.stock, unit)} : vous avez déjà tout le stock dans votre panier.`, true);
       const old = btn.innerHTML; btn.classList.add('done'); btn.innerHTML = MG.icon('check', btn.classList.contains('sm') ? 16 : 20);
       setTimeout(() => { btn.classList.remove('done'); btn.innerHTML = old; }, 1500);
-      MG.toast(r.stock - r.qty <= 0 ? 'Ajouté : c\'était le dernier en stock !' : r.stock <= MG.LOW_STOCK ? `Ajouté au panier · plus que ${r.stock - r.qty} après vous` : 'Ajouté au panier');
+      MG.toast(r.stock - r.qty <= 0 ? 'Ajouté : c\'était le dernier en stock !' : r.stock <= MG.LOW_STOCK ? `Ajouté au panier · plus que ${MG.qty(MG.r3(r.stock - r.qty), unit)} après vous` : unit !== 'piece' ? `Ajouté : ${MG.qty(r.qty, unit)} au panier` : 'Ajouté au panier');
     } catch (er) {
       if (er.status === 409) { MG.toast(er.message, true); const card = btn.closest('.product'); if (card) setTimeout(() => location.reload(), 1600); return; }
       MG.fail(er);
@@ -402,7 +410,7 @@
     try {
       const d = await MG.api('/api/cart');
       MG.cart = d;
-      const n = d.items.reduce((t, i) => t + i.qty, 0), tot = d.items.reduce((t, i) => t + i.price * i.qty, 0);
+      const n = MG.cartCount(d.items), tot = d.items.reduce((t, i) => t + MG.lineTotal(i.price, i.qty), 0);
       const fab = document.getElementById('cartFab');
       if (fab) {
         fab.hidden = !n || onCartPage();
@@ -427,9 +435,9 @@
         if (e.target.closest('[data-cd-close]')) return MG.closeCart();
         const b = e.target.closest('[data-cq]'); if (!b) return;
         const it = MG.cart.items.find(i => i.product_id === b.dataset.cq);
-        const qty = b.dataset.d === 'x' ? 0 : it.qty + Number(b.dataset.d);
+        const qty = b.dataset.d === 'x' ? 0 : MG.r3(it.qty + Number(b.dataset.d) * (it.qty_step || 1));
         b.disabled = true;
-        try { const r = await MG.api('/api/cart', { method: 'PUT', body: { productId: it.product_id, qty: Math.max(0, qty) } }); if (r.adjusted) MG.toast(`Il n'en reste que ${r.stock}`, true); }
+        try { const r = await MG.api('/api/cart', { method: 'PUT', body: { productId: it.product_id, qty: Math.max(0, qty) } }); if (r.adjusted) MG.toast(`Il n'en reste que ${MG.qty(r.stock, it.unit)}`, true); }
         catch (er) { MG.fail(er); }
         await refreshCartBadge();
       });
@@ -451,14 +459,14 @@
     }
     const shops = {};
     for (const i of items) (shops[i.shop_id] = shops[i.shop_id] || { name: i.shop_name, lines: [] }).lines.push(i);
-    const tot = items.reduce((t, i) => t + i.price * i.qty, 0), n = items.reduce((t, i) => t + i.qty, 0);
+    const tot = items.reduce((t, i) => t + MG.lineTotal(i.price, i.qty), 0), n = MG.cartCount(items);
     body.innerHTML = Object.values(shops).map(sh => `<div class="cd-shop"><h3>${MG.esc(sh.name)}</h3>${sh.lines.map(i => {
       const gone = !i.active || i.shop_status !== 'active' || i.stock <= 0, over = !gone && i.qty > i.stock;
       return `<div class="cd-line"><img src="${MG.img(i.photo_id)}" alt=""><div class="cd-info"><b>${MG.esc(i.name)}</b>
-        <span class="muted">${i.base_price > i.price ? `<s>${MG.fcfa(i.base_price)}</s> ` : ''}${MG.fcfa(i.price)}</span>
-        ${gone ? '<span class="stock-info out">Épuisé : à retirer</span>' : over ? `<span class="stock-info out">Il n'en reste que ${i.stock}</span>` : i.stock <= MG.LOW_STOCK ? `<span class="stock-info low">Plus que ${i.stock}</span>` : ''}
-        <div class="cd-row"><div class="qty"><button data-cq="${i.product_id}" data-d="-1" aria-label="Retirer un">−</button><b>${i.qty}</b><button data-cq="${i.product_id}" data-d="1" aria-label="Ajouter un"${gone || i.qty >= i.stock ? ' disabled' : ''}>+</button></div>
-        <span class="price" style="font-size:1rem">${MG.fcfa(i.price * i.qty)}</span><button class="cd-rm" data-cq="${i.product_id}" data-d="x" aria-label="Retirer ${MG.esc(i.name)}">${MG.icon('trash', 16)}</button></div></div></div>`;
+        <span class="muted">${i.base_price > i.price ? `<s>${MG.fcfa(i.base_price)}</s> ` : ''}${MG.fcfa(i.price)}${MG.per(i.unit)}</span>
+        ${gone ? '<span class="stock-info out">Épuisé : à retirer</span>' : over ? `<span class="stock-info out">Il n'en reste que ${MG.qty(i.stock, i.unit)}</span>` : i.stock <= MG.LOW_STOCK ? `<span class="stock-info low">Plus que ${MG.qty(i.stock, i.unit)}</span>` : ''}
+        <div class="cd-row"><div class="qty"><button data-cq="${i.product_id}" data-d="-1" aria-label="Retirer un">−</button><b>${MG.qty(i.qty, i.unit)}</b><button data-cq="${i.product_id}" data-d="1" aria-label="Ajouter un"${gone || MG.r3(i.qty + (i.qty_step || 1)) > i.stock ? ' disabled' : ''}>+</button></div>
+        <span class="price" style="font-size:1rem">${MG.fcfa(MG.lineTotal(i.price, i.qty))}</span><button class="cd-rm" data-cq="${i.product_id}" data-d="x" aria-label="Retirer ${MG.esc(i.name)}">${MG.icon('trash', 16)}</button></div></div></div>`;
     }).join('')}</div>`).join('');
     foot.innerHTML = `<div class="total"><span>${n} article${n > 1 ? 's' : ''}</span><b>${MG.fcfa(tot)}</b></div><p class="muted" style="margin:0 0 var(--space-3);font-size:.85rem">Livraison et bons d'achat calculés à l'étape suivante.</p>
       <a class="btn big" style="width:100%" href="/panier.html">Commander</a><button type="button" class="btn alt" style="width:100%;margin-top:var(--space-2)" data-cd-close>Continuer mes achats</button>`;
@@ -539,7 +547,7 @@
       if (!list || !list.length) return;
       add('suggest', list.map(p => `<div class="it"><a href="/boutique/${encodeURIComponent(p.slug)}" style="display:contents;color:inherit"><span style="position:relative;display:block"><img src="${MG.img(p.photo_id, p.category)}" alt="">${p.promo_pct ? `<span class="tag promo" style="position:absolute;top:6px;left:6px">−${p.promo_pct} %</span>` : ''}</span>
         <strong>${MG.esc(p.name)}</strong><small>${MG.esc(p.shop)}</small></a>
-        <div class="f"><span>${p.old_price ? `<span class="old">${MG.fcfa(p.old_price)}</span>` : ''}<span class="price">${MG.fcfa(p.price)}</span></span>${p.stock > 0 ? `<button class="add sm" data-add="${MG.esc(p.id)}" aria-label="Ajouter ${MG.esc(p.name)}">${MG.icon('plus', 16)}</button>` : '<span class="tag out">Épuisé</span>'}</div></div>`).join(''));
+        <div class="f"><span>${p.old_price ? `<span class="old">${MG.fcfa(p.old_price)}</span>` : ''}<span class="price">${MG.fcfa(p.price)}</span>${MG.per(p.unit)}</span>${p.stock > 0 ? `<button class="add sm" data-add="${MG.esc(p.id)}" data-step="${p.qty_step || 1}" data-unit="${p.unit || 'piece'}" aria-label="Ajouter ${MG.esc(p.name)}">${MG.icon('plus', 16)}</button>` : '<span class="tag out">Épuisé</span>'}</div></div>`).join(''));
     };
     async function ask(text) {
       bubble('me', MG.esc(text)); setQuick([]);

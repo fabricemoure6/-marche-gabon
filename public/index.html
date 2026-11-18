@@ -34,6 +34,13 @@
     <div class="rail" id="promoRail"></div>
   </section>
 
+  <!-- Produits vendus au kilo, au litre, au tas… (choisis par chaque boutique) -->
+  <section class="promo-band weigh-band" id="weigh" hidden>
+    <div class="head"><div><span class="kick">AU POIDS</span><h2>Vendus au kilo et à la mesure</h2><p id="weighSub">Poulet, poisson, viande, légumes… choisissez la quantité qu'il vous faut.</p></div>
+      <div class="rail-nav"><button type="button" data-wdir="-1" aria-label="Précédents">←</button><button type="button" data-wdir="1" aria-label="Suivants">→</button></div></div>
+    <div class="rail" id="weighRail"></div>
+  </section>
+
   <!-- Résultats de recherche -->
   <section id="results" hidden>
     <div class="section-head"><h2 id="resTitle"></h2><button class="link" id="clearSearch" type="button">Effacer la recherche</button></div>
@@ -149,6 +156,12 @@
   $('#demoNote').hidden = !demo;
   drawPromos(); drawSections();
   search($('#q').value.trim());
+  if (!demo) MG.api('/api/by-weight').then(list => {
+    if (!list.length) return;
+    $('#weigh').hidden = false;
+    $('#weighRail').innerHTML = list.map(p => MG.productCard(p, {})).join('');
+  }).catch(() => {});
+  $('#weigh').onclick = e => { const b = e.target.closest('[data-wdir]'); if (b) $('#weighRail').scrollBy({ left: Number(b.dataset.wdir) * $('#weighRail').clientWidth * 0.8, behavior: 'smooth' }); };
   if (location.hash === '#promos' && !$('#promos').hidden) $('#promos').scrollIntoView({ behavior: 'smooth' });
 })();
 </script></body></html>
