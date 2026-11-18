@@ -367,6 +367,8 @@
       <input id="cv" type="file" accept="image/*"><p class="muted" style="margin:.3rem 0 0;font-size:.85rem">Conseil : une photo large (paysage) de votre boutique ou de vos produits. Sans couverture, la page utilise une photo de vos produits.</p>
       <div class="row" style="margin-top:.8rem"><button type="button" class="btn alt small" id="gp">📍 Enregistrer la position de la boutique</button><span class="muted" id="gs">${s.lat != null ? '✅ Position enregistrée' : 'Nécessaire pour calculer la livraison et trouver les livreurs proches.'}</span></div>
       <p><button class="btn">Enregistrer</button></p></form>`;
+    const dbox = document.createElement('div'); dbox.style.marginTop = 'var(--space-4)'; S('pane').appendChild(dbox);
+    MG.docsCard(dbox, { title: 'Document administratif de la boutique', intro: 'L\'autorisation d\'ouverture de votre commerce délivrée par l\'administration, en photo ou en PDF.' }).catch(() => {});
     let pos = null;
     S('gp').onclick = async () => { try { pos = await MG.getPosition(); S('gs').textContent = '✅ Position prise, pensez à enregistrer'; } catch (er) { MG.fail(er); } };
     S('sf').onsubmit = async e => {

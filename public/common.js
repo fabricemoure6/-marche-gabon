@@ -43,6 +43,48 @@
     return out.id;
   };
 
+  // ---------- Pièces justificatives (facultatives, privées) ----------
+  // Une photo est réduite à 1600 px ; un PDF part tel quel (1 Mo maximum).
+  const DOC_STATE = { pending: ['En attente de vérification', 'pending'], verified: ['Vérifiée', 'active'], rejected: ['Refusée', 'suspended'] };
+  MG.openDocument = async id => {
+    const r = await fetch('/api/documents/' + id, { credentials: 'same-origin' });
+    if (!r.ok) throw new Error('Document introuvable');
+    const url = URL.createObjectURL(await r.blob()); window.open(url, '_blank', 'noopener'); setTimeout(() => URL.revokeObjectURL(url), 60000);
+  };
+  MG.docsCard = async function (box, { title, intro } = {}) {
+    const { kinds, documents } = await MG.api('/api/me/documents');
+    box.innerHTML = `<div class="card docs"><h3>${MG.esc(title || 'Mes pièces')} <span class="tag">Facultatif</span></h3>
+      <p class="muted" style="margin:0 0 var(--space-3)">${MG.esc(intro || '')} <b>Seule l'équipe du marché peut les voir</b> : jamais les clients.</p>
+      ${kinds.map(k => { const d = documents.find(x => x.kind === k.id), st = d && DOC_STATE[d.status];
+        return `<div class="docrow"><div><b>${MG.esc(k.label)}</b>${d ? `<br><span class="tag ${st[1]}">${st[0]}</span> <span class="muted">· envoyée le ${MG.date(d.created_at)}</span>${d.note ? `<br><span class="muted">Message de l'équipe : ${MG.esc(d.note)}</span>` : ''}` : '<br><span class="muted">Pas encore envoyée</span>'}</div>
+        <div class="row">${d ? `<button type="button" class="btn small alt" data-view="${d.id}">Voir</button><button type="button" class="btn small alt" data-del="${d.id}">Retirer</button>` : ''}
+        <label class="btn small ${d ? 'alt' : ''}" style="cursor:pointer">${d ? 'Remplacer' : 'Ajouter'}<input type="file" accept="image/*,application/pdf" hidden data-up="${k.id}"></label></div></div>`; }).join('')}</div>`;
+    box.onclick = async e => {
+      const v = e.target.closest('[data-view]'), x = e.target.closest('[data-del]');
+      try {
+        if (v) await MG.openDocument(v.dataset.view);
+        if (x && confirm('Retirer cette pièce ?')) { await MG.api('/api/me/documents/' + x.dataset.del, { method: 'DELETE' }); MG.toast('Pièce retirée'); MG.docsCard(box, { title, intro }); }
+      } catch (er) { MG.fail(er); }
+    };
+    box.onchange = async e => {
+      const i = e.target.closest('[data-up]'); if (!i || !i.files[0]) return;
+      const f = i.files[0];
+      try {
+        let body;
+        if (f.type === 'application/pdf') { if (f.size > 1024 * 1024) throw new Error('PDF trop lourd (1 Mo maximum) : envoyez plutôt une photo.'); body = await f.arrayBuffer(); }
+        else {
+          const bmp = await createImageBitmap(f), k = Math.min(1, 1600 / Math.max(bmp.width, bmp.height)), c = document.createElement('canvas');
+          c.width = Math.round(bmp.width * k); c.height = Math.round(bmp.height * k); c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height);
+          let q = 0.82, blob = await new Promise(r => c.toBlob(r, 'image/jpeg', q));
+          while (blob.size > 1000 * 1024 && q > 0.4) { q -= 0.12; blob = await new Promise(r => c.toBlob(r, 'image/jpeg', q)); }
+          body = await blob.arrayBuffer();
+        }
+        await MG.api('/api/me/documents/' + i.dataset.up, { method: 'POST', body });
+        MG.toast('Pièce envoyée : l\'équipe va la vérifier'); MG.docsCard(box, { title, intro });
+      } catch (er) { MG.fail(er); }
+    };
+  };
+
   // Photo de profil : recadrée au centre en carré de 400 px (JPEG léger)
   MG.uploadAvatar = async function (file) {
     if (!file) return null;

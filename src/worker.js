@@ -1,7 +1,7 @@
 // Marché Gabon : galerie marchande (Cloudflare Workers + D1).
 import {
   json, bad, rand, uid, now, sha256, safeEqual, hashPassword, createSession, clearCookie, currentUser, destroySession,
-  CATEGORIES, ORDER_STATUS, ensureSchema, loadSettings, saveSettings, toBase64, fromBase64, sniffImage,
+  CATEGORIES, ORDER_STATUS, ensureSchema, loadSettings, saveSettings, toBase64, fromBase64, sniffImage, sniffDocument, DOC_KINDS,
   validCoord, distanceKm, slugify, EFFECTIVE_PRICE, promoActive, publicProduct, voucherDiscount, loyaltyProgram, LOW_STOCK, photoList, SOLD, EXPENSE_CATS, period, UNITS, r3, unitOf, stepOf, fmtQty, lineTotal } from './lib.js';
 import { notify, confirmCheckout, rejectCheckout, cancelOrders, releaseVoucher, createVoucher, awardLoyalty, startOnlinePayment, singpayVerify, singpayOn, singpayCall, sp } from './pay.js';
 import { botReply, searchProducts } from './bot.js';
@@ -381,6 +381,36 @@ export default {
         const id = uid();
         await env.DB.prepare('INSERT INTO photos (id,owner_id,mime,data,size,created_at) VALUES (?1,?2,?3,?4,?5,?6)').bind(id, user.id, mime, toBase64(buf), buf.byteLength, now()).run();
         return json({ id }, 201);
+      }
+      // ----- Pièces justificatives (privées : propriétaire et administrateur uniquement) -----
+      if (method === 'GET' && p === '/api/me/documents') {
+        const { results } = await env.DB.prepare('SELECT id,kind,status,note,size,mime,created_at FROM documents WHERE user_id=?1').bind(user.id).all();
+        const kinds = Object.entries(DOC_KINDS).filter(([, k]) => k.roles.includes(user.role)).map(([id, k]) => ({ id, label: k.label }));
+        return json({ kinds, documents: results.map(d => ({ ...d, label: (DOC_KINDS[d.kind] || {}).label || d.kind })) });
+      }
+      if (method === 'POST' && (m = p.match(/^\/api\/me\/documents\/(cni|permis|passeport|autorisation)$/))) {
+        if (!DOC_KINDS[m[1]].roles.includes(user.role)) return bad('Cette pièce ne concerne pas votre type de compte', 403);
+        const buf = await request.arrayBuffer();
+        if (!buf.byteLength || buf.byteLength > 1024 * 1024) return bad('Fichier trop lourd (1 Mo maximum)');
+        const mime = sniffDocument(buf);
+        if (!mime) return bad('Format non pris en charge (photo JPEG, PNG, WebP ou PDF)');
+        const id = uid();
+        await env.DB.prepare(`INSERT INTO documents (id,user_id,kind,mime,data,size,status,created_at) VALUES (?1,?2,?3,?4,?5,?6,'pending',?7)
+          ON CONFLICT(user_id,kind) DO UPDATE SET id=excluded.id,mime=excluded.mime,data=excluded.data,size=excluded.size,status='pending',note=NULL,created_at=excluded.created_at,reviewed_at=NULL,reviewed_by=NULL`)
+          .bind(id, user.id, m[1], mime, toBase64(buf), buf.byteLength, now()).run();
+        const { results: admins } = await env.DB.prepare(`SELECT id FROM users WHERE role='admin'`).all();
+        for (const a of admins) await notify(env, a.id, 'Pièce à vérifier', `${user.name} a ajouté : ${DOC_KINDS[m[1]].label}.`, '/admin.html');
+        return json({ id }, 201);
+      }
+      if (method === 'DELETE' && (m = p.match(/^\/api\/me\/documents\/([a-f0-9]{16})$/))) {
+        await env.DB.prepare('DELETE FROM documents WHERE id=?1 AND user_id=?2').bind(m[1], user.id).run();
+        return json({ ok: true });
+      }
+      if (method === 'GET' && (m = p.match(/^\/api\/documents\/([a-f0-9]{16})$/))) {
+        const d = await env.DB.prepare('SELECT d.mime,d.data,d.kind,d.user_id,u.name FROM documents d JOIN users u ON u.id=d.user_id WHERE d.id=?1').bind(m[1]).first();
+        if (!d || (d.user_id !== user.id && user.role !== 'admin')) return bad('Document introuvable', 404);
+        if (user.role === 'admin' && d.user_id !== user.id) await logAction(env, user, 'Pièce consultée', 'document', m[1], d.name, (DOC_KINDS[d.kind] || {}).label || d.kind);
+        return new Response(fromBase64(d.data), { headers: { 'content-type': d.mime, 'cache-control': 'private, no-store', 'x-content-type-options': 'nosniff', 'content-security-policy': "sandbox; default-src 'none'; img-src data:; style-src 'unsafe-inline'", 'x-robots-tag': 'noindex', 'content-disposition': 'inline' } });
       }
       if (method === 'PUT' && p === '/api/me/photo') {
         const b = await readJson(request) || {};
@@ -875,8 +905,27 @@ export default {
             revenue: await c(`SELECT COALESCE(SUM(total),0) AS n FROM orders WHERE status IN ('paid','preparing','ready','delivering','delivered')`)
           });
         }
+        if (method === 'GET' && p === '/api/admin/documents') {
+          const { results } = await env.DB.prepare(
+            `SELECT d.id,d.kind,d.status,d.note,d.size,d.mime,d.created_at,d.reviewed_at,u.id AS user_id,u.name,u.role,u.phone,u.email,(SELECT s.name FROM shops s WHERE s.owner_id=u.id LIMIT 1) AS shop
+             FROM documents d JOIN users u ON u.id=d.user_id ORDER BY (d.status='pending') DESC, d.created_at DESC`).all();
+          return json(results.map(d => ({ ...d, label: (DOC_KINDS[d.kind] || {}).label || d.kind })));
+        }
+        if (method === 'POST' && (m = p.match(/^\/api\/admin\/documents\/([a-f0-9]{16})\/review$/))) {
+          const b = await readJson(request);
+          if (!b || !['verified', 'rejected', 'pending'].includes(b.status)) return bad('Statut invalide');
+          const note = cleanText(b.note, 300);
+          if (b.status === 'rejected' && note.length < 3) return bad('Indiquez pourquoi la pièce est refusée (elle sera transmise à la personne)');
+          const d = await env.DB.prepare('SELECT d.user_id,d.kind,u.name FROM documents d JOIN users u ON u.id=d.user_id WHERE d.id=?1').bind(m[1]).first();
+          if (!d) return bad('Document introuvable', 404);
+          await env.DB.prepare('UPDATE documents SET status=?2,note=?3,reviewed_at=?4,reviewed_by=?5 WHERE id=?1').bind(m[1], b.status, note || null, now(), user.id).run();
+          await logAction(env, user, b.status === 'verified' ? 'Pièce validée' : b.status === 'rejected' ? 'Pièce refusée' : 'Pièce remise en attente', 'document', m[1], d.name, `${DOC_KINDS[d.kind].label}${note ? ' : ' + note : ''}`);
+          if (b.status !== 'pending') await notify(env, d.user_id, b.status === 'verified' ? 'Pièce validée' : 'Pièce refusée',
+            b.status === 'verified' ? `Votre pièce « ${DOC_KINDS[d.kind].label} » a été vérifiée. Merci !` : `Votre pièce « ${DOC_KINDS[d.kind].label} » n'a pas pu être validée : ${note}. Vous pouvez en envoyer une nouvelle.`, DOC_KINDS[d.kind].roles[0] === 'courier' ? '/livreur.html' : '/vendeur.html');
+          return json({ ok: true });
+        }
         if (method === 'GET' && p === '/api/admin/shops') {
-          const { results } = await env.DB.prepare(`SELECT s.id,s.name,s.category,s.address,s.status,s.created_at,u.name AS owner,u.phone FROM shops s JOIN users u ON u.id=s.owner_id ORDER BY s.created_at DESC`).all();
+          const { results } = await env.DB.prepare(`SELECT s.id,s.name,s.category,s.address,s.status,s.created_at,u.name AS owner,u.phone,(SELECT status FROM documents d WHERE d.user_id=s.owner_id AND d.kind='autorisation') AS doc_status FROM shops s JOIN users u ON u.id=s.owner_id ORDER BY s.created_at DESC`).all();
           return json(results);
         }
         if (method === 'POST' && (m = p.match(/^\/api\/admin\/shops\/([a-f0-9]{16})\/status$/))) {
