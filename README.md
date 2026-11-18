@@ -89,3 +89,7 @@ Chaque produit a une **unité de vente** choisie par le vendeur dans « Ajouter 
 ## Pièces justificatives (facultatives)
 
 Un livreur peut ajouter sa carte d'identité, son permis ou son passeport ; une boutique, son document administratif d'ouverture du commerce (photo ou PDF, 1 Mo). Rien n'est obligatoire. Les pièces sont stockées dans la table `documents` (une par type et par personne), servies uniquement par `GET /api/documents/:id` à leur propriétaire et à l'administrateur (`cache-control: private, no-store`, jamais par la route publique des photos). L'administrateur les valide ou les refuse avec un motif dans l'onglet « Pièces » ; chaque consultation est inscrite au journal des actions et la personne est prévenue de la décision.
+
+## Numéro de versement des boutiques
+
+Dans « Ma boutique », chaque boutique indique où le marché doit verser ses ventes : Airtel Money ou Moov Money, numéro, nom du titulaire et code marchand (facultatif). Colonnes `shops.payout_method`, `payout_number`, `payout_name`, `payout_code`. Ces données ne sont lues que par la boutique elle-même et par l'administrateur (jamais par les routes publiques, qui listent leurs colonnes une à une). L'administrateur les voit dans Comptabilité (« Par boutique » et fenêtre « Verser »), où le moyen de paiement est présélectionné, et dans l'onglet Boutiques. Une boutique qui a un solde à recevoir sans numéro renseigné en est avertie dans sa comptabilité.
