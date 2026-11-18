@@ -119,9 +119,26 @@
         address: MG.$('#address').value, phone: MG.$('#phone').value, note: MG.$('#note').value, method: MG.$('#method').value,
         lat: pos && pos.lat, lng: pos && pos.lng, vouchers: Object.values(chosen).filter(Boolean) } });
       if (r.redirectUrl) { location.href = r.redirectUrl; return; }
-      showManual(r);
+      if (r.direct) showDirect(r); else showManual(r);
     } catch (er) { MG.$('#err').textContent = er.message; btn.disabled = false; if (er.status === 409 || /stock/i.test(er.message)) load(); }
   };
+  function showDirect(r) {
+    MG.$('#cart').hidden = true; MG.$('#order').hidden = true;
+    const p = MG.$('#pay'); p.hidden = false;
+    p.innerHTML = `<h2>Payez ${r.payments.length > 1 ? 'chaque boutique' : 'votre boutique'}</h2>
+      <p class="muted">Envoyez l'argent directement sur le compte de la boutique, puis saisissez la référence de la transaction reçue par SMS : la boutique confirme et prépare votre commande.</p>
+      ${r.payments.map(x => `<div class="card"><h3 style="margin:0 0 .4rem">${MG.esc(x.shop)} <small class="muted">· commande ${MG.esc(x.ref)}</small></h3>
+        ${MG.accountBox(x.account, x.amount)}
+        <label for="t-${x.ref}">Référence de la transaction</label>
+        <div class="row"><input id="t-${x.ref}" maxlength="60" placeholder="Ex. : MP240101.1234.A12345"><button class="btn" data-proof="${x.ref}">J'ai payé</button></div></div>`).join('')}
+      <div class="notice"><b>Frais de livraison : ${MG.fcfa(r.deliveryTotal)}</b> : à payer directement au livreur. Dès qu'un livreur accepte votre commande, son numéro apparaît dans « Mes commandes ».</div>
+      <a class="btn alt" href="/commandes.html">Mes commandes</a>`;
+    p.onclick = async e => {
+      const b = e.target.closest('[data-proof]'); if (!b) return;
+      try { await MG.api('/api/my/orders/' + b.dataset.proof + '/proof', { method: 'POST', body: { txnRef: MG.$('#t-' + b.dataset.proof).value } }); b.disabled = true; b.textContent = 'Envoyé ✓'; MG.toast('Merci, la boutique est prévenue'); }
+      catch (er) { MG.fail(er); }
+    };
+  }
   function showManual(r) {
     MG.$('#cart').hidden = true; MG.$('#order').hidden = true;
     const p = MG.$('#pay'); p.hidden = false;

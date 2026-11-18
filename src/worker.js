@@ -2,7 +2,7 @@
 import {
   json, bad, rand, uid, now, sha256, safeEqual, hashPassword, createSession, clearCookie, currentUser, destroySession,
   CATEGORIES, ORDER_STATUS, ensureSchema, loadSettings, saveSettings, toBase64, fromBase64, sniffImage, sniffDocument, DOC_KINDS,
-  validCoord, distanceKm, slugify, EFFECTIVE_PRICE, promoActive, publicProduct, voucherDiscount, loyaltyProgram, LOW_STOCK, photoList, SOLD, EXPENSE_CATS, period, UNITS, r3, unitOf, stepOf, fmtQty, lineTotal } from './lib.js';
+  validCoord, distanceKm, slugify, EFFECTIVE_PRICE, promoActive, publicProduct, voucherDiscount, loyaltyProgram, LOW_STOCK, photoList, SOLD, EXPENSE_CATS, period, UNITS, r3, unitOf, stepOf, fmtQty, lineTotal, cleanAccount, METHOD_LABEL } from './lib.js';
 import { notify, confirmCheckout, rejectCheckout, cancelOrders, releaseVoucher, createVoucher, awardLoyalty, startOnlinePayment, singpayVerify, singpayOn, singpayCall, sp } from './pay.js';
 import { botReply, searchProducts } from './bot.js';
 import { seoRoute } from './seo.js';
@@ -46,14 +46,16 @@ async function shopAccounting(env, shopId, per) {
     FROM orders o JOIN users u ON u.id=o.customer_id WHERE o.shop_id=?1 AND o.status IN ${SOLD} AND o.created_at BETWEEN ?2 AND ?3 ORDER BY o.created_at DESC LIMIT 500`, shopId, per.fromIso, per.toIso).all();
   const { results: expenses } = await S(`SELECT id,day,category,label,amount FROM expenses WHERE shop_id=?1 AND day BETWEEN ?2 AND ?3 ORDER BY day DESC, created_at DESC`, shopId, per.from, per.to).all();
   // Solde depuis l'ouverture : ventes livrées (nettes) moins versements reçus
-  const earned = await S(`SELECT COALESCE(SUM(subtotal-discount-commission),0) AS v FROM orders WHERE shop_id=?1 AND status='delivered'`, shopId).first();
+  const earned = await S(`SELECT COALESCE(SUM(subtotal-discount-commission),0) AS v FROM orders WHERE shop_id=?1 AND status='delivered' AND pay_direct=0`, shopId).first();
+  // Ventes encaissées directement par la boutique (le marché n'a pas touché cet argent) et commission qu'elle lui doit
+  const direct = await S(`SELECT COALESCE(SUM(CASE WHEN status='delivered' THEN subtotal-discount-commission ELSE 0 END),0) AS net, COALESCE(SUM(commission),0) AS commission, COUNT(*) AS n FROM orders WHERE shop_id=?1 AND pay_direct=1 AND status IN ${SOLD}`, shopId).first();
   const paid = await S(`SELECT COALESCE(SUM(amount),0) AS v FROM payouts WHERE shop_id=?1`, shopId).first();
   const { results: payouts } = await S(`SELECT amount,method,reference,note,created_at FROM payouts WHERE shop_id=?1 ORDER BY created_at DESC LIMIT 50`, shopId).all();
   const net = sum.gross - sum.discounts - sum.commission;
   return {
     period: { from: per.from, to: per.to },
     summary: { ...sum, net, expenses: exp.v, profit: net - exp.v, avg: sum.orders ? Math.round((sum.gross - sum.discounts) / sum.orders) : 0, cancelled: cancelled.n, cancelled_value: cancelled.v },
-    daily, top, orders, expenses, payouts, balance: { earned: earned.v, paid: paid.v, due: earned.v - paid.v }
+    daily, top, orders, expenses, payouts, balance: { earned: earned.v, paid: paid.v, due: earned.v - paid.v, direct_net: direct.net, direct_orders: direct.n, commission_owed: direct.commission }
   };
 }
 const csvCell = v => { const t = String(v ?? ''); return /[;"\n]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t; };
@@ -483,6 +485,17 @@ export default {
         const settings = await loadSettings(env);
         const byShop = new Map();
         for (const l of lines) { if (!byShop.has(l.shop_id)) byShop.set(l.shop_id, []); byShop.get(l.shop_id).push(l); }
+        // Paiement direct : le client paie chaque boutique sur son propre compte, à condition que TOUTES les boutiques du panier en aient indiqué un.
+        // Sinon ce panier suit l'ancien parcours (paiement au marché), pour que personne ne soit bloqué.
+        const accounts = new Map();
+        const sids = [...byShop.keys()];
+        const { results: sh } = await env.DB.prepare(`SELECT id,name,owner_id,payout_method,payout_number,payout_name,payout_code,payout_bank FROM shops WHERE id IN (${sids.map((_, i) => '?' + (i + 1)).join(',')})`).bind(...sids).all();
+        for (const s of sh) accounts.set(s.id, s);
+        const direct = (settings.payment_mode || 'direct') === 'direct' && sh.length === sids.length && sh.every(s => s.payout_number);
+        if ((settings.payment_mode || 'direct') === 'direct' && !direct) {
+          for (const s of sh) if (!s.payout_number) await notify(env, s.owner_id, 'Un client veut vous payer directement', 'Indiquez votre numéro Mobile Money ou votre compte bancaire dans Ma boutique : vos clients pourront vous payer directement.', '/vendeur.html#boutique');
+        }
+        const payList = [];
         const checkoutId = uid(), ref = 'MG-' + rand(4).toUpperCase();
         const stmts = [], orderRefs = [];
         let amount = 0;
@@ -514,17 +527,18 @@ export default {
           const orderId = orderIds.get(shopId), oref = 'CMD-' + rand(3).toUpperCase();
           orderRefs.push(oref); amount += subtotal - discount + fee;
           stmts.push(env.DB.prepare(
-            `INSERT INTO orders (id,ref,checkout_id,customer_id,shop_id,status,subtotal,delivery_fee,total,address,lat,lng,phone,note,distance_km,created_at,updated_at,discount,voucher_id,commission)
-             VALUES (?1,?2,?3,?4,?5,'awaiting_payment',?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?15,?16,?17,?18)`)
-            .bind(orderId, oref, checkoutId, user.id, shopId, subtotal, fee, subtotal - discount + fee, address, hasPos ? lat : null, hasPos ? lng : null, phone, note, km, now(), discount, voucher ? voucher.id : null, commission));
+            `INSERT INTO orders (id,ref,checkout_id,customer_id,shop_id,status,subtotal,delivery_fee,total,address,lat,lng,phone,note,distance_km,created_at,updated_at,discount,voucher_id,commission,pay_direct)
+             VALUES (?1,?2,?3,?4,?5,'awaiting_payment',?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?15,?16,?17,?18,?19)`)
+            .bind(orderId, oref, checkoutId, user.id, shopId, subtotal, fee, subtotal - discount + fee, address, hasPos ? lat : null, hasPos ? lng : null, phone, note, km, now(), discount, voucher ? voucher.id : null, commission, direct ? 1 : 0));
+          if (direct) payList.push({ ref: oref, shop: accounts.get(shopId).name, shopId, amount: subtotal - discount, delivery: fee });
           for (const l of ls) {
             stmts.push(env.DB.prepare('INSERT INTO order_items (id,order_id,product_id,name,price,qty,unit) VALUES (?1,?2,?3,?4,?5,?6,?7)').bind(uid(), orderId, l.product_id, l.name, l.price, l.qty, l.unit));
             stmts.push(env.DB.prepare('UPDATE products SET stock = ROUND(stock - ?2, 3), stock_updated_at=?3 WHERE id=?1').bind(l.product_id, l.qty, Date.now()));
           }
         }
         const method2 = ['airtel_money', 'moov_money', 'card'].includes(b.method) ? b.method : 'airtel_money';
-        stmts.unshift(env.DB.prepare(`INSERT INTO checkouts (id,ref,user_id,amount,method,provider,status,created_at) VALUES (?1,?2,?3,?4,?5,'manual','pending',?6)`)
-          .bind(checkoutId, ref, user.id, amount, method2, now()));
+        stmts.unshift(env.DB.prepare(`INSERT INTO checkouts (id,ref,user_id,amount,method,provider,status,created_at) VALUES (?1,?2,?3,?4,?5,?7,'pending',?6)`)
+          .bind(checkoutId, ref, user.id, amount, method2, now(), direct ? 'direct' : 'manual'));
         stmts.push(env.DB.prepare('DELETE FROM cart_items WHERE user_id=?1').bind(user.id));
         try { await env.DB.batch(stmts); }
         catch (e) {
@@ -540,6 +554,10 @@ export default {
           else if (a.stock <= LOW_STOCK) await notify(env, a.owner_id, 'Stock faible', `Il ne reste que ${fmtQty(a.stock, a.unit)} de « ${a.name} ». Pensez à mettre le stock à jour.`, '/vendeur.html#produits');
         }
         const co = { id: checkoutId, ref, amount };
+        if (direct) {
+          const payments = payList.map(x => { const a = accounts.get(x.shopId); return { ref: x.ref, shop: x.shop, amount: x.amount, account: { method: a.payout_method, methodLabel: METHOD_LABEL[a.payout_method], number: a.payout_number, name: a.payout_name, code: a.payout_code, bank: a.payout_bank } }; });
+          return json({ ref, amount, orders: orderRefs, id: checkoutId, direct: true, payments, deliveryTotal: payList.reduce((t, x) => t + x.delivery, 0), redirectUrl: null, manual: false }, 201);
+        }
         const online = await startOnlinePayment(env, co, url.origin);
         return json({
           ref, amount, orders: orderRefs, id: checkoutId,
@@ -555,6 +573,24 @@ export default {
         if (!r.meta.changes) return bad('Paiement introuvable', 404);
         const { results: admins } = await env.DB.prepare(`SELECT id FROM users WHERE role='admin'`).all();
         for (const a of admins) await notify(env, a.id, 'Paiement à vérifier', `Référence ${txn}`, '/admin.html');
+        return json({ ok: true });
+      }
+      // ----- Paiement direct : le client indique la référence de sa transaction (boutique, puis frais de livraison au livreur) -----
+      if (method === 'POST' && (m = p.match(/^\/api\/my\/orders\/(CMD-[A-F0-9]{6})\/(proof|fee-proof)$/))) {
+        const b = await readJson(request), txn = cleanText(b && b.txnRef, 60);
+        if (txn.length < 4) return bad('Saisissez la référence de la transaction (SMS de confirmation)');
+        const r = await loadOrderFor(env, user, m[1]);
+        if (!r || r.role !== 'customer' || !r.o.pay_direct) return bad('Commande introuvable', 404);
+        if (m[2] === 'proof') {
+          if (r.o.status !== 'awaiting_payment') return bad('Cette commande est déjà réglée ou annulée');
+          await env.DB.prepare('UPDATE orders SET pay_ref=?2, pay_submitted_at=?3, updated_at=?3 WHERE id=?1').bind(r.o.id, txn, now()).run();
+          await notify(env, r.o.shop_owner, 'Paiement à confirmer', `${r.o.customer_name} dit avoir payé ${r.o.subtotal - (r.o.discount || 0)} FCFA (commande ${r.o.ref}, réf. ${txn}). Vérifiez votre compte, puis confirmez.`, '/vendeur.html');
+        } else {
+          if (!r.o.courier_id) return bad('Un livreur n\'a pas encore pris votre commande');
+          if (r.o.fee_state === 'paid') return bad('Les frais de livraison sont déjà confirmés');
+          await env.DB.prepare(`UPDATE orders SET fee_ref=?2, fee_state='submitted' WHERE id=?1`).bind(r.o.id, txn).run();
+          await notify(env, r.o.courier_id, 'Frais de livraison payés', `${r.o.customer_name} dit avoir payé ${r.o.delivery_fee} FCFA (commande ${r.o.ref}, réf. ${txn}). Confirmez quand vous les avez reçus.`, '/livreur.html');
+        }
         return json({ ok: true });
       }
       if (method === 'GET' && (m = p.match(/^\/api\/my\/checkouts\/(MG-[A-F0-9]{8})\/check$/))) {
@@ -587,7 +623,24 @@ export default {
       if (method === 'GET' && (m = p.match(/^\/api\/orders\/(CMD-[A-F0-9]{6})$/))) {
         const r = await loadOrderFor(env, user, m[1]);
         if (!r) return bad('Commande introuvable', 404);
-        return json({ order: orderPublic(r.o, r.role), items: await itemsOf(env, r.o.id) });
+        const order = orderPublic(r.o, r.role);
+        if (r.o.pay_direct) {
+          const acc = (m_, n, nm, cd, bk) => (n ? { method: m_, methodLabel: METHOD_LABEL[m_], number: n, name: nm, code: cd, bank: bk } : null);
+          const sh = await env.DB.prepare('SELECT payout_method,payout_number,payout_name,payout_code,payout_bank FROM shops WHERE id=?1').bind(r.o.shop_id).first();
+          const shopState = r.o.status === 'cancelled' ? 'cancelled' : r.o.status !== 'awaiting_payment' ? 'paid' : r.o.pay_ref ? 'submitted' : 'to_pay';
+          let fee = null;
+          if (r.role !== 'seller') {
+            if (!r.o.courier_id) fee = { amount: r.o.delivery_fee, state: 'waiting_courier' };
+            else {
+              const k = await env.DB.prepare('SELECT pay_method,pay_number,pay_name,pay_code,pay_bank FROM couriers WHERE user_id=?1').bind(r.o.courier_id).first() || {};
+              fee = { amount: r.o.delivery_fee, state: r.o.fee_state === 'paid' ? 'paid' : r.o.fee_state === 'submitted' ? 'submitted' : 'to_pay', ref: r.o.fee_ref,
+                account: r.role === 'courier' ? null : acc(k.pay_method, k.pay_number, k.pay_name, k.pay_code, k.pay_bank), courier: r.o.courier_name };
+            }
+          }
+          order.pay = { direct: true, shop: { amount: r.o.subtotal - (r.o.discount || 0), state: shopState, ref: r.o.pay_ref,
+            account: r.role === 'customer' || r.role === 'admin' ? acc(sh.payout_method, sh.payout_number, sh.payout_name, sh.payout_code, sh.payout_bank) : null }, fee };
+        }
+        return json({ order, items: await itemsOf(env, r.o.id) });
       }
       if (method === 'POST' && (m = p.match(/^\/api\/orders\/(CMD-[A-F0-9]{6})\/cancel$/))) {
         const r = await loadOrderFor(env, user, m[1]);
@@ -658,13 +711,11 @@ export default {
             cover = null;
             if (b.cover_photo && await env.DB.prepare('SELECT 1 FROM photos WHERE id=?1 AND owner_id=?2').bind(String(b.cover_photo), user.id).first()) cover = String(b.cover_photo);
           }
-          // Où le marché verse l'argent de la boutique (visible seulement par la boutique et l'administrateur)
+          // Compte où les clients paient la boutique (Mobile Money ou banque)
           if (b.payout_number !== undefined) {
-            const digits = String(b.payout_number || '').replace(/[\s.\-]/g, '');
-            if (digits && !/^\+?\d{8,15}$/.test(digits)) return bad('Numéro de versement invalide : 8 à 15 chiffres (ex. 077 12 34 56)');
-            const pm = ['airtel_money', 'moov_money'].includes(b.payout_method) ? b.payout_method : 'airtel_money';
-            await env.DB.prepare('UPDATE shops SET payout_method=?2,payout_number=?3,payout_name=?4,payout_code=?5 WHERE id=?1')
-              .bind(shop.id, digits ? pm : null, digits || null, digits ? cleanText(b.payout_name, 80) || null : null, digits ? cleanText(b.payout_code, 30) || null : null).run();
+            const acc = cleanAccount({ method: b.payout_method, number: b.payout_number, name: b.payout_name, code: b.payout_code, bank: b.payout_bank }, cleanText);
+            if (acc.error) return bad(acc.error);
+            await env.DB.prepare('UPDATE shops SET payout_method=?2,payout_number=?3,payout_name=?4,payout_code=?5,payout_bank=?6 WHERE id=?1').bind(shop.id, acc.method, acc.number, acc.name, acc.code, acc.bank).run();
           }
           await env.DB.prepare('UPDATE shops SET name=?2,category=?3,description=?4,address=?5,phone=?6,whatsapp=?7,lat=?8,lng=?9,photo_id=?10,cover_photo=?11 WHERE id=?1')
             .bind(shop.id, name, cat, cleanText(b.description, 600), cleanText(b.address, 200), cleanText(b.phone, 30), cleanText(b.whatsapp, 30),
@@ -806,10 +857,32 @@ export default {
         }
         if (method === 'GET' && p === '/api/seller/orders') {
           const { results } = await env.DB.prepare(
-            `SELECT o.id,o.ref,o.status,o.total,o.subtotal,o.discount,o.delivery_fee,o.address,o.note,o.created_at,u.name AS customer_name
-             FROM orders o JOIN users u ON u.id=o.customer_id WHERE o.shop_id=?1 AND o.status!='awaiting_payment' ORDER BY o.created_at DESC LIMIT 60`).bind(shop.id).all();
+            `SELECT o.id,o.ref,o.status,o.total,o.subtotal,o.discount,o.delivery_fee,o.address,o.note,o.created_at,o.pay_direct,o.pay_ref,o.pay_submitted_at,u.name AS customer_name
+             FROM orders o JOIN users u ON u.id=o.customer_id WHERE o.shop_id=?1 AND (o.status!='awaiting_payment' OR o.pay_direct=1) ORDER BY o.created_at DESC LIMIT 60`).bind(shop.id).all();
           for (const o of results) { o.items = await itemsOf(env, o.id); o.statusLabel = ORDER_STATUS[o.status]; delete o.id; }
           return json(results);
+        }
+        if (method === 'POST' && (m = p.match(/^\/api\/seller\/orders\/(CMD-[A-F0-9]{6})\/payment$/))) {
+          const b = await readJson(request) || {};
+          const o = await env.DB.prepare('SELECT * FROM orders WHERE ref=?1 AND shop_id=?2 AND pay_direct=1').bind(m[1], shop.id).first();
+          if (!o) return bad('Commande introuvable', 404);
+          if (o.status !== 'awaiting_payment') return bad('Cette commande est déjà réglée ou annulée');
+          if (b.action === 'confirm') {
+            const r = await env.DB.prepare(`UPDATE orders SET status='paid', updated_at=?2 WHERE id=?1 AND status='awaiting_payment'`).bind(o.id, now()).run();
+            if (!r.meta.changes) return bad('Cette commande vient d\'être modifiée');
+            await env.DB.prepare(`UPDATE checkouts SET status='confirmed', confirmed_at=?2 WHERE id=?1 AND status!='confirmed' AND NOT EXISTS (SELECT 1 FROM orders WHERE checkout_id=?1 AND status='awaiting_payment')`).bind(o.checkout_id, now()).run();
+            await notify(env, o.customer_id, 'Paiement reçu', `${shop.name} a bien reçu votre paiement pour la commande ${o.ref}. Elle est en préparation. Votre reçu est disponible.`, `/recu.html?ref=${o.ref}`);
+            return json({ ok: true });
+          }
+          if (b.action === 'reject') {
+            const reason = cleanText(b.reason, 200) || 'paiement non retrouvé sur le compte';
+            await env.DB.prepare(`UPDATE products SET stock = ROUND(stock + COALESCE((SELECT qty FROM order_items WHERE order_id=?1 AND product_id=products.id),0), 3) WHERE id IN (SELECT product_id FROM order_items WHERE order_id=?1)`).bind(o.id).run();
+            await env.DB.prepare(`UPDATE orders SET status='cancelled', updated_at=?2 WHERE id=?1`).bind(o.id, now()).run();
+            await releaseVoucher(env, o.id);
+            await notify(env, o.customer_id, 'Paiement non retrouvé', `${shop.name} n'a pas retrouvé votre paiement (${reason}). La commande ${o.ref} est annulée. Vous pouvez recommander.`, `/commandes.html?ref=${o.ref}`);
+            return json({ ok: true });
+          }
+          return bad('Action invalide');
         }
         if (method === 'POST' && (m = p.match(/^\/api\/seller\/orders\/(CMD-[A-F0-9]{6})\/status$/))) {
           const b = await readJson(request);
@@ -858,6 +931,20 @@ export default {
           await env.DB.prepare('UPDATE couriers SET lat=?2,lng=?3,updated_at=?4 WHERE user_id=?1').bind(user.id, lat, lng, Date.now()).run();
           return json({ ok: true });
         }
+        if (method === 'POST' && p === '/api/courier/account') {
+          const b = await readJson(request) || {};
+          const acc = cleanAccount({ method: b.method, number: b.number, name: b.name, code: b.code, bank: b.bank }, cleanText);
+          if (acc.error) return bad(acc.error);
+          await env.DB.prepare('UPDATE couriers SET pay_method=?2,pay_number=?3,pay_name=?4,pay_code=?5,pay_bank=?6 WHERE user_id=?1').bind(user.id, acc.method, acc.number, acc.name, acc.code, acc.bank).run();
+          return json({ ok: true });
+        }
+        if (method === 'POST' && (m = p.match(/^\/api\/courier\/orders\/(CMD-[A-F0-9]{6})\/fee$/))) {
+          const o = await env.DB.prepare('SELECT id,ref,customer_id,pay_direct,fee_state FROM orders WHERE ref=?1 AND courier_id=?2').bind(m[1], user.id).first();
+          if (!o || !o.pay_direct) return bad('Commande introuvable', 404);
+          await env.DB.prepare(`UPDATE orders SET fee_state='paid' WHERE id=?1`).bind(o.id).run();
+          await notify(env, o.customer_id, 'Frais de livraison reçus', `${user.name} a bien reçu les frais de livraison de la commande ${o.ref}. Merci !`, `/commandes.html?ref=${o.ref}`);
+          return json({ ok: true });
+        }
         if (method === 'GET' && p === '/api/courier/jobs') {
           const settings = await loadSettings(env);
           const { results } = await env.DB.prepare(
@@ -877,13 +964,14 @@ export default {
           const r = await env.DB.prepare(`UPDATE orders SET courier_id=?2, updated_at=?3 WHERE ref=?1 AND status IN ('paid','preparing','ready') AND courier_id IS NULL`).bind(m[1], user.id, now()).run();
           if (!r.meta.changes) return bad('Cette course vient d\'être prise par un autre livreur', 409);
           const o = await env.DB.prepare('SELECT o.customer_id,o.ref,s.owner_id FROM orders o JOIN shops s ON s.id=o.shop_id WHERE o.ref=?1').bind(m[1]).first();
-          await notify(env, o.customer_id, 'Un livreur arrive à la boutique', `${user.name} va récupérer votre commande ${o.ref}.`, `/commandes.html?ref=${o.ref}`);
+          const dir = await env.DB.prepare('SELECT pay_direct,delivery_fee FROM orders WHERE ref=?1').bind(o.ref).first();
+          await notify(env, o.customer_id, 'Un livreur arrive à la boutique', `${user.name} va récupérer votre commande ${o.ref}.${dir && dir.pay_direct ? ` Vous pouvez payer les frais de livraison (${dir.delivery_fee} FCFA) : ouvrez la commande pour voir son numéro.` : ''}`, `/commandes.html?ref=${o.ref}`);
           await notify(env, o.owner_id, 'Livreur en route', `${user.name} vient chercher la commande ${o.ref}.`, '/vendeur.html');
           return json({ ok: true });
         }
         if (method === 'GET' && p === '/api/courier/orders') {
           const { results } = await env.DB.prepare(
-            `SELECT o.ref,o.status,o.address,o.delivery_fee,o.lat,o.lng,s.name AS shop_name,s.address AS shop_address,s.lat AS slat,s.lng AS slng,s.phone AS shop_phone
+            `SELECT o.ref,o.status,o.address,o.delivery_fee,o.pay_direct,o.fee_state,o.fee_ref,o.lat,o.lng,s.name AS shop_name,s.address AS shop_address,s.lat AS slat,s.lng AS slng,s.phone AS shop_phone
              FROM orders o JOIN shops s ON s.id=o.shop_id WHERE o.courier_id=?1 ORDER BY o.updated_at DESC LIMIT 30`).bind(user.id).all();
           return json(results.map(o => ({ ...o, statusLabel: ORDER_STATUS[o.status] })));
         }
@@ -961,7 +1049,8 @@ export default {
               COALESCE((SELECT SUM(discount) FROM orders o WHERE o.shop_id=s.id AND o.status IN ${SOLD} AND o.created_at BETWEEN ?1 AND ?2),0) AS discounts,
               COALESCE((SELECT SUM(commission) FROM orders o WHERE o.shop_id=s.id AND o.status IN ${SOLD} AND o.created_at BETWEEN ?1 AND ?2),0) AS commission,
               COALESCE((SELECT SUM(delivery_fee) FROM orders o WHERE o.shop_id=s.id AND o.status IN ${SOLD} AND o.created_at BETWEEN ?1 AND ?2),0) AS delivery,
-              COALESCE((SELECT SUM(subtotal-discount-commission) FROM orders o WHERE o.shop_id=s.id AND o.status='delivered'),0) AS earned,
+              COALESCE((SELECT SUM(subtotal-discount-commission) FROM orders o WHERE o.shop_id=s.id AND o.status='delivered' AND o.pay_direct=0),0) AS earned,
+              COALESCE((SELECT SUM(commission) FROM orders o WHERE o.shop_id=s.id AND o.pay_direct=1 AND o.status IN ${SOLD}),0) AS commission_owed,
               COALESCE((SELECT SUM(amount) FROM payouts p WHERE p.shop_id=s.id),0) AS paid,
               s.payout_method,s.payout_number,s.payout_name,s.payout_code
             FROM shops s ORDER BY gross DESC, s.name`).bind(per.fromIso, per.toIso).all();
@@ -1090,6 +1179,7 @@ export default {
             site_name: cleanText(b.site_name, 60) || cur.site_name, tagline: cleanText(b.tagline, 140) || cur.tagline,
             airtel_number: cleanText(b.airtel_number, 30), merchant_name: cleanText(b.merchant_name, 60) || cur.merchant_name,
             payment_instructions: cleanText(b.payment_instructions, 400) || cur.payment_instructions,
+            payment_mode: b.payment_mode === 'marketplace' ? 'marketplace' : 'direct',
             delivery_base: nn(b.delivery_base, cur.delivery_base, 0, 100000), delivery_per_km: nn(b.delivery_per_km, cur.delivery_per_km, 0, 10000),
             courier_radius_km: nn(b.courier_radius_km, cur.courier_radius_km, 1, 200),
             invite_required: ['none', 'pro', 'all'].includes(b.invite_required) ? b.invite_required : cur.invite_required,
