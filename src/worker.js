@@ -186,27 +186,18 @@ async function resetPassword(request, env) {
 }
 
 // ---------- Comptes de paiement verrouillés ----------
-// La première saisie est enregistrée ; toute modification ou suppression devient une demande que l'administrateur accepte.
-// L'ancien compte reste actif tant que la demande n'est pas acceptée ; tout est gardé dans account_changes.
+// Toute saisie d'un compte (première fois, modification ou suppression) devient une demande que l'administrateur accepte.
+// L'ancien compte (s'il existe) reste actif tant que la demande n'est pas acceptée ; tout est gardé dans account_changes.
 const sameAcc = (a, b) => ['method', 'number', 'name', 'code', 'bank'].every(k => (a[k] || null) === (b[k] || null));
 async function requestAccount(env, user, ownerType, ownerId, ownerName, cur, acc) {
   const old = { method: cur.method || null, number: cur.number || null, name: cur.name || null, code: cur.code || null, bank: cur.bank || null };
   const next = { method: acc.method, number: acc.number, name: acc.name, code: acc.code, bank: acc.bank };
   if (sameAcc(old, next)) return 'unchanged';
-  const apply = () => ownerType === 'shop'
-    ? env.DB.prepare('UPDATE shops SET payout_method=?2,payout_number=?3,payout_name=?4,payout_code=?5,payout_bank=?6 WHERE id=?1').bind(ownerId, next.method, next.number, next.name, next.code, next.bank).run()
-    : env.DB.prepare('UPDATE couriers SET pay_method=?2,pay_number=?3,pay_name=?4,pay_code=?5,pay_bank=?6 WHERE user_id=?1').bind(ownerId, next.method, next.number, next.name, next.code, next.bank).run();
-  if (!old.number && next.number) { // première saisie : active tout de suite, gardée en historique
-    await apply();
-    await env.DB.prepare(`INSERT INTO account_changes (id,owner_type,owner_id,user_id,old_data,new_data,status,note,created_at,decided_at) VALUES (?1,?2,?3,?4,NULL,?5,'approved','première saisie',?6,?6)`)
-      .bind(uid(), ownerType, ownerId, user.id, JSON.stringify(next), now()).run();
-    return 'saved';
-  }
-  await env.DB.prepare(`UPDATE account_changes SET status='replaced', decided_at=?3, note='remplacée par une demande plus récente' WHERE owner_type=?1 AND owner_id=?2 AND status='pending'`).bind(ownerType, ownerId, now()).run(); // une seule demande en attente, les anciennes restent dans l'historique
+    await env.DB.prepare(`UPDATE account_changes SET status='replaced', decided_at=?3, note='remplacée par une demande plus récente' WHERE owner_type=?1 AND owner_id=?2 AND status='pending'`).bind(ownerType, ownerId, now()).run(); // une seule demande en attente, les anciennes restent dans l'historique
   await env.DB.prepare(`INSERT INTO account_changes (id,owner_type,owner_id,user_id,old_data,new_data,status,created_at) VALUES (?1,?2,?3,?4,?5,?6,'pending',?7)`)
     .bind(uid(), ownerType, ownerId, user.id, JSON.stringify(old), JSON.stringify(next), now()).run();
   const { results: admins } = await env.DB.prepare(`SELECT id FROM users WHERE role='admin'`).all();
-  for (const a of admins) await notify(env, a.id, 'Changement de compte de paiement à valider', `${ownerName} (${ownerType === 'shop' ? 'boutique' : 'livreur'}) demande à modifier son compte de paiement.`, '/admin.html');
+  for (const a of admins) await notify(env, a.id, 'Compte de paiement à valider', `${ownerName} (${ownerType === 'shop' ? 'boutique' : 'livreur'}) ${old.number ? 'demande à modifier' : 'a indiqué'} son compte de paiement : à valider.`, '/admin.html');
   return 'pending';
 }
 async function pendingAccount(env, ownerType, ownerId) {
@@ -741,7 +732,7 @@ export default {
             cover = null;
             if (b.cover_photo && await env.DB.prepare('SELECT 1 FROM photos WHERE id=?1 AND owner_id=?2').bind(String(b.cover_photo), user.id).first()) cover = String(b.cover_photo);
           }
-          // Compte où les clients paient la boutique : première saisie enregistrée, changement soumis à l'administrateur
+          // Compte où les clients paient la boutique : toute saisie ou modification est soumise à l'administrateur
           let accState = null;
           if (b.payout_number !== undefined) {
             const acc = cleanAccount({ method: b.payout_method, number: b.payout_number, name: b.payout_name, code: b.payout_code, bank: b.payout_bank }, cleanText);
