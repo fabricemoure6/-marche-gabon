@@ -161,7 +161,8 @@ const MIGRATIONS = {
   notifications: [['kind', 'TEXT']],
   products: [['unit', "TEXT NOT NULL DEFAULT 'piece'"], ['qty_step', 'REAL NOT NULL DEFAULT 1'], ['promo_price', 'INTEGER'], ['promo_until', 'INTEGER'], ['promo_start', 'INTEGER'], ['stock_updated_at', 'INTEGER'], ['photos', 'TEXT']],
   shops: [['loyalty_enabled', 'INTEGER NOT NULL DEFAULT 0'], ['loyalty_every', 'INTEGER'], ['loyalty_kind', 'TEXT'], ['loyalty_value', 'INTEGER'],
-    ['loyalty_min', 'INTEGER'], ['loyalty_days', 'INTEGER'], ['cover_photo', 'TEXT']],
+    ['loyalty_min', 'INTEGER'], ['loyalty_days', 'INTEGER'], ['cover_photo', 'TEXT'],
+    ['payout_method', 'TEXT'], ['payout_number', 'TEXT'], ['payout_name', 'TEXT'], ['payout_code', 'TEXT']],
   order_items: [['unit', "TEXT NOT NULL DEFAULT 'piece'"]],
   orders: [['discount', 'INTEGER NOT NULL DEFAULT 0'], ['voucher_id', 'TEXT'], ['commission', 'INTEGER NOT NULL DEFAULT 0']]
 };

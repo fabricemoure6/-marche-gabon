@@ -658,6 +658,14 @@ export default {
             cover = null;
             if (b.cover_photo && await env.DB.prepare('SELECT 1 FROM photos WHERE id=?1 AND owner_id=?2').bind(String(b.cover_photo), user.id).first()) cover = String(b.cover_photo);
           }
+          // Où le marché verse l'argent de la boutique (visible seulement par la boutique et l'administrateur)
+          if (b.payout_number !== undefined) {
+            const digits = String(b.payout_number || '').replace(/[\s.\-]/g, '');
+            if (digits && !/^\+?\d{8,15}$/.test(digits)) return bad('Numéro de versement invalide : 8 à 15 chiffres (ex. 077 12 34 56)');
+            const pm = ['airtel_money', 'moov_money'].includes(b.payout_method) ? b.payout_method : 'airtel_money';
+            await env.DB.prepare('UPDATE shops SET payout_method=?2,payout_number=?3,payout_name=?4,payout_code=?5 WHERE id=?1')
+              .bind(shop.id, digits ? pm : null, digits || null, digits ? cleanText(b.payout_name, 80) || null : null, digits ? cleanText(b.payout_code, 30) || null : null).run();
+          }
           await env.DB.prepare('UPDATE shops SET name=?2,category=?3,description=?4,address=?5,phone=?6,whatsapp=?7,lat=?8,lng=?9,photo_id=?10,cover_photo=?11 WHERE id=?1')
             .bind(shop.id, name, cat, cleanText(b.description, 600), cleanText(b.address, 200), cleanText(b.phone, 30), cleanText(b.whatsapp, 30),
               pos ? lat : shop.lat, pos ? lng : shop.lng, photo, cover).run();
@@ -779,7 +787,7 @@ export default {
           const a = await shopAccounting(env, shop.id, period(url));
           if (p.endsWith('.csv')) return new Response(accountingCsv(shop.name, a), { headers: { 'content-type': 'text/csv; charset=utf-8',
             'content-disposition': `attachment; filename="comptabilite-${shop.slug}-${a.period.from}-${a.period.to}.csv"`, 'cache-control': 'no-store' } });
-          return json({ ...a, categories: EXPENSE_CATS, commission_pct: (await loadSettings(env)).commission_pct || 0 });
+          return json({ ...a, categories: EXPENSE_CATS, commission_pct: (await loadSettings(env)).commission_pct || 0, payout_set: !!shop.payout_number });
         }
         if (method === 'POST' && p === '/api/seller/expenses') {
           const b = await readJson(request) || {};
@@ -925,7 +933,7 @@ export default {
           return json({ ok: true });
         }
         if (method === 'GET' && p === '/api/admin/shops') {
-          const { results } = await env.DB.prepare(`SELECT s.id,s.name,s.category,s.address,s.status,s.created_at,u.name AS owner,u.phone,(SELECT status FROM documents d WHERE d.user_id=s.owner_id AND d.kind='autorisation') AS doc_status FROM shops s JOIN users u ON u.id=s.owner_id ORDER BY s.created_at DESC`).all();
+          const { results } = await env.DB.prepare(`SELECT s.id,s.name,s.category,s.address,s.status,s.created_at,u.name AS owner,u.phone,s.payout_method,s.payout_number,s.payout_name,s.payout_code,(SELECT status FROM documents d WHERE d.user_id=s.owner_id AND d.kind='autorisation') AS doc_status FROM shops s JOIN users u ON u.id=s.owner_id ORDER BY s.created_at DESC`).all();
           return json(results);
         }
         if (method === 'POST' && (m = p.match(/^\/api\/admin\/shops\/([a-f0-9]{16})\/status$/))) {
@@ -954,7 +962,8 @@ export default {
               COALESCE((SELECT SUM(commission) FROM orders o WHERE o.shop_id=s.id AND o.status IN ${SOLD} AND o.created_at BETWEEN ?1 AND ?2),0) AS commission,
               COALESCE((SELECT SUM(delivery_fee) FROM orders o WHERE o.shop_id=s.id AND o.status IN ${SOLD} AND o.created_at BETWEEN ?1 AND ?2),0) AS delivery,
               COALESCE((SELECT SUM(subtotal-discount-commission) FROM orders o WHERE o.shop_id=s.id AND o.status='delivered'),0) AS earned,
-              COALESCE((SELECT SUM(amount) FROM payouts p WHERE p.shop_id=s.id),0) AS paid
+              COALESCE((SELECT SUM(amount) FROM payouts p WHERE p.shop_id=s.id),0) AS paid,
+              s.payout_method,s.payout_number,s.payout_name,s.payout_code
             FROM shops s ORDER BY gross DESC, s.name`).bind(per.fromIso, per.toIso).all();
           const rows = results.map(r => ({ ...r, net: r.gross - r.discounts - r.commission, due: r.earned - r.paid }));
           const tot = k => rows.reduce((t, r) => t + r[k], 0);
