@@ -1007,8 +1007,25 @@ export default {
           return json({ ok: true });
         }
         if (method === 'GET' && p === '/api/admin/users') {
-          const { results } = await env.DB.prepare(`SELECT id,email,name,phone,role,status,created_at,avatar_id FROM users ORDER BY created_at DESC LIMIT 300`).all();
-          return json(results);
+          // Les comptes sont rangés par rôle : clients, livreurs, boutiques, équipe (administrateurs)
+          const role = ['customer', 'courier', 'seller', 'admin'].includes(url.searchParams.get('role')) ? url.searchParams.get('role') : 'customer';
+          const { results: cnt } = await env.DB.prepare(`SELECT role, COUNT(*) AS n FROM users GROUP BY role`).all();
+          const counts = { customer: 0, courier: 0, seller: 0, admin: 0 }; for (const c of cnt) counts[c.role] = c.n;
+          const { results } = await env.DB.prepare(
+            `SELECT u.id,u.email,u.name,u.phone,u.role,u.status,u.created_at,u.avatar_id,
+               (SELECT COUNT(*) FROM orders o WHERE o.customer_id=u.id AND o.status IN ${SOLD}) AS orders_n,
+               (SELECT COALESCE(SUM(o.total),0) FROM orders o WHERE o.customer_id=u.id AND o.status IN ${SOLD}) AS spent,
+               (SELECT MAX(o.created_at) FROM orders o WHERE o.customer_id=u.id) AS last_order,
+               (SELECT COUNT(*) FROM orders o WHERE o.courier_id=u.id AND o.status='delivered') AS deliveries,
+               (SELECT c.available FROM couriers c WHERE c.user_id=u.id) AS available,
+               (SELECT c.updated_at FROM couriers c WHERE c.user_id=u.id) AS last_seen,
+               (SELECT COUNT(*) FROM documents d WHERE d.user_id=u.id) AS docs_n,
+               (SELECT COUNT(*) FROM documents d WHERE d.user_id=u.id AND d.status='verified') AS docs_ok,
+               (SELECT s.name FROM shops s WHERE s.owner_id=u.id LIMIT 1) AS shop_name,
+               (SELECT s.status FROM shops s WHERE s.owner_id=u.id LIMIT 1) AS shop_status,
+               (SELECT COUNT(*) FROM products p JOIN shops s ON s.id=p.shop_id WHERE s.owner_id=u.id AND p.active=1) AS products_n
+             FROM users u WHERE u.role=?1 ORDER BY u.created_at DESC LIMIT 500`).bind(role).all();
+          return json({ role, counts, users: results });
         }
         if (method === 'POST' && (m = p.match(/^\/api\/admin\/users\/([a-f0-9]{16})\/status$/))) {
           const b = await readJson(request);
