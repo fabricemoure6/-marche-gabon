@@ -63,9 +63,12 @@
         ${o.slat != null ? `<a class="btn small alt" target="_blank" rel="noopener" href="https://www.openstreetmap.org/?mlat=${o.slat}&mlon=${o.slng}#map=16/${o.slat}/${o.slng}">Itinéraire boutique</a>` : ''}
         ${o.lat != null ? `<a class="btn small alt" target="_blank" rel="noopener" href="https://www.openstreetmap.org/?mlat=${o.lat}&mlon=${o.lng}#map=16/${o.lat}/${o.lng}">Position client</a>` : ''}
         ${o.status === 'paid' || o.status === 'preparing' ? '<span class="muted">La boutique prépare la commande : allez-y, vous pourrez confirmer la récupération dès qu\'elle est prête.</span>' : ''}
-        ${o.pay_direct ? (o.fee_state === 'paid' ? '<span class="tag active">Frais reçus</span>' : o.fee_state === 'submitted' ? `<span class="muted">Le client dit avoir payé (réf. ${MG.esc(o.fee_ref || '')})</span> <button class="btn small green" data-fee="${o.ref}">J\'ai reçu les frais</button>` : `<span class="muted">Frais à recevoir du client : ${MG.fcfa(o.delivery_fee)}</span>`) : ''}
-        ${o.status === 'ready' ? `<button class="btn small" data-do="pickup" data-r="${o.ref}">J'ai récupéré le colis</button>` : ''}
-        ${o.status === 'delivering' ? `<button class="btn small green" data-do="deliver" data-r="${o.ref}">Livré</button>` : ''}
+        ${o.pay_direct ? (o.fee_state === 'paid' ? '<span class="tag active">Frais reçus</span>'
+          : o.fee_dispute ? '<span class="tag pending">Litige sur les frais : l\'équipe du marché tranche</span>'
+          : o.fee_state === 'submitted' ? `<span class="muted">Le client dit avoir payé (réf. ${MG.esc(o.fee_ref || '')})</span> <button class="btn small green" data-fee="${o.ref}">J\'ai reçu les frais</button><button class="btn small red" data-feeno="${o.ref}">Frais non reçus</button>`
+          : `<span class="muted">Frais à recevoir du client : ${MG.fcfa(o.delivery_fee)}. Vous ne pouvez pas partir avant son paiement.</span> <button class="btn small alt" data-remind="${o.ref}">Relancer le client</button>`) : ''}
+        ${o.status === 'ready' ? `<button class="btn small" data-do="pickup" data-r="${o.ref}"${o.pay_direct && !['submitted', 'paid'].includes(o.fee_state) ? ' disabled title="Le client doit d\'abord payer les frais"' : ''}>J'ai récupéré le colis</button>` : ''}
+        ${o.status === 'delivering' ? `<button class="btn small green" data-do="deliver" data-r="${o.ref}"${o.pay_direct && o.fee_state !== 'paid' ? ' disabled title="Confirmez d\'abord avoir reçu les frais"' : ''}>Livré</button>` : ''}
         ${o.slat != null || o.lat != null ? `<button class="btn small" data-map="${o.ref}">🗺️ Carte</button>` : ''}
         <button class="btn small alt" data-chat="${o.ref}">Discuter</button></div></div>`).join('') : '<p class="muted">Aucune course acceptée.</p>';
     ORDERS = list;
@@ -94,17 +97,18 @@
   async function account() {
     const me = await MG.api('/api/courier/me'), m = me.pay_method || 'airtel_money';
     S('acct').innerHTML = `<form class="card" id="af"><h3 style="margin:0 0 .3rem">Où les clients vous paient</h3>
-      <p class="muted" style="margin:0 0 var(--space-3)">Quand vous acceptez une course, le client voit ce compte et vous envoie les frais de livraison. Il est invisible pour tous les autres.</p>
+      <p class="muted" style="margin:0 0 var(--space-3)">Quand vous acceptez une course, le client voit ce compte et vous envoie les frais de livraison. Il est invisible pour tous les autres. <b>Une fois enregistré, il ne peut plus être modifié librement</b> : tout changement doit être accepté par l'équipe du marché (votre compte actuel reste actif d'ici là).</p>
+      ${me.pending_account ? `<div class="notice">Demande en attente de validation : ${MG.esc((me.pending_account.number || 'suppression du compte'))}${me.pending_account.name ? ' · ' + MG.esc(me.pending_account.name) : ''}</div>` : ''}
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:0 var(--space-3)">
         <div><label for="am">Moyen de paiement</label><select id="am"><option value="airtel_money"${m === 'airtel_money' ? ' selected' : ''}>Airtel Money</option><option value="moov_money"${m === 'moov_money' ? ' selected' : ''}>Moov Money</option><option value="bank"${m === 'bank' ? ' selected' : ''}>Compte bancaire</option></select></div>
         <div><label for="an" id="anl">Numéro de téléphone</label><input id="an" maxlength="40" value="${MG.esc(me.pay_number || '')}" placeholder="Ex. 077 12 34 56"></div>
         <div><label for="anm">Nom du titulaire</label><input id="anm" maxlength="80" value="${MG.esc(me.pay_name || '')}"></div>
         <div id="acw"><label for="ac">Code agent (facultatif)</label><input id="ac" maxlength="30" value="${MG.esc(me.pay_code || '')}"></div>
         <div id="abw" hidden><label for="ab">Nom de la banque</label><input id="ab" maxlength="60" value="${MG.esc(me.pay_bank || '')}"></div></div>
-      <p><button class="btn">Enregistrer</button> ${me.pay_number ? '<span class="tag active">Compte renseigné</span>' : '<span class="tag pending">À renseigner</span>'}</p></form>`;
+      <p><button class="btn">${me.pay_number ? 'Demander la modification' : 'Enregistrer'}</button> ${me.pay_number ? '<span class="tag active">Compte renseigné</span>' : '<span class="tag pending">À renseigner</span>'}</p></form>`;
     const sync = () => { const b = S('am').value === 'bank'; S('abw').hidden = !b; S('acw').hidden = b; S('anl').textContent = b ? 'Numéro de compte (IBAN ou RIB)' : 'Numéro de téléphone'; };
     S('am').onchange = sync; sync();
-    S('af').onsubmit = async e => { e.preventDefault(); try { await MG.api('/api/courier/account', { method: 'POST', body: { method: S('am').value, number: S('an').value, name: S('anm').value, code: S('ac').value, bank: S('ab').value } }); MG.toast('Compte enregistré'); account(); } catch (er) { MG.fail(er); } };
+    S('af').onsubmit = async e => { e.preventDefault(); try { const r = await MG.api('/api/courier/account', { method: 'POST', body: { method: S('am').value, number: S('an').value, name: S('anm').value, code: S('ac').value, bank: S('ab').value } }); MG.toast(r.account === 'pending' ? 'Demande envoyée : l\'équipe du marché doit l\'accepter' : r.account === 'unchanged' ? 'Rien à modifier' : 'Compte enregistré'); account(); } catch (er) { MG.fail(er); } };
   }
   account().catch(() => {});
   S('toggle').onclick = async () => {
@@ -119,7 +123,9 @@
     try { await MG.api('/api/courier/jobs/' + b.dataset.acc + '/accept', { method: 'POST', body: {} }); MG.toast('Course acceptée'); jobs(); mine(); } catch (er) { MG.fail(er); jobs(); }
   };
   S('mine').onclick = async e => {
-    const a = e.target.closest('[data-do]'), c = e.target.closest('[data-chat]'), mp = e.target.closest('[data-map]'), fe = e.target.closest('[data-fee]');
+    const a = e.target.closest('[data-do]'), c = e.target.closest('[data-chat]'), mp = e.target.closest('[data-map]'), fe = e.target.closest('[data-fee]'), fn = e.target.closest('[data-feeno]'), rm = e.target.closest('[data-remind]');
+    if (rm) { try { await MG.api('/api/courier/orders/' + rm.dataset.remind + '/remind', { method: 'POST', body: {} }); MG.toast('Le client est relancé'); } catch (er) { MG.fail(er); } return; }
+    if (fn) { if (!confirm('Signaler que vous n\'avez pas reçu les frais ? L\'équipe du marché sera prévenue.')) return; try { await MG.api('/api/courier/orders/' + fn.dataset.feeno + '/fee-report', { method: 'POST', body: {} }); MG.toast('Signalé à l\'équipe du marché'); mine(); } catch (er) { MG.fail(er); } return; }
     if (mp) showMap(mp.dataset.map);
     if (fe) { try { await MG.api('/api/courier/orders/' + fe.dataset.fee + '/fee', { method: 'POST', body: {} }); MG.toast('Frais confirmés'); mine(); } catch (er) { MG.fail(er); } return; }
     if (a) { try { await MG.api('/api/courier/orders/' + a.dataset.r + '/' + a.dataset.do, { method: 'POST', body: {} }); mine(); } catch (er) { MG.fail(er); } }

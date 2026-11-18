@@ -137,6 +137,10 @@ const SCHEMA = [
   `CREATE TABLE IF NOT EXISTS admin_actions (id TEXT PRIMARY KEY, admin_id TEXT NOT NULL, admin_name TEXT, action TEXT NOT NULL, target_type TEXT,
      target_id TEXT, target_name TEXT, reason TEXT, created_at TEXT)`,
   `CREATE INDEX IF NOT EXISTS idx_admin_actions ON admin_actions(created_at)`,
+  // Historique des comptes de paiement : une première saisie est enregistrée, toute modification attend l'accord de l'administrateur
+  `CREATE TABLE IF NOT EXISTS account_changes (id TEXT PRIMARY KEY, owner_type TEXT NOT NULL, owner_id TEXT NOT NULL, user_id TEXT NOT NULL, old_data TEXT, new_data TEXT,
+     status TEXT NOT NULL DEFAULT 'pending', note TEXT, created_at TEXT, decided_at TEXT, decided_by TEXT)`,
+  `CREATE INDEX IF NOT EXISTS idx_account_changes ON account_changes(status, created_at)`,
   // Pièces justificatives (facultatives) : visibles seulement par leur propriétaire et par l'administrateur
   `CREATE TABLE IF NOT EXISTS documents (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, kind TEXT NOT NULL, mime TEXT NOT NULL, data TEXT NOT NULL, size INTEGER,
      status TEXT NOT NULL DEFAULT 'pending', note TEXT, created_at TEXT, reviewed_at TEXT, reviewed_by TEXT, UNIQUE (user_id, kind))`,
@@ -166,7 +170,7 @@ const MIGRATIONS = {
     ['payout_method', 'TEXT'], ['payout_number', 'TEXT'], ['payout_name', 'TEXT'], ['payout_code', 'TEXT'], ['payout_bank', 'TEXT']],
   couriers: [['pay_method', 'TEXT'], ['pay_number', 'TEXT'], ['pay_name', 'TEXT'], ['pay_code', 'TEXT'], ['pay_bank', 'TEXT']],
   order_items: [['unit', "TEXT NOT NULL DEFAULT 'piece'"]],
-  orders: [['pay_direct', 'INTEGER NOT NULL DEFAULT 0'], ['pay_ref', 'TEXT'], ['pay_submitted_at', 'TEXT'], ['fee_state', 'TEXT'], ['fee_ref', 'TEXT'], ['discount', 'INTEGER NOT NULL DEFAULT 0'], ['voucher_id', 'TEXT'], ['commission', 'INTEGER NOT NULL DEFAULT 0']]
+  orders: [['pay_account', 'TEXT'], ['fee_account', 'TEXT'], ['pay_dispute', 'TEXT'], ['fee_dispute', 'TEXT'], ['pay_direct', 'INTEGER NOT NULL DEFAULT 0'], ['pay_ref', 'TEXT'], ['pay_submitted_at', 'TEXT'], ['fee_state', 'TEXT'], ['fee_ref', 'TEXT'], ['discount', 'INTEGER NOT NULL DEFAULT 0'], ['voucher_id', 'TEXT'], ['commission', 'INTEGER NOT NULL DEFAULT 0']]
 };
 async function migrate(db) {
   for (const [table, cols] of Object.entries(MIGRATIONS)) {

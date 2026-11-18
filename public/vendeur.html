@@ -41,7 +41,7 @@
         ${o.note ? `<p class="muted">Note : ${MG.esc(o.note)}</p>` : ''}
         <div class="split"><b>${MG.fcfa(o.subtotal - (o.discount || 0))} <span class="muted">${o.discount ? `(bon fidélité −${MG.fcfa(o.discount)}) ` : ''}(+ livraison ${MG.fcfa(o.delivery_fee)})</span></b>
         <div class="row">
-          ${o.status === 'awaiting_payment' && o.pay_direct ? (o.pay_ref ? `<span class="muted">Réf. client : <b>${MG.esc(o.pay_ref)}</b></span> <button class="btn small green" data-pay="confirm" data-r="${o.ref}">Paiement reçu</button><button class="btn small red" data-pay="reject" data-r="${o.ref}">Non reçu</button>` : '<span class="muted">En attente du paiement du client</span>') : ''}
+          ${o.status === 'awaiting_payment' && o.pay_direct ? (o.pay_dispute ? '<span class="tag pending">Litige ouvert : l\'équipe du marché tranche</span>' : o.pay_ref ? `<span class="muted">Réf. client : <b>${MG.esc(o.pay_ref)}</b></span> <button class="btn small green" data-pay="confirm" data-r="${o.ref}">Paiement reçu</button><button class="btn small red" title="Ouvre un litige : l'équipe du marché tranche" data-pay="reject" data-r="${o.ref}">Non reçu</button>` : '<span class="muted">En attente du paiement du client</span>') : ''}
           ${o.status === 'paid' ? `<button class="btn small" data-st="preparing" data-r="${o.ref}">Préparer</button>` : ''}
           ${o.status === 'preparing' ? `<button class="btn small green" data-st="ready" data-r="${o.ref}">Prête : appeler un livreur</button>` : ''}
           ${['paid', 'preparing'].includes(o.status) ? `<button class="btn small red" data-st="cancelled" data-r="${o.ref}">Annuler</button>` : ''}
@@ -54,9 +54,9 @@
         try {
           if (pay.dataset.pay === 'confirm' && !confirm('Confirmer que vous avez bien reçu cet argent sur votre compte ?')) return;
           let reason = '';
-          if (pay.dataset.pay === 'reject') { reason = prompt('Pourquoi ? (ex. : montant incorrect, paiement introuvable)', 'paiement introuvable sur mon compte'); if (reason === null) return; }
+          if (pay.dataset.pay === 'reject') { reason = prompt('Pourquoi ne retrouvez-vous pas ce paiement ? L\'équipe du marché tranchera avec le client.', 'paiement introuvable sur mon compte'); if (reason === null) return; }
           await MG.api('/api/seller/orders/' + pay.dataset.r + '/payment', { method: 'POST', body: { action: pay.dataset.pay, reason } });
-          MG.toast(pay.dataset.pay === 'confirm' ? 'Paiement confirmé : vous pouvez préparer la commande' : 'Commande annulée'); draw();
+          MG.toast(pay.dataset.pay === 'confirm' ? 'Paiement confirmé : vous pouvez préparer la commande' : 'Litige ouvert : l\'équipe du marché va trancher'); draw();
         } catch (er) { MG.fail(er); }
         return;
       }
@@ -368,7 +368,7 @@
   }
 
   async function shopTab() {
-    const { shop: s } = await MG.api('/api/seller/shop'); shop = s;
+    const { shop: s, pending_account: pend } = await MG.api('/api/seller/shop'); shop = s;
     S('pane').innerHTML = `<form class="card" id="sf"><h3>Informations de la boutique</h3>
       <label for="n">Nom</label><input id="n" required value="${MG.esc(s.name)}" maxlength="80">
       <label for="c">Catégorie</label><select id="c">${MG.config.categories.map(c => `<option value="${c[0]}"${c[0] === s.category ? ' selected' : ''}>${MG.esc(c[1])}</option>`).join('')}</select>
@@ -381,7 +381,8 @@
       ${s.cover_photo ? `<div id="cvBox"><img src="${MG.photo(s.cover_photo)}" alt="" style="width:100%;max-height:140px;object-fit:cover;border-radius:var(--radius-m);display:block"><label style="display:flex;gap:.4rem;align-items:center;margin:.4rem 0"><input type="checkbox" id="cvDel" style="width:auto"> Retirer la couverture</label></div>` : ''}
       <input id="cv" type="file" accept="image/*"><p class="muted" style="margin:.3rem 0 0;font-size:.85rem">Conseil : une photo large (paysage) de votre boutique ou de vos produits. Sans couverture, la page utilise une photo de vos produits.</p>
       <h3 style="margin:var(--space-5) 0 var(--space-2)">Où vos clients vous paient</h3>
-      <p class="muted" style="margin:0 0 var(--space-3)">Au moment de payer, le client voit ce compte et y envoie l'argent de ses achats. Vous confirmez ensuite la réception dans « Commandes ». Les autres personnes ne voient jamais ces informations.</p>
+      <p class="muted" style="margin:0 0 var(--space-3)">Au moment de payer, le client voit ce compte et y envoie l'argent de ses achats. Vous confirmez ensuite la réception dans « Commandes ». Les autres personnes ne voient jamais ces informations. <b>Une fois enregistré, ce compte ne peut plus être modifié librement</b> : tout changement doit être accepté par l'équipe du marché (votre compte actuel reste actif d'ici là, et vos clients continuent de payer dessus).</p>
+      ${pend ? `<div class="notice">Modification en attente de validation : ${MG.esc(pend.number || 'suppression du compte')}${pend.name ? ' · ' + MG.esc(pend.name) : ''}</div>` : ''}
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:0 var(--space-3)">
         <div><label for="pm">Moyen de paiement</label><select id="pm"><option value="airtel_money"${(s.payout_method || 'airtel_money') === 'airtel_money' ? ' selected' : ''}>Airtel Money</option><option value="moov_money"${s.payout_method === 'moov_money' ? ' selected' : ''}>Moov Money</option><option value="bank"${s.payout_method === 'bank' ? ' selected' : ''}>Compte bancaire</option></select></div>
         <div><label for="pn" id="pnl">Numéro où faire le dépôt</label><input id="pn" maxlength="40" value="${MG.esc(s.payout_number || '')}" placeholder="Ex. 077 12 34 56"></div>
@@ -404,7 +405,7 @@
         if (f) body.photo_id = await MG.uploadPhoto(f);
         const cf = S('cv').files[0];
         if (cf) body.cover_photo = await MG.uploadPhoto(cf); else if (S('cvDel') && S('cvDel').checked) body.cover_photo = null;
-        await MG.api('/api/seller/shop', { method: 'PUT', body }); MG.toast('Boutique enregistrée'); shopTab();
+        const r = await MG.api('/api/seller/shop', { method: 'PUT', body }); MG.toast(r.account === 'pending' ? 'Boutique enregistrée. Le changement de compte attend l\'accord de l\'équipe du marché.' : 'Boutique enregistrée'); shopTab();
       } catch (er) { MG.fail(er); }
     };
   }
