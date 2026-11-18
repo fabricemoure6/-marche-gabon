@@ -65,7 +65,7 @@
       ${p.state === 'waiting_courier' ? `<p class="muted" style="margin:0">Dès qu'un livreur accepte votre commande, vous verrez ici son numéro pour lui envoyer les ${MG.fcfa(p.amount)} de frais de livraison.</p>`
         : p.state === 'to_pay' ? `<p style="margin:0 0 .5rem">Envoyez ${MG.fcfa(p.amount)} ${who}, puis saisissez la référence de la transaction.</p>${p.account ? MG.accountBox(p.account, p.amount) : '<p class="muted">Le compte de paiement n\'est pas renseigné.</p>'}
           <label for="ref-${kind}">Référence de la transaction (SMS de confirmation)</label><div class="row"><input id="ref-${kind}" maxlength="60" placeholder="Ex. : MP240101.1234.A12345"><button type="button" class="btn" data-sendproof="${kind}" data-ref="${ref}">J'ai payé</button></div>`
-        : p.state === 'submitted' ? `<p class="muted" style="margin:0">Référence envoyée : <b>${MG.esc(p.ref || '')}</b>. ${kind === 'proof' ? 'La boutique vérifie son compte puis confirme.' : 'Le livreur confirmera la réception.'}</p>`
+        : p.state === 'submitted' ? `<p class="muted" style="margin:0">Référence envoyée : <b>${MG.esc(p.ref || '')}</b>. ${p.dispute ? '<b>L\'équipe du marché vérifie votre paiement avec la boutique ou le livreur : gardez votre SMS de confirmation.</b>' : kind === 'proof' ? 'La boutique vérifie son compte puis confirme.' : 'Le livreur confirmera la réception.'}</p>`
         : p.state === 'paid' ? '<p class="muted" style="margin:0">Merci, tout est en ordre.</p>' : '<p class="muted" style="margin:0">Cette commande a été annulée.</p>'}</div>`;
   };
 

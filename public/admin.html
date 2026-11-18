@@ -13,7 +13,7 @@
   <h1>Administration</h1>
   <div class="tabs" id="tabs">
     <button data-t="overview" class="on">Vue d'ensemble</button><button data-t="payments">Paiements</button><button data-t="shops">Boutiques</button>
-    <button data-t="orders">Commandes</button><button data-t="users">Utilisateurs</button><button data-t="docs">Pièces</button><button data-t="invites">Invitations</button><button data-t="compta">Comptabilité</button><button data-t="settings">Réglages</button></div>
+    <button data-t="orders">Commandes</button><button data-t="users">Utilisateurs</button><button data-t="review">À valider</button><button data-t="docs">Pièces</button><button data-t="invites">Invitations</button><button data-t="compta">Comptabilité</button><button data-t="settings">Réglages</button></div>
   <div id="pane"></div>
 </main>
 <script src="/common.js"></script>
@@ -23,7 +23,7 @@
   const S = id => MG.$('#' + id), pane = S('pane');
   let tab = 'overview';
   S('tabs').onclick = e => { const b = e.target.closest('[data-t]'); if (!b) return; tab = b.dataset.t; [...S('tabs').children].forEach(x => x.classList.toggle('on', x === b)); show(); };
-  const T = { overview, payments, shops, orders, users, docs, invites, compta, settings };
+  const T = { overview, payments, shops, orders, users, review, docs, invites, compta, settings };
   const show = () => T[tab]().catch(MG.fail);
 
   // Fenêtre de confirmation sécurisée : motif + mot de passe de l'administrateur.
@@ -101,6 +101,50 @@
     const list = await MG.api('/api/admin/orders');
     pane.innerHTML = `<div class="card scroll"><table><thead><tr><th>Réf.</th><th>Boutique</th><th>Client</th><th>Total</th><th>État</th></tr></thead><tbody>${list.map(o => `<tr>
       <td>${MG.esc(o.ref)}<br><small class="muted">${MG.date(o.created_at)}</small></td><td>${MG.esc(o.shop)}</td><td>${MG.esc(o.customer)}</td><td>${MG.fcfa(o.total)}</td><td><span class="tag ${o.status}">${MG.esc(o.statusLabel)}</span></td></tr>`).join('')}</tbody></table></div>`;
+  }
+
+  // Changements de compte de paiement et litiges : rien ne change sans ton accord
+  async function review() {
+    const { accounts, disputes } = await MG.api('/api/admin/review');
+    const ML = { airtel_money: 'Airtel Money', moov_money: 'Moov Money', bank: 'Compte bancaire' };
+    const acc = a => a ? (a.number ? `<b>${ML[a.method] || ''}</b> ${MG.esc(a.number)}${a.bank ? ' (' + MG.esc(a.bank) + ')' : ''}${a.name ? '<br><small>' + MG.esc(a.name) + (a.code ? ' · code ' + MG.esc(a.code) : '') + '</small>' : ''}` : '<i>suppression du compte</i>') : '<span class="muted">—</span>';
+    const pend = accounts.filter(a => a.status === 'pending'), done = accounts.filter(a => a.status !== 'pending');
+    const ST = { pending: ['À valider', 'pending'], approved: ['Accepté', 'active'], rejected: ['Refusé', 'suspended'], replaced: ['Remplacé', 'cancelled'] };
+    pane.innerHTML = `<h2 style="margin-top:0">Comptes de paiement à valider ${pend.length ? `<span class="tag pending">${pend.length}</span>` : ''}</h2>
+      <p class="muted">Une boutique ou un livreur enregistre son compte une première fois sans validation. Ensuite, toute modification ou suppression attend ton accord ; l'ancien compte reste actif et tout est gardé ci-dessous.</p>
+      ${pend.length ? `<div class="card scroll"><table><thead><tr><th>Qui</th><th>Compte actuel</th><th>Compte demandé</th><th></th></tr></thead><tbody>${pend.map(a => `<tr><td><b>${MG.esc(a.owner_name || '')}</b><br><small>${a.owner_type === 'shop' ? 'Boutique' : 'Livreur'} · ${MG.date(a.created_at)}</small></td><td>${acc(a.old_data)}</td><td>${acc(a.new_data)}</td>
+        <td><button class="btn small green" data-ok="${a.id}">Accepter</button> <button class="btn small red" data-no="${a.id}">Refuser</button></td></tr>`).join('')}</tbody></table></div>` : '<div class="card"><p>Aucune modification en attente.</p></div>'}
+      <h2>Litiges</h2>
+      ${disputes.length ? disputes.map(d => `<div class="card"><div class="split"><div><b>${MG.esc(d.ref)}</b> · ${MG.esc(d.shop)} · client ${MG.esc(d.customer)}${d.customer_phone ? ' (' + MG.esc(d.customer_phone) + ')' : ''}
+        <br>${d.pay_dispute && d.status === 'awaiting_payment' ? `<span class="tag pending">Paiement de la boutique</span> ${MG.fcfa(d.subtotal - (d.discount || 0))} · réf. du client <b>${MG.esc(d.pay_ref || '—')}</b><br><small>La boutique dit : ${MG.esc(d.pay_dispute)}</small>` : `<span class="tag pending">Frais de livraison</span> ${MG.fcfa(d.delivery_fee)} · livreur ${MG.esc(d.courier || '—')} · réf. du client <b>${MG.esc(d.fee_ref || '—')}</b><br><small>${MG.esc(d.fee_dispute)}</small>`}</div>
+        <div class="row">${d.pay_dispute && d.status === 'awaiting_payment' ? `<button class="btn small green" data-dp="${d.ref}" data-k="pay" data-a="valid">Paiement valide</button><button class="btn small red" data-dp="${d.ref}" data-k="pay" data-a="cancel">Annuler la commande</button>`
+          : `<button class="btn small green" data-dp="${d.ref}" data-k="fee" data-a="received">Frais bien reçus</button>${d.status === 'ready' ? `<button class="btn small red" data-dp="${d.ref}" data-k="fee" data-a="free">Remplacer le livreur</button>` : ''}`}</div></div></div>`).join('') : '<div class="card"><p>Aucun litige ouvert.</p></div>'}
+      <h2>Historique des comptes</h2>
+      ${done.length ? `<div class="card scroll"><table><thead><tr><th>Date</th><th>Qui</th><th>Avant</th><th>Après</th><th>Décision</th></tr></thead><tbody>${done.map(a => `<tr><td>${MG.date(a.decided_at || a.created_at)}</td><td>${MG.esc(a.owner_name || '')}<br><small>${a.owner_type === 'shop' ? 'Boutique' : 'Livreur'}</small></td><td>${acc(a.old_data)}</td><td>${acc(a.new_data)}</td><td><span class="tag ${ST[a.status][1]}">${ST[a.status][0]}</span>${a.note ? `<br><small>${MG.esc(a.note)}</small>` : ''}</td></tr>`).join('')}</tbody></table></div>` : '<div class="card"><p class="muted">Rien pour le moment.</p></div>'}`;
+    pane.onclick = async e => {
+      const ok = e.target.closest('[data-ok]'), no = e.target.closest('[data-no]'), dp = e.target.closest('[data-dp]');
+      try {
+        if (ok) {
+          const m = MG.modal(`<form id="pf"><h2>Accepter le changement de compte</h2><p class="muted">Pour éviter une erreur ou une fraude, confirme avec ton mot de passe : le nouveau compte sera immédiatement montré aux clients.</p>
+            <label for="pw">Ton mot de passe</label><input id="pw" type="password" required autocomplete="current-password"><p class="err" id="pe"></p>
+            <div class="row"><button type="button" class="btn alt" data-close>Annuler</button><button class="btn green">Accepter</button></div></form>`);
+          m.el.querySelector('#pf').onsubmit = async ev => { ev.preventDefault();
+            try { await MG.api('/api/admin/account-changes/' + ok.dataset.ok + '/decide', { method: 'POST', body: { status: 'approved', password: m.el.querySelector('#pw').value } }); m.close(); MG.toast('Nouveau compte actif'); review(); }
+            catch (er) { m.el.querySelector('#pe').textContent = er.message; } };
+        }
+        if (no) {
+          const m = MG.modal(`<form id="rf"><h2>Refuser le changement</h2><p class="muted">L'ancien compte reste actif. Le motif est envoyé à la personne.</p><label for="rn">Motif</label><textarea id="rn" required maxlength="300"></textarea><p class="err" id="re"></p>
+            <div class="row"><button type="button" class="btn alt" data-close>Annuler</button><button class="btn red">Refuser</button></div></form>`);
+          m.el.querySelector('#rf').onsubmit = async ev => { ev.preventDefault();
+            try { await MG.api('/api/admin/account-changes/' + no.dataset.no + '/decide', { method: 'POST', body: { status: 'rejected', note: m.el.querySelector('#rn').value } }); m.close(); MG.toast('Demande refusée'); review(); }
+            catch (er) { m.el.querySelector('#re').textContent = er.message; } };
+        }
+        if (dp) {
+          if (dp.dataset.a === 'cancel' && !confirm('Annuler cette commande ? Le client est prévenu et le stock est remis.')) return;
+          await MG.api('/api/admin/disputes/' + dp.dataset.dp + '/decide', { method: 'POST', body: { kind: dp.dataset.k, action: dp.dataset.a } }); MG.toast('Litige tranché'); review();
+        }
+      } catch (er) { MG.fail(er); }
+    };
   }
 
   // Pièces justificatives envoyées par les livreurs et les boutiques (facultatives, privées)

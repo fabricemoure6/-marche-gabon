@@ -185,6 +185,36 @@ async function resetPassword(request, env) {
   return json({ ok: true });
 }
 
+// ---------- Comptes de paiement verrouillés ----------
+// La première saisie est enregistrée ; toute modification ou suppression devient une demande que l'administrateur accepte.
+// L'ancien compte reste actif tant que la demande n'est pas acceptée ; tout est gardé dans account_changes.
+const sameAcc = (a, b) => ['method', 'number', 'name', 'code', 'bank'].every(k => (a[k] || null) === (b[k] || null));
+async function requestAccount(env, user, ownerType, ownerId, ownerName, cur, acc) {
+  const old = { method: cur.method || null, number: cur.number || null, name: cur.name || null, code: cur.code || null, bank: cur.bank || null };
+  const next = { method: acc.method, number: acc.number, name: acc.name, code: acc.code, bank: acc.bank };
+  if (sameAcc(old, next)) return 'unchanged';
+  const apply = () => ownerType === 'shop'
+    ? env.DB.prepare('UPDATE shops SET payout_method=?2,payout_number=?3,payout_name=?4,payout_code=?5,payout_bank=?6 WHERE id=?1').bind(ownerId, next.method, next.number, next.name, next.code, next.bank).run()
+    : env.DB.prepare('UPDATE couriers SET pay_method=?2,pay_number=?3,pay_name=?4,pay_code=?5,pay_bank=?6 WHERE user_id=?1').bind(ownerId, next.method, next.number, next.name, next.code, next.bank).run();
+  if (!old.number && next.number) { // première saisie : active tout de suite, gardée en historique
+    await apply();
+    await env.DB.prepare(`INSERT INTO account_changes (id,owner_type,owner_id,user_id,old_data,new_data,status,note,created_at,decided_at) VALUES (?1,?2,?3,?4,NULL,?5,'approved','première saisie',?6,?6)`)
+      .bind(uid(), ownerType, ownerId, user.id, JSON.stringify(next), now()).run();
+    return 'saved';
+  }
+  await env.DB.prepare(`UPDATE account_changes SET status='replaced', decided_at=?3, note='remplacée par une demande plus récente' WHERE owner_type=?1 AND owner_id=?2 AND status='pending'`).bind(ownerType, ownerId, now()).run(); // une seule demande en attente, les anciennes restent dans l'historique
+  await env.DB.prepare(`INSERT INTO account_changes (id,owner_type,owner_id,user_id,old_data,new_data,status,created_at) VALUES (?1,?2,?3,?4,?5,?6,'pending',?7)`)
+    .bind(uid(), ownerType, ownerId, user.id, JSON.stringify(old), JSON.stringify(next), now()).run();
+  const { results: admins } = await env.DB.prepare(`SELECT id FROM users WHERE role='admin'`).all();
+  for (const a of admins) await notify(env, a.id, 'Changement de compte de paiement à valider', `${ownerName} (${ownerType === 'shop' ? 'boutique' : 'livreur'}) demande à modifier son compte de paiement.`, '/admin.html');
+  return 'pending';
+}
+async function pendingAccount(env, ownerType, ownerId) {
+  const r = await env.DB.prepare(`SELECT id,new_data,created_at FROM account_changes WHERE owner_type=?1 AND owner_id=?2 AND status='pending'`).bind(ownerType, ownerId).first();
+  return r ? { id: r.id, created_at: r.created_at, ...JSON.parse(r.new_data) } : null;
+}
+const snap = r => JSON.stringify({ method: r.method, methodLabel: METHOD_LABEL[r.method], number: r.number, name: r.name, code: r.code, bank: r.bank });
+
 // ---------- Aides communes ----------
 async function itemsOf(env, orderId) {
   const { results } = await env.DB.prepare('SELECT name,price,qty,unit FROM order_items WHERE order_id=?1').bind(orderId).all();
@@ -527,9 +557,9 @@ export default {
           const orderId = orderIds.get(shopId), oref = 'CMD-' + rand(3).toUpperCase();
           orderRefs.push(oref); amount += subtotal - discount + fee;
           stmts.push(env.DB.prepare(
-            `INSERT INTO orders (id,ref,checkout_id,customer_id,shop_id,status,subtotal,delivery_fee,total,address,lat,lng,phone,note,distance_km,created_at,updated_at,discount,voucher_id,commission,pay_direct)
-             VALUES (?1,?2,?3,?4,?5,'awaiting_payment',?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?15,?16,?17,?18,?19)`)
-            .bind(orderId, oref, checkoutId, user.id, shopId, subtotal, fee, subtotal - discount + fee, address, hasPos ? lat : null, hasPos ? lng : null, phone, note, km, now(), discount, voucher ? voucher.id : null, commission, direct ? 1 : 0));
+            `INSERT INTO orders (id,ref,checkout_id,customer_id,shop_id,status,subtotal,delivery_fee,total,address,lat,lng,phone,note,distance_km,created_at,updated_at,discount,voucher_id,commission,pay_direct,pay_account)
+             VALUES (?1,?2,?3,?4,?5,'awaiting_payment',?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?15,?16,?17,?18,?19,?20)`)
+            .bind(orderId, oref, checkoutId, user.id, shopId, subtotal, fee, subtotal - discount + fee, address, hasPos ? lat : null, hasPos ? lng : null, phone, note, km, now(), discount, voucher ? voucher.id : null, commission, direct ? 1 : 0, direct ? (a => snap({ method: a.payout_method, number: a.payout_number, name: a.payout_name, code: a.payout_code, bank: a.payout_bank }))(accounts.get(shopId)) : null));
           if (direct) payList.push({ ref: oref, shop: accounts.get(shopId).name, shopId, amount: subtotal - discount, delivery: fee });
           for (const l of ls) {
             stmts.push(env.DB.prepare('INSERT INTO order_items (id,order_id,product_id,name,price,qty,unit) VALUES (?1,?2,?3,?4,?5,?6,?7)').bind(uid(), orderId, l.product_id, l.name, l.price, l.qty, l.unit));
@@ -634,11 +664,11 @@ export default {
             else {
               const k = await env.DB.prepare('SELECT pay_method,pay_number,pay_name,pay_code,pay_bank FROM couriers WHERE user_id=?1').bind(r.o.courier_id).first() || {};
               fee = { amount: r.o.delivery_fee, state: r.o.fee_state === 'paid' ? 'paid' : r.o.fee_state === 'submitted' ? 'submitted' : 'to_pay', ref: r.o.fee_ref,
-                account: r.role === 'courier' ? null : acc(k.pay_method, k.pay_number, k.pay_name, k.pay_code, k.pay_bank), courier: r.o.courier_name };
+                account: r.role === 'courier' ? null : (r.o.fee_account ? JSON.parse(r.o.fee_account) : acc(k.pay_method, k.pay_number, k.pay_name, k.pay_code, k.pay_bank)), courier: r.o.courier_name, dispute: !!r.o.fee_dispute };
             }
           }
           order.pay = { direct: true, shop: { amount: r.o.subtotal - (r.o.discount || 0), state: shopState, ref: r.o.pay_ref,
-            account: r.role === 'customer' || r.role === 'admin' ? acc(sh.payout_method, sh.payout_number, sh.payout_name, sh.payout_code, sh.payout_bank) : null }, fee };
+            account: r.role === 'customer' || r.role === 'admin' ? (r.o.pay_account ? JSON.parse(r.o.pay_account) : acc(sh.payout_method, sh.payout_number, sh.payout_name, sh.payout_code, sh.payout_bank)) : null, dispute: !!r.o.pay_dispute }, fee };
         }
         return json({ order, items: await itemsOf(env, r.o.id) });
       }
@@ -693,7 +723,7 @@ export default {
         const shop = await env.DB.prepare('SELECT * FROM shops WHERE owner_id=?1').bind(user.id).first();
         if (!shop) return bad('Boutique introuvable', 404);
 
-        if (method === 'GET' && p === '/api/seller/shop') return json({ shop, categories: CATEGORIES });
+        if (method === 'GET' && p === '/api/seller/shop') return json({ shop, categories: CATEGORIES, pending_account: await pendingAccount(env, 'shop', shop.id) });
         if (method === 'PUT' && p === '/api/seller/shop') {
           const b = await readJson(request);
           if (!b) return bad('Requête invalide');
@@ -711,16 +741,17 @@ export default {
             cover = null;
             if (b.cover_photo && await env.DB.prepare('SELECT 1 FROM photos WHERE id=?1 AND owner_id=?2').bind(String(b.cover_photo), user.id).first()) cover = String(b.cover_photo);
           }
-          // Compte où les clients paient la boutique (Mobile Money ou banque)
+          // Compte où les clients paient la boutique : première saisie enregistrée, changement soumis à l'administrateur
+          let accState = null;
           if (b.payout_number !== undefined) {
             const acc = cleanAccount({ method: b.payout_method, number: b.payout_number, name: b.payout_name, code: b.payout_code, bank: b.payout_bank }, cleanText);
             if (acc.error) return bad(acc.error);
-            await env.DB.prepare('UPDATE shops SET payout_method=?2,payout_number=?3,payout_name=?4,payout_code=?5,payout_bank=?6 WHERE id=?1').bind(shop.id, acc.method, acc.number, acc.name, acc.code, acc.bank).run();
+            accState = await requestAccount(env, user, 'shop', shop.id, shop.name, { method: shop.payout_method, number: shop.payout_number, name: shop.payout_name, code: shop.payout_code, bank: shop.payout_bank }, acc);
           }
           await env.DB.prepare('UPDATE shops SET name=?2,category=?3,description=?4,address=?5,phone=?6,whatsapp=?7,lat=?8,lng=?9,photo_id=?10,cover_photo=?11 WHERE id=?1')
             .bind(shop.id, name, cat, cleanText(b.description, 600), cleanText(b.address, 200), cleanText(b.phone, 30), cleanText(b.whatsapp, 30),
               pos ? lat : shop.lat, pos ? lng : shop.lng, photo, cover).run();
-          return json({ ok: true });
+          return json({ ok: true, account: accState });
         }
         if (method === 'GET' && p === '/api/seller/products') {
           const { results } = await env.DB.prepare(`SELECT p.*, (SELECT COUNT(*) FROM stock_alerts a WHERE a.product_id=p.id) AS waiting FROM products p WHERE p.shop_id=?1 ORDER BY p.created_at DESC`).bind(shop.id).all();
@@ -857,7 +888,7 @@ export default {
         }
         if (method === 'GET' && p === '/api/seller/orders') {
           const { results } = await env.DB.prepare(
-            `SELECT o.id,o.ref,o.status,o.total,o.subtotal,o.discount,o.delivery_fee,o.address,o.note,o.created_at,o.pay_direct,o.pay_ref,o.pay_submitted_at,u.name AS customer_name
+            `SELECT o.id,o.ref,o.status,o.total,o.subtotal,o.discount,o.delivery_fee,o.address,o.note,o.created_at,o.pay_direct,o.pay_ref,o.pay_submitted_at,o.pay_dispute,u.name AS customer_name
              FROM orders o JOIN users u ON u.id=o.customer_id WHERE o.shop_id=?1 AND (o.status!='awaiting_payment' OR o.pay_direct=1) ORDER BY o.created_at DESC LIMIT 60`).bind(shop.id).all();
           for (const o of results) { o.items = await itemsOf(env, o.id); o.statusLabel = ORDER_STATUS[o.status]; delete o.id; }
           return json(results);
@@ -868,19 +899,20 @@ export default {
           if (!o) return bad('Commande introuvable', 404);
           if (o.status !== 'awaiting_payment') return bad('Cette commande est déjà réglée ou annulée');
           if (b.action === 'confirm') {
-            const r = await env.DB.prepare(`UPDATE orders SET status='paid', updated_at=?2 WHERE id=?1 AND status='awaiting_payment'`).bind(o.id, now()).run();
+            const r = await env.DB.prepare(`UPDATE orders SET status='paid', pay_dispute=NULL, updated_at=?2 WHERE id=?1 AND status='awaiting_payment'`).bind(o.id, now()).run();
             if (!r.meta.changes) return bad('Cette commande vient d\'être modifiée');
             await env.DB.prepare(`UPDATE checkouts SET status='confirmed', confirmed_at=?2 WHERE id=?1 AND status!='confirmed' AND NOT EXISTS (SELECT 1 FROM orders WHERE checkout_id=?1 AND status='awaiting_payment')`).bind(o.checkout_id, now()).run();
             await notify(env, o.customer_id, 'Paiement reçu', `${shop.name} a bien reçu votre paiement pour la commande ${o.ref}. Elle est en préparation. Votre reçu est disponible.`, `/recu.html?ref=${o.ref}`);
             return json({ ok: true });
           }
-          if (b.action === 'reject') {
+          if (b.action === 'reject') { // la boutique ne peut pas annuler seule : elle ouvre un litige que l'administrateur tranche
             const reason = cleanText(b.reason, 200) || 'paiement non retrouvé sur le compte';
-            await env.DB.prepare(`UPDATE products SET stock = ROUND(stock + COALESCE((SELECT qty FROM order_items WHERE order_id=?1 AND product_id=products.id),0), 3) WHERE id IN (SELECT product_id FROM order_items WHERE order_id=?1)`).bind(o.id).run();
-            await env.DB.prepare(`UPDATE orders SET status='cancelled', updated_at=?2 WHERE id=?1`).bind(o.id, now()).run();
-            await releaseVoucher(env, o.id);
-            await notify(env, o.customer_id, 'Paiement non retrouvé', `${shop.name} n'a pas retrouvé votre paiement (${reason}). La commande ${o.ref} est annulée. Vous pouvez recommander.`, `/commandes.html?ref=${o.ref}`);
-            return json({ ok: true });
+            if (o.pay_dispute) return bad('Un litige est déjà ouvert : l\'équipe du marché va trancher.');
+            await env.DB.prepare('UPDATE orders SET pay_dispute=?2, updated_at=?3 WHERE id=?1').bind(o.id, reason, now()).run();
+            const { results: admins } = await env.DB.prepare(`SELECT id FROM users WHERE role='admin'`).all();
+            for (const ad of admins) await notify(env, ad.id, 'Litige de paiement', `${shop.name} ne retrouve pas le paiement de la commande ${o.ref} (réf. client : ${o.pay_ref || '—'}) : ${reason}.`, '/admin.html');
+            await notify(env, o.customer_id, 'Votre paiement est vérifié par l\'équipe', `${shop.name} ne retrouve pas encore votre paiement (commande ${o.ref}). L'équipe du marché vérifie avec vous : gardez votre SMS de confirmation.`, `/commandes.html?ref=${o.ref}`);
+            return json({ ok: true, dispute: true });
           }
           return bad('Action invalide');
         }
@@ -918,7 +950,7 @@ export default {
         await env.DB.prepare('INSERT OR IGNORE INTO couriers (user_id,available) VALUES (?1,0)').bind(user.id).run();
         const me = await env.DB.prepare('SELECT * FROM couriers WHERE user_id=?1').bind(user.id).first();
 
-        if (method === 'GET' && p === '/api/courier/me') return json(me);
+        if (method === 'GET' && p === '/api/courier/me') return json({ ...me, pending_account: await pendingAccount(env, 'courier', user.id) });
         if (method === 'POST' && p === '/api/courier/availability') {
           const b = await readJson(request);
           await env.DB.prepare('UPDATE couriers SET available=?2 WHERE user_id=?1').bind(user.id, b && b.available ? 1 : 0).run();
@@ -935,14 +967,25 @@ export default {
           const b = await readJson(request) || {};
           const acc = cleanAccount({ method: b.method, number: b.number, name: b.name, code: b.code, bank: b.bank }, cleanText);
           if (acc.error) return bad(acc.error);
-          await env.DB.prepare('UPDATE couriers SET pay_method=?2,pay_number=?3,pay_name=?4,pay_code=?5,pay_bank=?6 WHERE user_id=?1').bind(user.id, acc.method, acc.number, acc.name, acc.code, acc.bank).run();
-          return json({ ok: true });
+          const state = await requestAccount(env, user, 'courier', user.id, user.name, { method: me.pay_method, number: me.pay_number, name: me.pay_name, code: me.pay_code, bank: me.pay_bank }, acc);
+          return json({ ok: true, account: state });
         }
         if (method === 'POST' && (m = p.match(/^\/api\/courier\/orders\/(CMD-[A-F0-9]{6})\/fee$/))) {
           const o = await env.DB.prepare('SELECT id,ref,customer_id,pay_direct,fee_state FROM orders WHERE ref=?1 AND courier_id=?2').bind(m[1], user.id).first();
           if (!o || !o.pay_direct) return bad('Commande introuvable', 404);
-          await env.DB.prepare(`UPDATE orders SET fee_state='paid' WHERE id=?1`).bind(o.id).run();
+          await env.DB.prepare(`UPDATE orders SET fee_state='paid', fee_dispute=NULL WHERE id=?1`).bind(o.id).run();
           await notify(env, o.customer_id, 'Frais de livraison reçus', `${user.name} a bien reçu les frais de livraison de la commande ${o.ref}. Merci !`, `/commandes.html?ref=${o.ref}`);
+          return json({ ok: true });
+        }
+        if (method === 'POST' && (m = p.match(/^\/api\/courier\/orders\/(CMD-[A-F0-9]{6})\/(remind|fee-report)$/))) {
+          const o = await env.DB.prepare('SELECT id,ref,customer_id,pay_direct,fee_state,delivery_fee FROM orders WHERE ref=?1 AND courier_id=?2').bind(m[1], user.id).first();
+          if (!o || !o.pay_direct) return bad('Commande introuvable', 404);
+          if (o.fee_state === 'paid') return bad('Les frais sont déjà confirmés');
+          if (m[2] === 'remind') { await notify(env, o.customer_id, 'Frais de livraison à payer', `${user.name}, votre livreur, attend les frais de livraison (${o.delivery_fee} FCFA) de la commande ${o.ref}. Ouvrez la commande pour voir où payer.`, `/commandes.html?ref=${o.ref}`); return json({ ok: true }); }
+          await env.DB.prepare(`UPDATE orders SET fee_dispute='Frais non reçus par le livreur' WHERE id=?1`).bind(o.id).run();
+          const { results: admins } = await env.DB.prepare(`SELECT id FROM users WHERE role='admin'`).all();
+          for (const ad of admins) await notify(env, ad.id, 'Litige sur les frais de livraison', `${user.name} (livreur) n'a pas reçu les frais de la commande ${o.ref} (${o.delivery_fee} FCFA).`, '/admin.html');
+          await notify(env, o.customer_id, 'Frais de livraison non reçus', `Le livreur ne retrouve pas votre paiement des frais (commande ${o.ref}). L'équipe du marché vous contactera : gardez votre SMS de confirmation.`, `/commandes.html?ref=${o.ref}`);
           return json({ ok: true });
         }
         if (method === 'GET' && p === '/api/courier/jobs') {
@@ -965,13 +1008,14 @@ export default {
           if (!r.meta.changes) return bad('Cette course vient d\'être prise par un autre livreur', 409);
           const o = await env.DB.prepare('SELECT o.customer_id,o.ref,s.owner_id FROM orders o JOIN shops s ON s.id=o.shop_id WHERE o.ref=?1').bind(m[1]).first();
           const dir = await env.DB.prepare('SELECT pay_direct,delivery_fee FROM orders WHERE ref=?1').bind(o.ref).first();
+          if (dir && dir.pay_direct && me.pay_number) await env.DB.prepare('UPDATE orders SET fee_account=?2 WHERE ref=?1').bind(o.ref, snap({ method: me.pay_method, number: me.pay_number, name: me.pay_name, code: me.pay_code, bank: me.pay_bank })).run();
           await notify(env, o.customer_id, 'Un livreur arrive à la boutique', `${user.name} va récupérer votre commande ${o.ref}.${dir && dir.pay_direct ? ` Vous pouvez payer les frais de livraison (${dir.delivery_fee} FCFA) : ouvrez la commande pour voir son numéro.` : ''}`, `/commandes.html?ref=${o.ref}`);
           await notify(env, o.owner_id, 'Livreur en route', `${user.name} vient chercher la commande ${o.ref}.`, '/vendeur.html');
           return json({ ok: true });
         }
         if (method === 'GET' && p === '/api/courier/orders') {
           const { results } = await env.DB.prepare(
-            `SELECT o.ref,o.status,o.address,o.delivery_fee,o.pay_direct,o.fee_state,o.fee_ref,o.lat,o.lng,s.name AS shop_name,s.address AS shop_address,s.lat AS slat,s.lng AS slng,s.phone AS shop_phone
+            `SELECT o.ref,o.status,o.address,o.delivery_fee,o.pay_direct,o.fee_state,o.fee_ref,o.fee_dispute,o.lat,o.lng,s.name AS shop_name,s.address AS shop_address,s.lat AS slat,s.lng AS slng,s.phone AS shop_phone
              FROM orders o JOIN shops s ON s.id=o.shop_id WHERE o.courier_id=?1 ORDER BY o.updated_at DESC LIMIT 30`).bind(user.id).all();
           return json(results.map(o => ({ ...o, statusLabel: ORDER_STATUS[o.status] })));
         }
@@ -980,6 +1024,10 @@ export default {
           if (!o) return bad('Commande introuvable', 404);
           const want = m[2] === 'pickup' ? ['ready', 'delivering'] : ['delivering', 'delivered'];
           if (o.status !== want[0]) return bad('Changement de statut impossible');
+          if (o.pay_direct) { // les frais se paient au livreur : il ne part pas sans paiement déclaré, et ne livre qu'une fois les frais reçus
+            if (m[2] === 'pickup' && !['submitted', 'paid'].includes(o.fee_state)) return bad('Le client n\'a pas encore payé les frais de livraison : relancez-le avant de partir.', 409);
+            if (m[2] === 'deliver' && o.fee_state !== 'paid') return bad('Confirmez d\'abord avoir bien reçu les frais de livraison (ou signalez qu\'ils ne sont pas arrivés).', 409);
+          }
           const upd = await env.DB.prepare('UPDATE orders SET status=?2, updated_at=?3 WHERE id=?1 AND status=?4').bind(o.id, want[1], now(), want[0]).run();
           if (!upd.meta.changes) return bad('Changement de statut impossible');
           await notify(env, o.customer_id, 'Votre commande ' + o.ref, ORDER_STATUS[want[1]], `/commandes.html?ref=${o.ref}`);
@@ -1000,6 +1048,75 @@ export default {
             paymentsToCheck: await c(`SELECT COUNT(*) AS n FROM checkouts WHERE status='submitted'`),
             revenue: await c(`SELECT COALESCE(SUM(total),0) AS n FROM orders WHERE status IN ('paid','preparing','ready','delivering','delivered')`)
           });
+        }
+        // ----- Ce que l'administrateur doit valider : changements de compte de paiement et litiges -----
+        if (method === 'GET' && p === '/api/admin/review') {
+          const { results: acc } = await env.DB.prepare(`SELECT c.id,c.owner_type,c.owner_id,c.old_data,c.new_data,c.status,c.note,c.created_at,c.decided_at,
+              CASE c.owner_type WHEN 'shop' THEN (SELECT name FROM shops WHERE id=c.owner_id) ELSE (SELECT name FROM users WHERE id=c.owner_id) END AS owner_name
+            FROM account_changes c ORDER BY (c.status='pending') DESC, c.created_at DESC LIMIT 60`).all();
+          const parse = j => { try { return j ? JSON.parse(j) : null; } catch { return null; } };
+          const { results: disputes } = await env.DB.prepare(
+            `SELECT o.ref,o.status,o.subtotal,o.discount,o.delivery_fee,o.pay_ref,o.pay_dispute,o.fee_ref,o.fee_dispute,o.fee_state,s.name AS shop,cu.name AS customer,cu.phone AS customer_phone,co.name AS courier
+             FROM orders o JOIN shops s ON s.id=o.shop_id JOIN users cu ON cu.id=o.customer_id LEFT JOIN users co ON co.id=o.courier_id
+             WHERE (o.pay_dispute IS NOT NULL AND o.status='awaiting_payment') OR (o.fee_dispute IS NOT NULL AND o.fee_state IS NOT 'paid') ORDER BY o.updated_at DESC LIMIT 60`).all();
+          return json({ accounts: acc.map(a => ({ ...a, old_data: parse(a.old_data), new_data: parse(a.new_data) })), disputes });
+        }
+        if (method === 'POST' && (m = p.match(/^\/api\/admin\/account-changes\/([a-f0-9]{16})\/decide$/))) {
+          const b = await readJson(request) || {};
+          const c = await env.DB.prepare(`SELECT * FROM account_changes WHERE id=?1 AND status='pending'`).bind(m[1]).first();
+          if (!c) return bad('Demande introuvable ou déjà traitée', 404);
+          const next = JSON.parse(c.new_data), note = cleanText(b.note, 300);
+          const ownerUser = c.owner_type === 'shop' ? (await env.DB.prepare('SELECT owner_id AS u, name FROM shops WHERE id=?1').bind(c.owner_id).first()) : (await env.DB.prepare('SELECT id AS u, name FROM users WHERE id=?1').bind(c.owner_id).first());
+          if (b.status === 'approved') {
+            const err = await confirmAdmin(env, user, b.password); if (err) return bad(err, 403);
+            if (c.owner_type === 'shop') await env.DB.prepare('UPDATE shops SET payout_method=?2,payout_number=?3,payout_name=?4,payout_code=?5,payout_bank=?6 WHERE id=?1').bind(c.owner_id, next.method, next.number, next.name, next.code, next.bank).run();
+            else await env.DB.prepare('UPDATE couriers SET pay_method=?2,pay_number=?3,pay_name=?4,pay_code=?5,pay_bank=?6 WHERE user_id=?1').bind(c.owner_id, next.method, next.number, next.name, next.code, next.bank).run();
+          } else if (b.status === 'rejected') { if (note.length < 3) return bad('Indiquez pourquoi la modification est refusée'); }
+          else return bad('Décision invalide');
+          await env.DB.prepare(`UPDATE account_changes SET status=?2, note=?3, decided_at=?4, decided_by=?5 WHERE id=?1`).bind(c.id, b.status, note || null, now(), user.id).run();
+          await logAction(env, user, b.status === 'approved' ? 'Compte de paiement modifié' : 'Modification de compte refusée', c.owner_type, c.owner_id, ownerUser && ownerUser.name, next.number ? `${METHOD_LABEL[next.method]} ${next.number}` : 'suppression du compte');
+          await notify(env, ownerUser.u, b.status === 'approved' ? 'Modification de compte acceptée' : 'Modification de compte refusée', b.status === 'approved' ? 'Votre nouveau compte de paiement est maintenant actif.' : `Votre demande n'a pas été acceptée : ${note}. Votre ancien compte reste actif.`, c.owner_type === 'shop' ? '/vendeur.html#boutique' : '/livreur.html');
+          return json({ ok: true });
+        }
+        if (method === 'POST' && (m = p.match(/^\/api\/admin\/disputes\/(CMD-[A-F0-9]{6})\/decide$/))) {
+          const b = await readJson(request) || {};
+          const o = await env.DB.prepare('SELECT o.*, s.name AS shop_name, s.owner_id AS shop_owner FROM orders o JOIN shops s ON s.id=o.shop_id WHERE o.ref=?1').bind(m[1]).first();
+          if (!o) return bad('Commande introuvable', 404);
+          const cancelOrder = async () => {
+            await env.DB.prepare(`UPDATE products SET stock = ROUND(stock + COALESCE((SELECT qty FROM order_items WHERE order_id=?1 AND product_id=products.id),0), 3) WHERE id IN (SELECT product_id FROM order_items WHERE order_id=?1)`).bind(o.id).run();
+            await env.DB.prepare(`UPDATE orders SET status='cancelled', pay_dispute=NULL, updated_at=?2 WHERE id=?1`).bind(o.id, now()).run();
+            await releaseVoucher(env, o.id);
+          };
+          if (b.kind === 'pay' && o.pay_dispute && o.status === 'awaiting_payment') {
+            if (b.action === 'valid') {
+              await env.DB.prepare(`UPDATE orders SET status='paid', pay_dispute=NULL, updated_at=?2 WHERE id=?1`).bind(o.id, now()).run();
+              await env.DB.prepare(`UPDATE checkouts SET status='confirmed', confirmed_at=?2 WHERE id=?1 AND status!='confirmed' AND NOT EXISTS (SELECT 1 FROM orders WHERE checkout_id=?1 AND status='awaiting_payment')`).bind(o.checkout_id, now()).run();
+              await notify(env, o.customer_id, 'Paiement validé', `L'équipe du marché a validé votre paiement (commande ${o.ref}). Elle est en préparation.`, `/recu.html?ref=${o.ref}`);
+              await notify(env, o.shop_owner, 'Litige tranché : paiement valide', `L'équipe du marché a validé le paiement de la commande ${o.ref}. Vous pouvez la préparer.`, '/vendeur.html');
+            } else if (b.action === 'cancel') {
+              await cancelOrder();
+              await notify(env, o.customer_id, 'Commande annulée', `Après vérification, le paiement de la commande ${o.ref} n'a pas été retrouvé. Elle est annulée.`, `/commandes.html?ref=${o.ref}`);
+              await notify(env, o.shop_owner, 'Litige tranché : commande annulée', `La commande ${o.ref} est annulée par l'équipe du marché.`, '/vendeur.html');
+            } else return bad('Décision invalide');
+            await logAction(env, user, b.action === 'valid' ? 'Litige de paiement : paiement validé' : 'Litige de paiement : commande annulée', 'order', o.id, o.ref, o.pay_dispute);
+            return json({ ok: true });
+          }
+          if (b.kind === 'fee' && o.fee_dispute && o.courier_id) {
+            if (b.action === 'received') {
+              await env.DB.prepare(`UPDATE orders SET fee_state='paid', fee_dispute=NULL WHERE id=?1`).bind(o.id).run();
+              await notify(env, o.courier_id, 'Frais de livraison validés', `L'équipe du marché a validé les frais de la commande ${o.ref}. Vous pouvez livrer.`, '/livreur.html');
+            } else if (b.action === 'free' && o.status === 'ready') {
+              const oldCourier = o.courier_id;
+              await env.DB.prepare(`UPDATE orders SET courier_id=NULL, fee_state=NULL, fee_ref=NULL, fee_account=NULL, fee_dispute=NULL, updated_at=?2 WHERE id=?1`).bind(o.id, now()).run();
+              await notify(env, oldCourier, 'Course retirée', `La course ${o.ref} vous a été retirée par l'équipe du marché.`, '/livreur.html');
+              await notify(env, o.customer_id, 'Un autre livreur va être trouvé', `Votre commande ${o.ref} est remise en attente d'un livreur.`, `/commandes.html?ref=${o.ref}`);
+              const shop = await env.DB.prepare('SELECT * FROM shops WHERE id=?1').bind(o.shop_id).first();
+              await pushCouriers(env, shop, o, await loadSettings(env));
+            } else return bad('Décision impossible dans cet état');
+            await logAction(env, user, b.action === 'received' ? 'Litige de livraison : frais validés' : 'Litige de livraison : livreur remplacé', 'order', o.id, o.ref, o.fee_dispute);
+            return json({ ok: true });
+          }
+          return bad('Aucun litige ouvert sur cette commande', 404);
         }
         if (method === 'GET' && p === '/api/admin/documents') {
           const { results } = await env.DB.prepare(
