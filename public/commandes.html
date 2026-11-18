@@ -37,7 +37,7 @@
   async function list() {
     const orders = await MG.api('/api/my/orders');
     MG.$('#list').innerHTML = orders.length ? orders.map(o => `<div class="card split">
-      <div><b>${MG.esc(o.ref)}</b> · ${MG.esc(o.shop_name)}<br><span class="muted">${MG.date(o.created_at)} · ${MG.fcfa(o.total)}</span></div>
+      <div class="ord-id"><img src="/logo/marche-gabon-icone.svg" alt="" width="44" height="44"><div><b>${MG.esc(o.ref)}</b> · ${MG.esc(o.shop_name)}<br><span class="muted">${MG.date(o.created_at)} · ${MG.fcfa(o.total)}</span></div></div>
       <div><span class="tag ${o.status}">${MG.esc(o.statusLabel)}</span> <button class="btn small alt" data-ref="${o.ref}">Détails</button></div></div>`).join('')
       : '<div class="card"><p>Aucune commande pour le moment.</p><a class="btn" href="/">Voir les boutiques</a></div>';
   }
@@ -48,7 +48,7 @@
     const { order: o, items } = await MG.api('/api/orders/' + ref);
     const idx = FLOW.indexOf(o.status);
     const d = MG.$('#detail');
-    d.innerHTML = `<div class="card"><div class="split"><h2>Commande ${MG.esc(o.ref)}</h2><span class="tag ${o.status}">${MG.esc(o.statusLabel)}</span></div>
+    d.innerHTML = `<div class="card"><div class="split"><div class="ord-id"><img src="/logo/marche-gabon-icone.svg" alt="" width="56" height="56"><h2 style="margin:0">Commande ${MG.esc(o.ref)}</h2></div><span class="tag ${o.status}">${MG.esc(o.statusLabel)}</span></div>
       <p><b>${MG.esc(o.shop.name)}</b> · ${MG.date(o.created_at)}</p>
       ${o.status !== 'cancelled' && o.status !== 'awaiting_payment' ? `<ul class="steps">${FLOW.map((s, i) => `<li class="${i <= idx ? 'done' : ''}">${{ paid: 'Payée', preparing: 'Préparation', ready: 'Prête', delivering: 'En livraison', delivered: 'Livrée' }[s]}</li>`).join('')}</ul>` : ''}
       <table><tbody>${items.map(i => `<tr><td>${MG.esc(i.name)}</td><td>${MG.qty(i.qty, i.unit)} × ${MG.fcfa(i.price)}</td><td style="text-align:right">${MG.fcfa(MG.lineTotal(i.price, i.qty))}</td></tr>`).join('')}</tbody></table>
