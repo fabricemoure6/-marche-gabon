@@ -325,7 +325,7 @@
         ${kpi(-s.expenses, 'Dépenses', 'neg', `${a.expenses.length} dépense${a.expenses.length > 1 ? 's' : ''}`)}
         ${kpi(s.profit, 'Bénéfice', s.profit >= 0 ? 'good' : 'bad', s.profit >= 0 ? 'recettes − dépenses' : 'les dépenses dépassent les recettes')}
       </div></div>
-    ${!a.payout_set ? `<div class="notice">Indiquez votre numéro Mobile Money ou votre compte bancaire pour que vos clients puissent vous payer : <button type="button" class="link" id="goPay">renseigner mon compte</button>.</div>` : ''}
+    ${!a.payout_set ? `<div class="notice">Indiquez votre numéro Mobile Money ou votre compte bancaire (validé ensuite par l'équipe du marché) pour que vos clients puissent vous payer : <button type="button" class="link" id="goPay">renseigner mon compte</button>.</div>` : ''}
     <div class="acc-grid">
       <div class="card"><h3 style="margin:0">Recettes nettes ${long ? 'par mois' : 'par jour'}</h3><div id="chart" style="margin-top:var(--space-3)"></div></div>
       <div class="card"><h3 style="margin:0 0 var(--space-3)">Mon solde</h3>
@@ -381,8 +381,8 @@
       ${s.cover_photo ? `<div id="cvBox"><img src="${MG.photo(s.cover_photo)}" alt="" style="width:100%;max-height:140px;object-fit:cover;border-radius:var(--radius-m);display:block"><label style="display:flex;gap:.4rem;align-items:center;margin:.4rem 0"><input type="checkbox" id="cvDel" style="width:auto"> Retirer la couverture</label></div>` : ''}
       <input id="cv" type="file" accept="image/*"><p class="muted" style="margin:.3rem 0 0;font-size:.85rem">Conseil : une photo large (paysage) de votre boutique ou de vos produits. Sans couverture, la page utilise une photo de vos produits.</p>
       <h3 style="margin:var(--space-5) 0 var(--space-2)">Où vos clients vous paient</h3>
-      <p class="muted" style="margin:0 0 var(--space-3)">Au moment de payer, le client voit ce compte et y envoie l'argent de ses achats. Vous confirmez ensuite la réception dans « Commandes ». Les autres personnes ne voient jamais ces informations. <b>Une fois enregistré, ce compte ne peut plus être modifié librement</b> : tout changement doit être accepté par l'équipe du marché (votre compte actuel reste actif d'ici là, et vos clients continuent de payer dessus).</p>
-      ${pend ? `<div class="notice">Modification en attente de validation : ${MG.esc(pend.number || 'suppression du compte')}${pend.name ? ' · ' + MG.esc(pend.name) : ''}</div>` : ''}
+      <p class="muted" style="margin:0 0 var(--space-3)">Au moment de payer, le client voit ce compte et y envoie l'argent de ses achats. Vous confirmez ensuite la réception dans « Commandes ». Les autres personnes ne voient jamais ces informations. <b>Pour la sécurité de vos clients, ce compte doit être validé par l'équipe du marché</b> avant d'être montré. Ensuite, tout changement doit aussi être accepté (le compte actuel reste actif d'ici là). Tant qu'il n'est pas validé, vos clients paient via le marché.</p>
+      ${pend ? `<div class="notice">${s.payout_number ? 'Modification' : 'Compte'} en attente de validation par l'équipe du marché : ${MG.esc(pend.number || 'suppression du compte')}${pend.name ? ' · ' + MG.esc(pend.name) : ''}</div>` : ''}
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:0 var(--space-3)">
         <div><label for="pm">Moyen de paiement</label><select id="pm"><option value="airtel_money"${(s.payout_method || 'airtel_money') === 'airtel_money' ? ' selected' : ''}>Airtel Money</option><option value="moov_money"${s.payout_method === 'moov_money' ? ' selected' : ''}>Moov Money</option><option value="bank"${s.payout_method === 'bank' ? ' selected' : ''}>Compte bancaire</option></select></div>
         <div><label for="pn" id="pnl">Numéro où faire le dépôt</label><input id="pn" maxlength="40" value="${MG.esc(s.payout_number || '')}" placeholder="Ex. 077 12 34 56"></div>
@@ -405,7 +405,7 @@
         if (f) body.photo_id = await MG.uploadPhoto(f);
         const cf = S('cv').files[0];
         if (cf) body.cover_photo = await MG.uploadPhoto(cf); else if (S('cvDel') && S('cvDel').checked) body.cover_photo = null;
-        const r = await MG.api('/api/seller/shop', { method: 'PUT', body }); MG.toast(r.account === 'pending' ? 'Boutique enregistrée. Le changement de compte attend l\'accord de l\'équipe du marché.' : 'Boutique enregistrée'); shopTab();
+        const r = await MG.api('/api/seller/shop', { method: 'PUT', body }); MG.toast(r.account === 'pending' ? 'Boutique enregistrée. Votre compte de paiement attend la validation de l\'équipe du marché.' : 'Boutique enregistrée'); shopTab();
       } catch (er) { MG.fail(er); }
     };
   }

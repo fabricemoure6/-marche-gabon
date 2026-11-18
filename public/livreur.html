@@ -97,18 +97,18 @@
   async function account() {
     const me = await MG.api('/api/courier/me'), m = me.pay_method || 'airtel_money';
     S('acct').innerHTML = `<form class="card" id="af"><h3 style="margin:0 0 .3rem">Où les clients vous paient</h3>
-      <p class="muted" style="margin:0 0 var(--space-3)">Quand vous acceptez une course, le client voit ce compte et vous envoie les frais de livraison. Il est invisible pour tous les autres. <b>Une fois enregistré, il ne peut plus être modifié librement</b> : tout changement doit être accepté par l'équipe du marché (votre compte actuel reste actif d'ici là).</p>
-      ${me.pending_account ? `<div class="notice">Demande en attente de validation : ${MG.esc((me.pending_account.number || 'suppression du compte'))}${me.pending_account.name ? ' · ' + MG.esc(me.pending_account.name) : ''}</div>` : ''}
+      <p class="muted" style="margin:0 0 var(--space-3)">Quand vous acceptez une course, le client voit ce compte et vous envoie les frais de livraison. Il est invisible pour tous les autres. <b>Il doit être validé par l'équipe du marché</b> avant d'être montré aux clients ; ensuite, tout changement doit aussi être accepté (le compte actuel reste actif d'ici là).</p>
+      ${me.pending_account ? `<div class="notice">${me.pay_number ? 'Modification' : 'Compte'} en attente de validation par l'équipe du marché : ${MG.esc((me.pending_account.number || 'suppression du compte'))}${me.pending_account.name ? ' · ' + MG.esc(me.pending_account.name) : ''}</div>` : ''}
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:0 var(--space-3)">
         <div><label for="am">Moyen de paiement</label><select id="am"><option value="airtel_money"${m === 'airtel_money' ? ' selected' : ''}>Airtel Money</option><option value="moov_money"${m === 'moov_money' ? ' selected' : ''}>Moov Money</option><option value="bank"${m === 'bank' ? ' selected' : ''}>Compte bancaire</option></select></div>
         <div><label for="an" id="anl">Numéro de téléphone</label><input id="an" maxlength="40" value="${MG.esc(me.pay_number || '')}" placeholder="Ex. 077 12 34 56"></div>
         <div><label for="anm">Nom du titulaire</label><input id="anm" maxlength="80" value="${MG.esc(me.pay_name || '')}"></div>
         <div id="acw"><label for="ac">Code agent (facultatif)</label><input id="ac" maxlength="30" value="${MG.esc(me.pay_code || '')}"></div>
         <div id="abw" hidden><label for="ab">Nom de la banque</label><input id="ab" maxlength="60" value="${MG.esc(me.pay_bank || '')}"></div></div>
-      <p><button class="btn">${me.pay_number ? 'Demander la modification' : 'Enregistrer'}</button> ${me.pay_number ? '<span class="tag active">Compte renseigné</span>' : '<span class="tag pending">À renseigner</span>'}</p></form>`;
+      <p><button class="btn">${me.pay_number ? 'Demander la modification' : 'Envoyer pour validation'}</button> ${me.pay_number ? '<span class="tag active">Compte validé</span>' : me.pending_account ? '<span class="tag pending">En attente de validation</span>' : '<span class="tag pending">À renseigner</span>'}</p></form>`;
     const sync = () => { const b = S('am').value === 'bank'; S('abw').hidden = !b; S('acw').hidden = b; S('anl').textContent = b ? 'Numéro de compte (IBAN ou RIB)' : 'Numéro de téléphone'; };
     S('am').onchange = sync; sync();
-    S('af').onsubmit = async e => { e.preventDefault(); try { const r = await MG.api('/api/courier/account', { method: 'POST', body: { method: S('am').value, number: S('an').value, name: S('anm').value, code: S('ac').value, bank: S('ab').value } }); MG.toast(r.account === 'pending' ? 'Demande envoyée : l\'équipe du marché doit l\'accepter' : r.account === 'unchanged' ? 'Rien à modifier' : 'Compte enregistré'); account(); } catch (er) { MG.fail(er); } };
+    S('af').onsubmit = async e => { e.preventDefault(); try { const r = await MG.api('/api/courier/account', { method: 'POST', body: { method: S('am').value, number: S('an').value, name: S('anm').value, code: S('ac').value, bank: S('ab').value } }); MG.toast(r.account === 'pending' ? 'Demande envoyée : l\'équipe du marché doit l\'accepter' : r.account === 'unchanged' ? 'Rien à modifier' : 'Compte envoyé'); account(); } catch (er) { MG.fail(er); } };
   }
   account().catch(() => {});
   S('toggle').onclick = async () => {

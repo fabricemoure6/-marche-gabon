@@ -111,7 +111,7 @@
     const pend = accounts.filter(a => a.status === 'pending'), done = accounts.filter(a => a.status !== 'pending');
     const ST = { pending: ['À valider', 'pending'], approved: ['Accepté', 'active'], rejected: ['Refusé', 'suspended'], replaced: ['Remplacé', 'cancelled'] };
     pane.innerHTML = `<h2 style="margin-top:0">Comptes de paiement à valider ${pend.length ? `<span class="tag pending">${pend.length}</span>` : ''}</h2>
-      <p class="muted">Une boutique ou un livreur enregistre son compte une première fois sans validation. Ensuite, toute modification ou suppression attend ton accord ; l'ancien compte reste actif et tout est gardé ci-dessous.</p>
+      <p class="muted">Tout compte de paiement indiqué par une boutique ou un livreur attend ton accord avant d'être montré aux clients, la première fois comme à chaque modification ou suppression. L'ancien compte reste actif jusque-là et tout est gardé ci-dessous.</p>
       ${pend.length ? `<div class="card scroll"><table><thead><tr><th>Qui</th><th>Compte actuel</th><th>Compte demandé</th><th></th></tr></thead><tbody>${pend.map(a => `<tr><td><b>${MG.esc(a.owner_name || '')}</b><br><small>${a.owner_type === 'shop' ? 'Boutique' : 'Livreur'} · ${MG.date(a.created_at)}</small></td><td>${acc(a.old_data)}</td><td>${acc(a.new_data)}</td>
         <td><button class="btn small green" data-ok="${a.id}">Accepter</button> <button class="btn small red" data-no="${a.id}">Refuser</button></td></tr>`).join('')}</tbody></table></div>` : '<div class="card"><p>Aucune modification en attente.</p></div>'}
       <h2>Litiges</h2>
@@ -125,7 +125,7 @@
       const ok = e.target.closest('[data-ok]'), no = e.target.closest('[data-no]'), dp = e.target.closest('[data-dp]');
       try {
         if (ok) {
-          const m = MG.modal(`<form id="pf"><h2>Accepter le changement de compte</h2><p class="muted">Pour éviter une erreur ou une fraude, confirme avec ton mot de passe : le nouveau compte sera immédiatement montré aux clients.</p>
+          const m = MG.modal(`<form id="pf"><h2>Accepter ce compte de paiement</h2><p class="muted">Pour éviter une erreur ou une fraude, confirme avec ton mot de passe : ce compte sera immédiatement montré aux clients.</p>
             <label for="pw">Ton mot de passe</label><input id="pw" type="password" required autocomplete="current-password"><p class="err" id="pe"></p>
             <div class="row"><button type="button" class="btn alt" data-close>Annuler</button><button class="btn green">Accepter</button></div></form>`);
           m.el.querySelector('#pf').onsubmit = async ev => { ev.preventDefault();
