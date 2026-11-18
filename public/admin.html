@@ -131,15 +131,34 @@
       } catch (er) { MG.fail(er); }
     };
   }
+  // Comptes rangés par rôle : clients, livreurs, boutiques, équipe
+  let userRole = 'customer', userQuery = '';
   async function users() {
-    const list = await MG.api('/api/admin/users');
-    const R = ROLE;
-    pane.innerHTML = `<div id="link"></div><div class="card scroll"><table><thead><tr><th>Nom</th><th>Contact</th><th>Rôle</th><th>État</th><th></th></tr></thead><tbody>${list.map(u => `<tr>
-      <td><span class="person">${MG.avatar(u, 36)}${MG.esc(u.name)}</span></td><td>${MG.esc(u.email)}<br><small>${MG.esc(u.phone || '')}</small></td><td>${R[u.role]}</td><td><span class="tag ${u.status}">${u.status}</span></td>
-      <td>${u.role === 'admin' ? '' : `<button class="btn small alt" data-r="${u.id}">Lien de réinitialisation</button> <button class="btn small ${u.status === 'active' ? 'red' : 'green'}" data-u="${u.status === 'active' ? 'suspended' : 'active'}" data-id="${u.id}">${u.status === 'active' ? 'Suspendre' : 'Réactiver'}</button>`}</td></tr>`).join('')}</tbody></table></div>`;
+    const { counts, users: list } = await MG.api('/api/admin/users?role=' + userRole);
+    const SECTIONS = [['customer', 'Clients', 'Aucun client inscrit pour le moment.'], ['courier', 'Livreurs', 'Aucun livreur inscrit pour le moment.'], ['seller', 'Boutiques', 'Aucun gestionnaire de boutique inscrit pour le moment.'], ['admin', 'Équipe', '']];
+    const ago = t => { if (!t) return '—'; const m = Math.round((Date.now() - Number(t)) / 60000); return m < 2 ? 'à l\'instant' : m < 60 ? m + ' min' : m < 1440 ? Math.round(m / 60) + ' h' : Math.round(m / 1440) + ' j'; };
+    const HEAD = { customer: ['Commandes', 'Dépensé', 'Dernière commande'], courier: ['Disponibilité', 'Courses livrées', 'Pièces'], seller: ['Boutique', 'Produits', 'Pièce'], admin: [] }[userRole];
+    const cells = u => ({
+      customer: [`${u.orders_n}`, MG.fcfa(u.spent), u.last_order ? MG.date(u.last_order) : '—'],
+      courier: [u.available ? '<span class="tag active">Disponible</span>' : '<span class="tag cancelled">Indisponible</span>' + (u.last_seen ? `<br><small class="muted">vu il y a ${ago(u.last_seen)}</small>` : ''), `${u.deliveries}`, u.docs_n ? `${u.docs_ok}/${u.docs_n} vérifiée${u.docs_ok > 1 ? 's' : ''}` : '<span class="muted">aucune</span>'],
+      seller: [u.shop_name ? `${MG.esc(u.shop_name)}<br><span class="tag ${u.shop_status}">${u.shop_status}</span>` : '<span class="muted">pas de boutique</span>', `${u.products_n}`, u.docs_n ? (u.docs_ok ? 'Vérifiée' : 'À vérifier') : '<span class="muted">aucune</span>'],
+      admin: []
+    })[userRole];
+    const q = userQuery.trim().toLowerCase();
+    const shown = q ? list.filter(u => (u.name + ' ' + u.email + ' ' + (u.phone || '') + ' ' + (u.shop_name || '')).toLowerCase().includes(q)) : list;
+    pane.innerHTML = `<div id="link"></div>
+      <div class="tabs" id="roleTabs">${SECTIONS.map(([r, l]) => `<button data-role="${r}" class="${r === userRole ? 'on' : ''}">${l} <span class="muted">(${counts[r]})</span></button>`).join('')}</div>
+      <label class="search" style="margin:0 0 var(--space-4);max-width:420px"><input id="uq" type="search" placeholder="Chercher un nom, un e-mail, un numéro…" aria-label="Chercher" value="${MG.esc(userQuery)}"></label>
+      ${shown.length ? `<div class="card scroll"><table><thead><tr><th>Nom</th><th>Contact</th>${HEAD.map(h => `<th>${h}</th>`).join('')}<th>Compte</th><th></th></tr></thead><tbody>${shown.map(u => `<tr>
+        <td><span class="person">${MG.avatar(u, 36)}${MG.esc(u.name)}</span><br><small class="muted">inscrit le ${MG.date(u.created_at)}</small></td><td>${MG.esc(u.email)}<br><small>${MG.esc(u.phone || '')}</small></td>
+        ${cells(u).map(c => `<td>${c}</td>`).join('')}<td><span class="tag ${u.status}">${u.status}</span></td>
+        <td>${u.role === 'admin' ? '' : `<button class="btn small alt" data-r="${u.id}">Lien de réinitialisation</button> <button class="btn small ${u.status === 'active' ? 'red' : 'green'}" data-u="${u.status === 'active' ? 'suspended' : 'active'}" data-id="${u.id}">${u.status === 'active' ? 'Suspendre' : 'Réactiver'}</button>`}</td></tr>`).join('')}</tbody></table></div>`
+      : `<div class="card"><p>${q ? 'Aucun résultat pour cette recherche.' : SECTIONS.find(x => x[0] === userRole)[2]}</p></div>`}`;
+    S('uq').oninput = e => { userQuery = e.target.value; const pos = e.target.selectionStart; users().then(() => { const i = S('uq'); i.focus(); i.setSelectionRange(pos, pos); }); };
     pane.onclick = async e => {
-      const r = e.target.closest('[data-r]'), s = e.target.closest('[data-u]');
+      const t = e.target.closest('[data-role]'), r = e.target.closest('[data-r]'), s = e.target.closest('[data-u]');
       try {
+        if (t) { userRole = t.dataset.role; userQuery = ''; return users(); }
         if (r) { const d = await MG.api('/api/admin/users/' + r.dataset.r + '/reset', { method: 'POST', body: {} }); S('link').innerHTML = `<div class="notice">Lien valable 1 heure, à transmettre à l'utilisateur (WhatsApp) :<br><input readonly value="${MG.esc(location.origin + d.path)}" onclick="this.select()"></div>`; }
         if (s) {
           const u = list.find(x => x.id === s.dataset.id);
