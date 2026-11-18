@@ -687,10 +687,10 @@
     el.classList.add('done'); setTimeout(() => el.classList.add('out'), 250); setTimeout(() => el.remove(), 800);
   };
 
-  // Affiché dès le début du chargement, retiré quand le site est prêt (500 ms mini, 1,2 s à la première visite)
+  // Affiché dès le début du chargement, retiré quand le site est prêt (0,9 s mini, 1,6 s à la première visite)
   (function () {
     let first = true; try { first = !sessionStorage.getItem('mg-welcomed'); sessionStorage.setItem('mg-welcomed', '1'); } catch (e) {}
-    const t0 = Date.now(), min = first ? 1200 : 500;
+    const t0 = Date.now(), min = first ? 1600 : 900;
     MG.splash(first ? 'Bienvenue, nous préparons le marché…' : 'Chargement…');
     const done = () => setTimeout(MG.splashHide, Math.max(0, min - (Date.now() - t0)));
     MG.ready.then(done, done);
