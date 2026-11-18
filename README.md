@@ -80,4 +80,4 @@ SMS ; l'administrateur valide dans l'onglet Paiements.
 
 ## Logo
 
-Le logo (un éventail de feuilles : orange, vert, bleu et un cœur jaune) a été dessiné dans Adobe Illustrator. Le fichier source `public/logo/marche-gabon-logo.ai` contient 4 plans de travail : icône d'application, icône avec contour sombre, icône avec contour crème et image de partage 1200×630. Les exports SVG et PNG sont dans `public/logo/`. Il sert aussi de favicon, d'icône d'application, d'image de partage et d'icône d'en-tête. Couleurs : papaye #f76707, forêt #0b7a47, lagune #2563a8, soleil #ffc53d, nuit #1f1a17.
+Le logo (un éventail de feuilles : orange, vert, bleu et un cœur jaune) a été dessiné dans Adobe Illustrator. Le fichier source `design/marche-gabon-logo.ai` (hors du site public) contient 4 plans de travail : icône d'application, icône avec contour sombre, icône avec contour crème et image de partage 1200×630. Les exports SVG et PNG sont dans `public/logo/`. Il sert aussi de favicon, d'icône d'application, d'image de partage et d'icône d'en-tête. Couleurs : papaye #f76707, forêt #0b7a47, lagune #2563a8, soleil #ffc53d, nuit #1f1a17.
