@@ -107,6 +107,8 @@ Confidentialité : le compte d'une boutique n'est montré qu'au client de la com
 
 ## Sauvegardes et restauration
 
+**Activation (à faire une fois).** Le code des sauvegardes est en place mais le stockage n'est pas relié, car R2 doit d'abord être activé sur le compte Cloudflare (tableau de bord, R2 Object Storage, activer ; il y a un quota gratuit). Ensuite, dans `wrangler.jsonc`, ajouter une virgule après le bloc `d1_databases` et décommenter les lignes `r2_buckets` et `triggers` : le bucket est alors créé au déploiement et la première copie se fait dans les 15 minutes. D'ici là, l'administration le signale et D1 garde son historique intégré (Time Travel).
+
 **Ce qui est sauvegardé.** Le code est dans GitHub. Les données (D1) sont copiées chaque nuit dans un stockage Cloudflare R2 séparé (binding `BACKUPS`, bucket créé automatiquement au déploiement). Une copie complète par jour, découpée en petits fichiers `backups/AAAA-MM-JJ/<table>.<n>.json` ; le fichier `manifest.json` est écrit en dernier et prouve que la copie est complète. Les 30 dernières copies sont gardées. Les sessions, les jetons de réinitialisation et les tentatives de connexion ne sont pas copiés (éphémères).
 
 **Comment ça tourne.** Un déclencheur planifié passe toutes les 15 minutes (`triggers.crons`) : il fait avancer la copie du jour par morceaux, sans jamais dépasser le temps de calcul d'une exécution, puis ne fait plus rien tant que la copie du jour est terminée. Une copie interrompue reprend où elle s'était arrêtée. Si aucune copie complète n'existe depuis plus de 48 h, l'administrateur reçoit une notification (au plus une par jour).
