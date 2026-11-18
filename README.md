@@ -80,7 +80,7 @@ SMS ; l'administrateur valide dans l'onglet Paiements.
 
 ## Logo
 
-Le logo (un éventail de feuilles : orange, vert, bleu et un cœur jaune) a été dessiné dans Adobe Illustrator. Le fichier source `design/marche-gabon-logo.ai` (hors du site public) contient 4 plans de travail : icône d'application, icône avec contour sombre, icône avec contour crème et image de partage 1200×630. Les exports SVG et PNG sont dans `public/logo/`. Il sert aussi de favicon, d'icône d'application, d'image de partage et d'icône d'en-tête. Couleurs : papaye #f76707, forêt #0b7a47, lagune #2563a8, soleil #ffc53d, nuit #1f1a17.
+Le logo actuel est la « proposition 2 » dessinée dans Adobe Illustrator : un sac de courses souriant aux couleurs du Gabon (vert, jaune, bleu) avec « marché gabon » en vert et noir. Les 4 propositions sont conservées dans `design/marche-gabon-propositions.ai` (hors du site public) ; l'ancien éventail est dans `design/marche-gabon-logo.ai`. Les exports SVG et PNG (icône d'application, icône pour fond clair ou sombre, logo horizontal clair ou sombre, image de partage 1200×630) sont dans `public/logo/`. Il sert aussi de favicon, d'icône d'écran d'accueil, d'image de partage, d'icône d'en-tête, d'écran de chargement, de pastille sur les boutiques et d'en-tête des reçus. Couleurs : vert #009e60, jaune #fcd116, bleu #3a75c4, nuit #1f1a17, crème #fff8ee.
 
 ## Produits vendus au kilo, au litre, au tas…
 
