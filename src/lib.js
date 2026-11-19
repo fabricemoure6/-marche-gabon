@@ -39,7 +39,8 @@ const SESSION_DAYS = 30;
 function getCookie(request, name) {
   const c = request.headers.get('cookie') || '';
   const m = c.split(/;\s*/).find(x => x.startsWith(name + '='));
-  return m ? decodeURIComponent(m.slice(name.length + 1)) : null;
+  if (!m) return null;
+  try { return decodeURIComponent(m.slice(name.length + 1)); } catch { return null; } // cookie mal formé : traité comme absent
 }
 
 export async function createSession(env, userId, secure) {
@@ -64,6 +65,39 @@ export async function currentUser(request, env) {
 export async function destroySession(request, env) {
   const sid = getCookie(request, 'sid');
   if (sid) await env.DB.prepare('DELETE FROM sessions WHERE token_hash=?1').bind(await sha256(sid)).run();
+}
+
+// ---------- En-têtes de sécurité (toutes les réponses) ----------
+// Le site utilise des scripts en ligne : 'unsafe-inline' reste nécessaire, mais seules les sources listées sont autorisées.
+const CSP = [
+  "default-src 'self'",
+  "script-src 'self' 'unsafe-inline' https://unpkg.com",
+  "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://unpkg.com",
+  "font-src 'self' https://fonts.gstatic.com",
+  "img-src 'self' data: blob: https://tile.openstreetmap.org https://*.tile.openstreetmap.org https://unpkg.com",
+  "connect-src 'self' https://nominatim.openstreetmap.org https://router.project-osrm.org",
+  "frame-ancestors 'none'", "base-uri 'self'", "form-action 'self'", "object-src 'none'"
+].join('; ');
+export function withSecurityHeaders(res) {
+  const r = new Response(res.body, res);
+  const h = r.headers;
+  h.set('strict-transport-security', 'max-age=31536000; includeSubDomains');
+  h.set('x-content-type-options', 'nosniff');
+  h.set('x-frame-options', 'DENY');
+  h.set('referrer-policy', 'strict-origin-when-cross-origin');
+  h.set('permissions-policy', 'geolocation=(self), camera=(), microphone=(), payment=()');
+  if (!h.has('content-security-policy')) h.set('content-security-policy', CSP);
+  return r;
+}
+
+// ---------- Limites d'usage (inscriptions, photos) ----------
+// Compte les événements récents d'une clé dans login_attempts (même table que les essais de connexion)
+export async function recentCount(env, key, windowMs) {
+  const r = await env.DB.prepare('SELECT COUNT(*) AS n FROM login_attempts WHERE key=?1 AND at>?2').bind(key, Date.now() - windowMs).first();
+  return r ? r.n : 0;
+}
+export async function recordEvent(env, key) {
+  await env.DB.prepare('INSERT INTO login_attempts (key,at) VALUES (?1,?2)').bind(key, Date.now()).run();
 }
 
 // ---------- Données de référence ----------

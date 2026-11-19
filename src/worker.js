@@ -2,9 +2,10 @@
 import {
   json, bad, rand, uid, now, sha256, safeEqual, hashPassword, createSession, clearCookie, currentUser, destroySession,
   CATEGORIES, ORDER_STATUS, ensureSchema, loadSettings, saveSettings, toBase64, fromBase64, sniffImage, sniffDocument, DOC_KINDS,
+  withSecurityHeaders, recentCount, recordEvent,
   validCoord, distanceKm, slugify, EFFECTIVE_PRICE, promoActive, publicProduct, voucherDiscount, loyaltyProgram, LOW_STOCK, photoList, SOLD, EXPENSE_CATS, period, UNITS, r3, unitOf, stepOf, fmtQty, lineTotal, cleanAccount, METHOD_LABEL } from './lib.js';
 import { backupStep, backupStatus, backupStream, backupWatch } from './backup.js';
-import { notify, confirmCheckout, rejectCheckout, cancelOrders, releaseVoucher, createVoucher, awardLoyalty, startOnlinePayment, singpayVerify, singpayOn, singpayCall, sp } from './pay.js';
+import { notify, confirmCheckout, rejectCheckout, cancelOrders, releaseVoucher, restock, createVoucher, awardLoyalty, startOnlinePayment, singpayVerify, singpayOn, singpayCall, sp } from './pay.js';
 import { botReply, searchProducts } from './bot.js';
 import { seoRoute } from './seo.js';
 
@@ -59,7 +60,12 @@ async function shopAccounting(env, shopId, per) {
     daily, top, orders, expenses, payouts, balance: { earned: earned.v, paid: paid.v, due: earned.v - paid.v, direct_net: direct.net, direct_orders: direct.n, commission_owed: direct.commission }
   };
 }
-const csvCell = v => { const t = String(v ?? ''); return /[;"\n]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t; };
+// Un texte qui commence par = + - @ serait exécuté comme une formule par Excel : on le préfixe d'une apostrophe
+const csvCell = v => {
+  let t = String(v ?? '');
+  if (typeof v === 'string' && /^[=+\-@\t\r]/.test(t)) t = "'" + t;
+  return /[;"\n]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t;
+};
 function accountingCsv(shopName, a) {
   const rows = [['Date', 'Type', 'Référence / catégorie', 'Libellé', 'Recette (FCFA)', 'Dépense (FCFA)', 'Détail']];
   for (const o of a.orders) rows.push([o.created_at.slice(0, 10), 'Vente', o.ref, 'Client : ' + o.customer, o.subtotal - o.discount - o.commission, '',
@@ -100,6 +106,9 @@ async function logAction(env, user, action, type, id, name, reason) {
 async function register(request, env, secure) {
   const b = await readJson(request);
   if (!b) return bad('Requête invalide');
+  // Anti-robots : 20 comptes par heure et par adresse IP (large, car les opérateurs mobiles partagent souvent une même IP)
+  const kReg = 'r:' + await sha256(request.headers.get('cf-connecting-ip') || 'local');
+  if ((await recentCount(env, kReg, 3600000)) >= 20) return bad('Trop d\'inscriptions depuis cette connexion. Réessayez dans une heure.', 429);
   const email = cleanText(b.email, 254).toLowerCase();
   const name = cleanText(b.name, 80), phone = cleanText(b.phone, 30), password = String(b.password || '');
   const code = String(b.invite || '').toLowerCase();
@@ -144,6 +153,7 @@ async function register(request, env, secure) {
   }
   if (invite) await env.DB.prepare('INSERT INTO invite_uses (invite_id,user_id,created_at) VALUES (?1,?2,?3)').bind(invite.id, id, now()).run();
   if (role === 'courier') await env.DB.prepare('INSERT INTO couriers (user_id,available) VALUES (?1,0)').bind(id).run();
+  await recordEvent(env, kReg);
   const cookie = await createSession(env, id, secure);
   return json({ ok: true, user: { id, email, name, role } }, 201, { 'set-cookie': cookie });
 }
@@ -166,7 +176,10 @@ async function login(request, env, secure) {
     return bad('E-mail ou mot de passe incorrect', 401);
   }
   if (u.status !== 'active') return bad('Ce compte est suspendu', 403);
-  await env.DB.prepare('DELETE FROM login_attempts WHERE key=?1').bind(kEmail).run();
+  await env.DB.batch([
+    env.DB.prepare('DELETE FROM login_attempts WHERE key=?1').bind(kEmail),
+    env.DB.prepare('DELETE FROM sessions WHERE expires_at<?1').bind(t) // ménage des sessions expirées
+  ]);
   return json({ ok: true, user: { id: u.id, email: u.email, name: u.name, role: u.role } }, 200, { 'set-cookie': await createSession(env, u.id, secure) });
 }
 
@@ -261,6 +274,11 @@ export default {
     })());
   },
   async fetch(request, env) {
+    return withSecurityHeaders(await route(request, env));
+  }
+};
+
+async function route(request, env) {
     const url = new URL(request.url);
     const p = url.pathname, method = request.method;
     if (!p.startsWith('/api/')) {
@@ -407,8 +425,13 @@ export default {
         if (!buf.byteLength || buf.byteLength > 700 * 1024) return bad('Photo trop lourde (700 Ko maximum)');
         const mime = sniffImage(buf);
         if (!mime) return bad('Format non pris en charge (JPEG, PNG ou WebP)');
+        // Quotas : un client ou un livreur n'a besoin que de sa photo de profil ; une boutique, de ses produits
         const n = (await env.DB.prepare('SELECT COUNT(*) AS n FROM photos WHERE owner_id=?1').bind(user.id).first()).n;
-        if (n >= 400) return bad('Limite de photos atteinte');
+        const maxTotal = user.role === 'seller' || user.role === 'admin' ? 400 : 20;
+        if (n >= maxTotal) return bad('Limite de photos atteinte');
+        const kPh = 'p:' + user.id;
+        if ((await recentCount(env, kPh, 86400000)) >= (user.role === 'seller' || user.role === 'admin' ? 120 : 10)) return bad('Trop de photos envoyées aujourd\'hui. Réessayez demain.', 429);
+        await recordEvent(env, kPh);
         const id = uid();
         await env.DB.prepare('INSERT INTO photos (id,owner_id,mime,data,size,created_at) VALUES (?1,?2,?3,?4,?5,?6)').bind(id, user.id, mime, toBase64(buf), buf.byteLength, now()).run();
         return json({ id }, 201);
@@ -675,9 +698,10 @@ export default {
         const r = await loadOrderFor(env, user, m[1]);
         if (!r || r.role !== 'customer') return bad('Commande introuvable', 404);
         if (r.o.status !== 'awaiting_payment') return bad('Seule une commande non payée peut être annulée ici. Écrivez à la boutique.');
-        await env.DB.prepare(`UPDATE products SET stock = ROUND(stock + COALESCE((SELECT qty FROM order_items WHERE order_id=?1 AND product_id=products.id),0), 3)
-          WHERE id IN (SELECT product_id FROM order_items WHERE order_id=?1)`).bind(r.o.id).run();
-        await env.DB.prepare(`UPDATE orders SET status='cancelled', updated_at=?2 WHERE id=?1`).bind(r.o.id, now()).run();
+        // Annulation atomique d'abord : deux demandes simultanées (ou un paiement confirmé au même moment) ne remettent pas le stock deux fois
+        const upd = await env.DB.prepare(`UPDATE orders SET status='cancelled', updated_at=?2 WHERE id=?1 AND status='awaiting_payment'`).bind(r.o.id, now()).run();
+        if (!upd.meta.changes) return bad('Cette commande vient de changer d\'état. Rechargez la page.', 409);
+        await restock(env, r.o.id);
         await releaseVoucher(env, r.o.id);
         return json({ ok: true });
       }
@@ -921,14 +945,14 @@ export default {
           if (!o) return bad('Commande introuvable', 404);
           const next = b && b.status, allowed = { paid: ['preparing', 'cancelled'], preparing: ['ready', 'cancelled'] }[o.status] || [];
           if (!allowed.includes(next)) return bad('Changement de statut impossible');
-          await env.DB.prepare('UPDATE orders SET status=?2, updated_at=?3 WHERE id=?1').bind(o.id, next, now()).run();
+          const upd = await env.DB.prepare('UPDATE orders SET status=?2, updated_at=?3 WHERE id=?1 AND status=?4').bind(o.id, next, now(), o.status).run();
+          if (!upd.meta.changes) return bad('Cette commande vient de changer d\'état. Rechargez la page.', 409);
           const outOfStock = next === 'cancelled' && b.reason === 'out_of_stock';
           if (next === 'cancelled') {
             if (outOfStock) { // le vendeur n'avait plus l'article : le stock passe à 0 pour éviter d'autres commandes
               await env.DB.prepare(`UPDATE products SET stock=0, stock_updated_at=?2 WHERE id IN (SELECT product_id FROM order_items WHERE order_id=?1)`).bind(o.id, Date.now()).run();
             } else {
-              await env.DB.prepare(`UPDATE products SET stock = ROUND(stock + COALESCE((SELECT qty FROM order_items WHERE order_id=?1 AND product_id=products.id),0), 3)
-                WHERE id IN (SELECT product_id FROM order_items WHERE order_id=?1)`).bind(o.id).run();
+              await restock(env, o.id);
             }
             await releaseVoucher(env, o.id);
           }
@@ -1099,18 +1123,21 @@ export default {
           const o = await env.DB.prepare('SELECT o.*, s.name AS shop_name, s.owner_id AS shop_owner FROM orders o JOIN shops s ON s.id=o.shop_id WHERE o.ref=?1').bind(m[1]).first();
           if (!o) return bad('Commande introuvable', 404);
           const cancelOrder = async () => {
-            await env.DB.prepare(`UPDATE products SET stock = ROUND(stock + COALESCE((SELECT qty FROM order_items WHERE order_id=?1 AND product_id=products.id),0), 3) WHERE id IN (SELECT product_id FROM order_items WHERE order_id=?1)`).bind(o.id).run();
-            await env.DB.prepare(`UPDATE orders SET status='cancelled', pay_dispute=NULL, updated_at=?2 WHERE id=?1`).bind(o.id, now()).run();
+            const u = await env.DB.prepare(`UPDATE orders SET status='cancelled', pay_dispute=NULL, updated_at=?2 WHERE id=?1 AND status='awaiting_payment'`).bind(o.id, now()).run();
+            if (!u.meta.changes) return false;
+            await restock(env, o.id);
             await releaseVoucher(env, o.id);
+            return true;
           };
           if (b.kind === 'pay' && o.pay_dispute && o.status === 'awaiting_payment') {
             if (b.action === 'valid') {
-              await env.DB.prepare(`UPDATE orders SET status='paid', pay_dispute=NULL, updated_at=?2 WHERE id=?1`).bind(o.id, now()).run();
+              const u = await env.DB.prepare(`UPDATE orders SET status='paid', pay_dispute=NULL, updated_at=?2 WHERE id=?1 AND status='awaiting_payment'`).bind(o.id, now()).run();
+              if (!u.meta.changes) return bad('Cette commande vient de changer d\'état. Rechargez la page.', 409);
               await env.DB.prepare(`UPDATE checkouts SET status='confirmed', confirmed_at=?2 WHERE id=?1 AND status!='confirmed' AND NOT EXISTS (SELECT 1 FROM orders WHERE checkout_id=?1 AND status='awaiting_payment')`).bind(o.checkout_id, now()).run();
               await notify(env, o.customer_id, 'Paiement validé', `L'équipe du marché a validé votre paiement (commande ${o.ref}). Elle est en préparation.`, `/recu.html?ref=${o.ref}`);
               await notify(env, o.shop_owner, 'Litige tranché : paiement valide', `L'équipe du marché a validé le paiement de la commande ${o.ref}. Vous pouvez la préparer.`, '/vendeur.html');
             } else if (b.action === 'cancel') {
-              await cancelOrder();
+              if (!await cancelOrder()) return bad('Cette commande vient de changer d\'état. Rechargez la page.', 409);
               await notify(env, o.customer_id, 'Commande annulée', `Après vérification, le paiement de la commande ${o.ref} n'a pas été retrouvé. Elle est annulée.`, `/commandes.html?ref=${o.ref}`);
               await notify(env, o.shop_owner, 'Litige tranché : commande annulée', `La commande ${o.ref} est annulée par l'équipe du marché.`, '/vendeur.html');
             } else return bad('Décision invalide');
@@ -1343,5 +1370,4 @@ export default {
       console.error(e);
       return bad('Erreur du serveur', 500);
     }
-  }
-};
+}

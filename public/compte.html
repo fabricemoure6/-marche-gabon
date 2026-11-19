@@ -17,7 +17,11 @@
 (async () => {
   await MG.ready;
   const view = MG.$('#view'), next = MG.param('next');
-  const dest = () => (next && next.startsWith('/') && !next.startsWith('//') ? next : '/');
+  // Retour après connexion : uniquement vers une page de ce site (bloque « /\evil.com », « //evil.com », « javascript: »…)
+  const dest = () => {
+    if (!next || !next.startsWith('/')) return '/';
+    try { const u = new URL(next, location.origin); return u.origin === location.origin ? u.pathname + u.search + u.hash : '/'; } catch { return '/'; }
+  };
   const go = u => { location.href = u; };
 
   if (MG.param('reset')) return resetView(MG.param('reset'));
