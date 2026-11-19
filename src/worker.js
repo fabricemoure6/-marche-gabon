@@ -254,6 +254,15 @@ function orderPublic(o, role) {
   return out;
 }
 
+// Zone de livraison montrée aux livreurs avant qu'ils prennent une course : le début de l'adresse (le quartier),
+// sans numéro ni repère précis. Ex. « Quartier Louis, pharmacie, portail bleu » → « Quartier Louis ».
+function zoneOf(address) {
+  const first = String(address || '').split(/[,;:(\n]| - /)[0];
+  const words = first.split(/\s+/).filter(w => w && !/\d/.test(w)).slice(0, 4);
+  const z = words.join(' ').slice(0, 30).trim();
+  return z.length >= 3 ? z : null;
+}
+
 async function pushCouriers(env, shop, order, settings) {
   const { results } = await env.DB.prepare(
     `SELECT c.user_id,c.lat,c.lng FROM couriers c JOIN users u ON u.id=c.user_id WHERE c.available=1 AND u.status='active'`).all();
@@ -1019,7 +1028,8 @@ async function route(request, env) {
              FROM orders o JOIN shops s ON s.id=o.shop_id WHERE o.status IN ('paid','preparing','ready') AND o.courier_id IS NULL ORDER BY o.created_at`).all();
           const jobs = results.map(j => {
             const d = validCoord(me.lat, me.lng) && validCoord(j.slat, j.slng) ? Math.round(distanceKm(me.lat, me.lng, j.slat, j.slng) * 10) / 10 : null;
-            return { ref: j.ref, shop: j.shop_name, shopAddress: j.shop_address, address: j.address, fee: j.delivery_fee, tripKm: j.distance_km, toShopKm: d,
+            // Avant acceptation, le livreur ne voit que la zone (le quartier), jamais l'adresse précise du client
+            return { ref: j.ref, shop: j.shop_name, shopAddress: j.shop_address, zone: zoneOf(j.address), fee: j.delivery_fee, tripKm: j.distance_km, toShopKm: d,
               status: j.status, statusLabel: { paid: 'Commande reçue', preparing: 'En préparation', ready: 'Prête à récupérer' }[j.status], items: j.items, slat: j.slat, slng: j.slng,
               far: d !== null && d > settings.courier_radius_km };
           }).sort((a, b) => (b.status === 'ready') - (a.status === 'ready') || (a.toShopKm ?? 1e9) - (b.toShopKm ?? 1e9));
