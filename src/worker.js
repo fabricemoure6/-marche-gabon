@@ -2,7 +2,7 @@
 import {
   json, bad, rand, uid, now, sha256, safeEqual, hashPassword, createSession, clearCookie, currentUser, destroySession,
   CATEGORIES, ORDER_STATUS, ensureSchema, loadSettings, saveSettings, toBase64, fromBase64, sniffImage, sniffDocument, DOC_KINDS,
-  withSecurityHeaders, recentCount, recordEvent,
+  withSecurityHeaders, recentCount, recordEvent, cached, clearCache, PUBLIC_TTL,
   validCoord, distanceKm, slugify, EFFECTIVE_PRICE, promoActive, publicProduct, voucherDiscount, loyaltyProgram, LOW_STOCK, photoList, SOLD, EXPENSE_CATS, period, UNITS, r3, unitOf, stepOf, fmtQty, lineTotal, cleanAccount, METHOD_LABEL } from './lib.js';
 import { backupStep, backupStatus, backupStream, backupWatch } from './backup.js';
 import { notify, confirmCheckout, rejectCheckout, cancelOrders, releaseVoucher, restock, createVoucher, awardLoyalty, startOnlinePayment, singpayVerify, singpayOn, singpayCall, sp } from './pay.js';
@@ -283,7 +283,9 @@ export default {
     })());
   },
   async fetch(request, env) {
-    return withSecurityHeaders(await route(request, env));
+    const res = await route(request, env);
+    if (!['GET', 'HEAD'].includes(request.method)) clearCache(); // une écriture : la mémoire courte repart de zéro
+    return withSecurityHeaders(res);
   }
 };
 
@@ -314,28 +316,28 @@ async function route(request, env) {
       }
       if (method === 'GET' && p === '/api/shops') {
         const cat = url.searchParams.get('cat') || '', q = cleanText(url.searchParams.get('q'), 60).toLowerCase();
-        const { results } = await env.DB.prepare(
+        const results = await cached('shops', PUBLIC_TTL, async () => (await env.DB.prepare(
           `SELECT s.id,s.name,s.slug,s.category,s.description,s.address,s.photo_id,
                   (SELECT COUNT(*) FROM products p WHERE p.shop_id=s.id AND p.active=1) AS products,
                   (SELECT COUNT(*) FROM products p WHERE p.shop_id=s.id AND p.active=1 AND p.stock>0 AND ${EFFECTIVE_PRICE} < p.price) AS promos,
                   (SELECT MAX(ROUND(100 - 100.0 * p.promo_price / p.price)) FROM products p WHERE p.shop_id=s.id AND p.active=1 AND p.stock>0 AND ${EFFECTIVE_PRICE} < p.price) AS best_pct,
                   COALESCE(s.cover_photo, (SELECT p.photo_id FROM products p WHERE p.shop_id=s.id AND p.active=1 AND p.photo_id IS NOT NULL ORDER BY p.created_at DESC LIMIT 1)) AS cover_id,
                   s.loyalty_enabled
-           FROM shops s WHERE s.status='active' ORDER BY promos > 0 DESC, s.name`).all();
+           FROM shops s WHERE s.status='active' ORDER BY promos > 0 DESC, s.name`).all()).results);
         return json(results.filter(s => (!cat || s.category === cat) && (!q || (s.name + ' ' + (s.description || '')).toLowerCase().includes(q))));
       }
       if (method === 'GET' && p === '/api/by-weight') { // produits vendus au kilo, au litre, au tas…
-        const { results } = await env.DB.prepare(
+        const results = await cached('by-weight', PUBLIC_TTL, async () => (await env.DB.prepare(
           `SELECT p.id,p.name,p.description,p.price,p.promo_price,p.promo_until,p.stock,p.unit,p.qty_step,p.photo_id,p.photos,s.name AS shop_name,s.slug,s.category
-           FROM products p JOIN shops s ON s.id=p.shop_id WHERE p.active=1 AND p.stock>0 AND s.status='active' AND p.unit!='piece' ORDER BY p.created_at DESC LIMIT 24`).all();
+           FROM products p JOIN shops s ON s.id=p.shop_id WHERE p.active=1 AND p.stock>0 AND s.status='active' AND p.unit!='piece' ORDER BY p.created_at DESC LIMIT 24`).all()).results);
         return json(results.map(publicProduct));
       }
       if (method === 'GET' && p === '/api/promotions') {
-        const { results } = await env.DB.prepare(
+        const results = await cached('promotions', PUBLIC_TTL, async () => (await env.DB.prepare(
           `SELECT p.id,p.name,p.description,p.price,p.promo_price,p.promo_until,p.stock,p.unit,p.qty_step,p.photo_id,p.photos,s.name AS shop_name,s.slug,s.category
            FROM products p JOIN shops s ON s.id=p.shop_id
            WHERE p.active=1 AND p.stock>0 AND s.status='active' AND ${EFFECTIVE_PRICE} < p.price
-           ORDER BY (1.0 * p.promo_price / p.price) ASC, p.promo_until ASC LIMIT 24`).all();
+           ORDER BY (1.0 * p.promo_price / p.price) ASC, p.promo_until ASC LIMIT 24`).all()).results);
         return json(results.map(publicProduct));
       }
       if (method === 'GET' && p === '/api/products') {
@@ -344,9 +346,10 @@ async function route(request, env) {
         return json(await searchProducts(env, { cat, q, limit }));
       }
       if (method === 'GET' && (m = p.match(/^\/api\/shops\/([a-z0-9-]{1,60})$/))) {
-        const s = await env.DB.prepare(`SELECT id,name,slug,category,description,address,photo_id,cover_photo,phone,loyalty_enabled,loyalty_every,loyalty_kind,loyalty_value,loyalty_min,loyalty_days
-          FROM shops WHERE slug=?1 AND status='active'`).bind(m[1]).first();
-        if (!s) return bad('Boutique introuvable', 404);
+        const shopRow = await cached('shop:' + m[1], PUBLIC_TTL, () => env.DB.prepare(`SELECT id,name,slug,category,description,address,photo_id,cover_photo,phone,loyalty_enabled,loyalty_every,loyalty_kind,loyalty_value,loyalty_min,loyalty_days
+          FROM shops WHERE slug=?1 AND status='active'`).bind(m[1]).first());
+        if (!shopRow) return bad('Boutique introuvable', 404);
+        const s = { ...shopRow }; // copie : l'original reste intact dans la mémoire courte
         const loyalty = loyaltyProgram(s);
         for (const k of ['loyalty_enabled', 'loyalty_every', 'loyalty_kind', 'loyalty_value', 'loyalty_min', 'loyalty_days']) delete s[k];
         let mine = null;
@@ -357,8 +360,8 @@ async function route(request, env) {
           const { results: al } = await env.DB.prepare('SELECT a.product_id FROM stock_alerts a JOIN products p ON p.id=a.product_id WHERE a.user_id=?1 AND p.shop_id=?2').bind(viewer.id, s.id).all();
           mine = { stamps: card ? card.stamps : 0, orders: card ? card.orders : 0, vouchers: v.n, alerts: al.map(x => x.product_id) };
         }
-        const { results } = await env.DB.prepare(
-          `SELECT id,name,description,price,promo_price,promo_until,stock,unit,qty_step,photo_id,photos,created_at FROM products WHERE shop_id=?1 AND active=1 ORDER BY created_at DESC`).bind(s.id).all();
+        const results = await cached('shop-products:' + s.id, PUBLIC_TTL, async () => (await env.DB.prepare(
+          `SELECT id,name,description,price,promo_price,promo_until,stock,unit,qty_step,photo_id,photos,created_at FROM products WHERE shop_id=?1 AND active=1 ORDER BY created_at DESC`).bind(s.id).all()).results);
         const list = results.map(publicProduct).sort((a, b) => (b.promo_pct ? 1 : 0) - (a.promo_pct ? 1 : 0) || (b.stock > 0) - (a.stock > 0));
         return json({ shop: { ...s, loyalty }, products: list, mine });
       }

@@ -90,6 +90,22 @@ export function withSecurityHeaders(res) {
   return r;
 }
 
+// ---------- Mémoire courte des lectures publiques ----------
+// Accueil, boutiques, promotions, recherche, réglages : gardés quelques secondes dans la mémoire du serveur
+// au lieu d'interroger la base à chaque visite. Toute écriture (POST, PUT, DELETE) vide cette mémoire.
+// Les résultats mis en mémoire ne doivent jamais être modifiés par l'appelant (on en fait des copies).
+const memo = new Map();
+export async function cached(key, ttlMs, fn) {
+  const e = memo.get(key), t = Date.now();
+  if (e && e.exp > t) return e.val;
+  const val = await fn();
+  if (memo.size > 300) memo.clear(); // garde-fou mémoire
+  memo.set(key, { val, exp: t + ttlMs });
+  return val;
+}
+export const clearCache = () => memo.clear();
+export const PUBLIC_TTL = 30000;
+
 // ---------- Limites d'usage (inscriptions, photos) ----------
 // Compte les événements récents d'une clé dans login_attempts (même table que les essais de connexion)
 export async function recentCount(env, key, windowMs) {
@@ -190,6 +206,15 @@ const SCHEMA = [
   `CREATE INDEX IF NOT EXISTS idx_payouts_shop ON payouts(shop_id)`,
   `CREATE TABLE IF NOT EXISTS stock_alerts (user_id TEXT NOT NULL, product_id TEXT NOT NULL, created_at TEXT, PRIMARY KEY (user_id, product_id))`,
   `CREATE INDEX IF NOT EXISTS idx_stock_alerts_product ON stock_alerts(product_id)`,
+  // Index des requêtes fréquentes : elles restent rapides quand la base grossit
+  `CREATE INDEX IF NOT EXISTS idx_orders_status_courier ON orders(status, courier_id)`,  // courses disponibles des livreurs
+  `CREATE INDEX IF NOT EXISTS idx_products_active ON products(active, created_at)`,      // recherche, promotions
+  `CREATE INDEX IF NOT EXISTS idx_cart_product ON cart_items(product_id)`,               // produit retiré : nettoyage des paniers
+  `CREATE INDEX IF NOT EXISTS idx_checkouts_user ON checkouts(user_id)`,                 // paiements d'un client
+  `CREATE INDEX IF NOT EXISTS idx_chat_sender ON chat_messages(sender_id, created_at)`,  // limite anti-spam de la discussion
+  `CREATE INDEX IF NOT EXISTS idx_users_role ON users(role)`,                            // administrateurs à prévenir
+  `CREATE INDEX IF NOT EXISTS idx_shops_status ON shops(status)`,                        // boutiques actives
+  `CREATE INDEX IF NOT EXISTS idx_login_attempts_at ON login_attempts(at)`,              // ménage des essais anciens
   // Le stock ne peut jamais devenir négatif : deux paiements simultanés du dernier article échouent proprement
   `CREATE TRIGGER IF NOT EXISTS products_stock_nonneg BEFORE UPDATE OF stock ON products WHEN NEW.stock < 0 BEGIN SELECT RAISE(ABORT, 'stock_insuffisant'); END`
 ];
@@ -272,16 +297,19 @@ export function publicProduct(p) {
 }
 
 // ---------- Réglages ----------
+// Réglages lus au plus toutes les 15 s par serveur (un changement de l'admin s'applique partout en 15 s au plus)
 export async function loadSettings(env) {
-  const row = await env.DB.prepare(`SELECT value FROM site_config WHERE key='settings'`).first();
-  let saved = {};
-  try { saved = row ? JSON.parse(row.value) : {}; } catch { /* réglages illisibles : valeurs par défaut */ }
+  const saved = await cached('settings', 15000, async () => {
+    const row = await env.DB.prepare(`SELECT value FROM site_config WHERE key='settings'`).first();
+    try { return row ? JSON.parse(row.value) : {}; } catch { return {}; /* réglages illisibles : valeurs par défaut */ }
+  });
   return { ...DEFAULT_SETTINGS, ...saved };
 }
 
 export async function saveSettings(env, settings) {
   await env.DB.prepare(`INSERT INTO site_config (key,value) VALUES ('settings',?1)
     ON CONFLICT(key) DO UPDATE SET value=excluded.value`).bind(JSON.stringify(settings)).run();
+  clearCache();
 }
 
 // ---------- Photos : base64 <-> octets ----------

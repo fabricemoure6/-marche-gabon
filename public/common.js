@@ -456,7 +456,12 @@
     label();
     if (u) {
       MG.$('#bell').onclick = toggleNotifs;
-      pollNotifs(); setInterval(pollNotifs, 15000);
+      // Notifications : toutes les 15 s, puis de plus en plus espacé (jusqu'à 60 s) tant que rien de nouveau n'arrive.
+      // Rien du tout quand l'onglet est caché ; vérification immédiate quand on revient sur la page.
+      let delay = 15000, nt = null;
+      const next = () => { clearTimeout(nt); if (!document.hidden) nt = setTimeout(async () => { delay = (await pollNotifs()) ? 15000 : Math.min(delay * 2, 60000); next(); }, delay); };
+      document.addEventListener('visibilitychange', () => { if (document.hidden) clearTimeout(nt); else { delay = 15000; pollNotifs().then(next); } });
+      pollNotifs().then(next);
     }
     if (!u || u.role === 'customer') refreshCartBadge();
   }
@@ -557,9 +562,11 @@
       .onfinish = () => { g.remove(); bump(); };
   }
 
+  // Renvoie true s'il y a du nouveau (le rythme de vérification se resserre alors)
   async function pollNotifs() {
     try {
       const d = await MG.api('/api/notifications');
+      const changed = d.unread !== MG._lastUnread;
       MG.notifs = d.items;
       const b = MG.$('#bellBadge');
       if (b) { b.textContent = d.unread; b.hidden = !d.unread; }
@@ -578,8 +585,11 @@
         }
       }
       MG._lastUnread = d.unread;
-    } catch { /* hors ligne */ }
+      return changed;
+    } catch { return false; /* hors ligne */ }
   }
+  // Exécute fn seulement si l'onglet est visible (pour les rafraîchissements automatiques des pages)
+  MG.ifVisible = fn => () => (document.hidden ? undefined : fn());
 
   function toggleNotifs() {
     const box = MG.$('#notifBox');
@@ -656,6 +666,7 @@
     let last = '', me = null, stopped = false;
     async function load() {
       if (stopped || !document.body.contains(box)) { stopped = true; return; }
+      if (document.hidden) { setTimeout(load, 5000); return; } // onglet caché : pas de requête
       try {
         const d = await MG.api('/api/orders/' + ref + '/messages?after=' + encodeURIComponent(last));
         me = d.me;

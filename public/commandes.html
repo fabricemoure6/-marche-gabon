@@ -74,7 +74,7 @@
     const c = MG.$('#cancel');
     if (c) c.onclick = async () => { if (!confirm('Annuler cette commande ?')) return; try { await MG.api('/api/orders/' + ref + '/cancel', { method: 'POST', body: {} }); list(); open(ref); } catch (er) { MG.fail(er); } };
     if (MG.$('#chat')) MG.chat(MG.$('#chat'), ref);
-    if (['ready', 'delivering'].includes(o.status)) { track(ref); trackTimer = setInterval(() => track(ref), 5000); }
+    if (['ready', 'delivering'].includes(o.status)) { track(ref); trackTimer = setInterval(MG.ifVisible(() => track(ref)), 5000); }
   }
 
   // Suivi en direct : carte OpenStreetMap créée une seule fois, le livreur se déplace dessus

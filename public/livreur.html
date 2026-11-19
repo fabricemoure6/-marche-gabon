@@ -141,6 +141,6 @@
   };
   MG.docsCard(S('docs'), { title: 'Mes pièces d\'identité', intro: 'Carte d\'identité, permis de conduire ou passeport : une pièce vérifiée renforce la confiance de l\'équipe du marché.' }).catch(() => {});
   await jobs(); await mine();
-  setInterval(() => { jobs(); mine(); }, 20000);
+  setInterval(MG.ifVisible(() => { jobs(); mine(); }), 20000);
 })();
 </script></body></html>
