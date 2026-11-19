@@ -1,6 +1,6 @@
 // Référencement : pages rendues côté serveur (contenu, titres, aperçus de partage, données structurées),
 // sitemap.xml et robots.txt. Le JavaScript du navigateur reprend ensuite la main sur les mêmes éléments.
-import { CATEGORIES, loadSettings, publicProduct, EFFECTIVE_PRICE, LOW_STOCK, UNITS, fmtQty } from './lib.js';
+import { CATEGORIES, loadSettings, publicProduct, EFFECTIVE_PRICE, LOW_STOCK, UNITS, fmtQty, cached, PUBLIC_TTL } from './lib.js';
 
 const ILLU = { habits: 'pagne-wax', parfumerie: 'parfum', alimentation: 'bananes-plantain', quincaillerie: 'sac-riz', electronique: 'smartphone', maison: 'marmite', autres: 'panier-tresse' };
 const illu = cat => '/img/produits/' + (ILLU[cat] || 'panier-tresse') + '.svg';
@@ -48,6 +48,9 @@ function shopCard(s) {
 }
 
 async function activeShops(env) {
+  return cached('seo-shops', PUBLIC_TTL, () => activeShopsDb(env));
+}
+async function activeShopsDb(env) {
   const { results } = await env.DB.prepare(
     `SELECT s.id,s.name,s.slug,s.category,s.description,s.address,s.photo_id,s.created_at,s.loyalty_enabled,
             (SELECT COUNT(*) FROM products p WHERE p.shop_id=s.id AND p.active=1) AS products,
@@ -65,10 +68,10 @@ async function page(env, url, path) {
 }
 async function homePage(env, url) {
   const [st, shops] = await Promise.all([loadSettings(env), activeShops(env)]);
-  const { results: promoRows } = await env.DB.prepare(
+  const promoRows = await cached('promotions', PUBLIC_TTL, async () => (await env.DB.prepare(
     `SELECT p.id,p.name,p.description,p.price,p.promo_price,p.promo_until,p.stock,p.unit,p.qty_step,p.photo_id,p.photos,s.name AS shop_name,s.slug,s.category
      FROM products p JOIN shops s ON s.id=p.shop_id WHERE p.active=1 AND p.stock>0 AND s.status='active' AND ${EFFECTIVE_PRICE} < p.price
-     ORDER BY (1.0 * p.promo_price / p.price) ASC, p.promo_until ASC LIMIT 24`).all();
+     ORDER BY (1.0 * p.promo_price / p.price) ASC, p.promo_until ASC LIMIT 24`).all()).results);
   const promos = promoRows.map(publicProduct);
   const site = st.site_name, origin = url.origin;
   const title = `${site} : vos boutiques en ligne, livrées chez vous à Libreville`;
@@ -99,9 +102,9 @@ async function homePage(env, url) {
 
 async function shopPage(env, url, slug) {
   const st = await loadSettings(env);
-  const s = await env.DB.prepare(`SELECT id,name,slug,category,description,address,photo_id,cover_photo,phone,created_at,loyalty_enabled,loyalty_every,loyalty_kind,loyalty_value,loyalty_min FROM shops WHERE slug=?1 AND status='active'`).bind(slug).first();
+  const s = await cached('seo-shop:' + slug, PUBLIC_TTL, () => env.DB.prepare(`SELECT id,name,slug,category,description,address,photo_id,cover_photo,phone,created_at,loyalty_enabled,loyalty_every,loyalty_kind,loyalty_value,loyalty_min FROM shops WHERE slug=?1 AND status='active'`).bind(slug).first());
   if (!s) return null;
-  const { results } = await env.DB.prepare(`SELECT id,name,description,price,promo_price,promo_until,stock,unit,qty_step,photo_id,photos,created_at FROM products WHERE shop_id=?1 AND active=1 ORDER BY created_at DESC`).bind(s.id).all();
+  const results = await cached('shop-products:' + s.id, PUBLIC_TTL, async () => (await env.DB.prepare(`SELECT id,name,description,price,promo_price,promo_until,stock,unit,qty_step,photo_id,photos,created_at FROM products WHERE shop_id=?1 AND active=1 ORDER BY created_at DESC`).bind(s.id).all()).results);
   const products = results.map(publicProduct).sort((a, b) => (b.promo_pct ? 1 : 0) - (a.promo_pct ? 1 : 0) || (b.stock > 0) - (a.stock > 0));
   const origin = url.origin, site = st.site_name, pageUrl = `${origin}/boutique/${encodeURIComponent(s.slug)}`;
   const cat = catName(s.category), promos = products.filter(p => p.promo_pct && p.stock > 0);

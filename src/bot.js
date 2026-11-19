@@ -1,5 +1,5 @@
 // Assistant à règles : répond aux questions fréquentes sans service externe.
-import { CATEGORIES, ORDER_STATUS, publicProduct, EFFECTIVE_PRICE } from './lib.js';
+import { CATEGORIES, ORDER_STATUS, publicProduct, EFFECTIVE_PRICE, cached, PUBLIC_TTL } from './lib.js';
 
 const has = (t, words) => words.some(w => t.includes(w));
 const norm = s => String(s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
@@ -10,9 +10,10 @@ const QUICK = ['Les promotions', 'Où est ma commande ?', 'Frais de livraison', 
 
 // Produits actifs des boutiques actives, filtrés par rubrique et mots-clés (sans accents).
 export async function searchProducts(env, { cat = '', q = '', limit = 24 } = {}) {
-  const { results } = await env.DB.prepare(
+  // Le catalogue (400 produits au plus) est relu au plus toutes les 30 s, au lieu d'une fois par recherche
+  const results = await cached('catalog', PUBLIC_TTL, async () => (await env.DB.prepare(
     `SELECT p.id,p.name,p.description,p.price,p.promo_price,p.promo_until,p.stock,p.unit,p.qty_step,p.photo_id,p.photos,s.name AS shop_name,s.slug,s.category,s.address
-     FROM products p JOIN shops s ON s.id=p.shop_id WHERE p.active=1 AND s.status='active' ORDER BY p.created_at DESC LIMIT 400`).all();
+     FROM products p JOIN shops s ON s.id=p.shop_id WHERE p.active=1 AND s.status='active' ORDER BY p.created_at DESC LIMIT 400`).all()).results);
   const words = keywords(q);
   if (String(q).trim() && !words.length) return [];
   return results

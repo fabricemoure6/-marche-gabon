@@ -47,7 +47,7 @@
           ${['paid', 'preparing'].includes(o.status) ? `<button class="btn small red" data-st="cancelled" data-r="${o.ref}">Annuler</button>` : ''}
           <button class="btn small alt" data-chat="${o.ref}">Discuter</button></div></div></div>`).join('') : '<div class="card"><p>Aucune commande pour le moment. Vous serez notifié dès qu\'un client commande ou paie.</p></div>';
     }
-    await draw(); timer = setInterval(draw, 20000);
+    await draw(); timer = setInterval(MG.ifVisible(draw), 20000);
     S('pane').onclick = async e => {
       const st = e.target.closest('[data-st]'), ch = e.target.closest('[data-chat]'), pay = e.target.closest('[data-pay]');
       if (pay) {
