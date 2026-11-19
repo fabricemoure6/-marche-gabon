@@ -24,10 +24,13 @@
     if (loading) return loading;
     loading = new Promise(function (ok, ko) {
       var css = document.createElement('link');
+      // Empreintes d'intégrité (SRI) : le navigateur refuse un fichier modifié sur unpkg.com
       css.rel = 'stylesheet'; css.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
+      css.integrity = 'sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY='; css.crossOrigin = 'anonymous';
       document.head.appendChild(css);
       var s = document.createElement('script');
       s.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
+      s.integrity = 'sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo='; s.crossOrigin = 'anonymous';
       s.onload = ok; s.onerror = function () { loading = null; ko(new Error('Carte indisponible (réseau)')); };
       document.head.appendChild(s);
     });

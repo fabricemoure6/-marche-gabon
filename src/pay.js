@@ -73,22 +73,27 @@ export async function confirmCheckout(env, checkout) {
   }
 }
 
-export async function rejectCheckout(env, checkout, restock = true) {
+export async function rejectCheckout(env, checkout, doRestock = true) {
   if (checkout.status === 'confirmed' || checkout.status === 'rejected') return;
   await env.DB.prepare(`UPDATE checkouts SET status='rejected' WHERE id=?1 AND status NOT IN ('confirmed','rejected')`).bind(checkout.id).run();
-  await cancelOrders(env, checkout.id, restock);
+  await cancelOrders(env, checkout.id, doRestock);
+}
+
+// Remet en stock les articles d'une commande. À appeler seulement après avoir fait passer la commande
+// à « annulée » par une mise à jour conditionnelle, pour ne jamais rendre le stock deux fois.
+export async function restock(env, orderId) {
+  await env.DB.prepare(`UPDATE products SET stock = ROUND(stock + COALESCE((SELECT qty FROM order_items WHERE order_id=?1 AND product_id=products.id),0), 3)
+    WHERE id IN (SELECT product_id FROM order_items WHERE order_id=?1)`).bind(orderId).run();
 }
 
 // Annule les commandes d'un paiement et remet les produits en stock
-export async function cancelOrders(env, checkoutId, restock = true) {
+export async function cancelOrders(env, checkoutId, doRestock = true) {
   const { results: orders } = await env.DB.prepare(
     `SELECT id FROM orders WHERE checkout_id=?1 AND status='awaiting_payment'`).bind(checkoutId).all();
   for (const o of orders) {
-    if (restock) {
-      await env.DB.prepare(`UPDATE products SET stock = ROUND(stock + COALESCE((SELECT qty FROM order_items WHERE order_id=?1 AND product_id=products.id),0), 3)
-        WHERE id IN (SELECT product_id FROM order_items WHERE order_id=?1)`).bind(o.id).run();
-    }
-    await env.DB.prepare(`UPDATE orders SET status='cancelled', updated_at=?2 WHERE id=?1`).bind(o.id, now()).run();
+    const u = await env.DB.prepare(`UPDATE orders SET status='cancelled', updated_at=?2 WHERE id=?1 AND status='awaiting_payment'`).bind(o.id, now()).run();
+    if (!u.meta.changes) continue; // déjà annulée ou payée entre-temps
+    if (doRestock) await restock(env, o.id);
     await releaseVoucher(env, o.id);
   }
 }
