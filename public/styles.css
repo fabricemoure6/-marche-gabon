@@ -335,7 +335,10 @@ th{font-size:.78rem;text-transform:uppercase;letter-spacing:.04em;color:var(--in
 .shop .logo{background-size:cover;background-position:center}
 
 /* ---------- Barre d'outils (boutique) ---------- */
-.toolbar{display:flex;gap:var(--space-3);align-items:center;flex-wrap:wrap;margin:0 0 var(--space-4)}
+.toolbar{display:flex;gap:var(--space-3);align-items:center;flex-wrap:wrap;margin:0 0 var(--space-4);
+  position:sticky;top:var(--head-h,64px);z-index:15;background:var(--surface-100);padding:var(--space-2) 0;transition:box-shadow .2s}
+.toolbar.stuck{box-shadow:0 12px 14px -12px rgba(31,26,23,.35)}
+@media (max-width:600px){.toolbar.stuck select{display:none}}
 .toolbar .search{flex:1;min-width:220px;box-shadow:none;border:1.5px solid var(--line-strong);padding:2px 6px 2px 14px}
 .toolbar select{width:auto;min-width:180px;border-radius:var(--radius-pill)}
 .toolbar .chip{min-height:44px}
