@@ -203,7 +203,8 @@
 :root[data-theme="dark"] [data-look="gabon"] .section-head h2{background:linear-gradient(transparent 70%,#fcd11666 70%)}
 
 /* ===================== Vignettes du choix de design (« Ma boutique ») ===================== */
-.look-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:var(--space-3)}
+.look-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:var(--space-3)}
+@media (max-width:420px){.look-grid{gap:var(--space-2)}.look-opt{padding:4px}}
 .look-opt{position:relative;display:flex;flex-direction:column;gap:6px;margin:0;padding:6px;border-radius:var(--radius-m);cursor:pointer;font-weight:600}
 .look-opt input{position:absolute;opacity:0;pointer-events:none}
 .look-opt:hover{background:var(--surface-300)}
