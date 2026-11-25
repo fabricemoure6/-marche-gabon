@@ -6,7 +6,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600..800&family=Figtree:wght@400;500;600;700;800&display=swap" media="print" onload="this.media='all'"><noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600..800&family=Figtree:wght@400;500;600;700;800&display=swap"></noscript>
 <meta name="robots" content="noindex, nofollow">
-<link rel="stylesheet" href="/styles.css">
+<link rel="stylesheet" href="/styles.css"><link rel="stylesheet" href="/looks.css">
 <script>try{var t=localStorage.getItem("mg-theme");if(t==="dark"||t==="light")document.documentElement.dataset.theme=t}catch(e){}</script></head>
 <body><header id="top"></header>
 <main>
@@ -367,6 +367,18 @@
     };
   }
 
+  // Designs de la page boutique (même liste que SHOP_LOOKS côté serveur, styles dans looks.css)
+  const LOOKS = [['', 'Marché', 'Le design du site'], ['wax', 'Wax', 'Motif de pagne indigo et orange'], ['chic', 'Élégance', 'Noir et or, lignes fines'],
+    ['frais', 'Frais', 'Vert feuille, très arrondi'], ['lagune', 'Lagune', 'Bleu océan, net et moderne'], ['douceur', 'Douceur', 'Rose et lavande'],
+    ['gabon', 'Gabon', 'Vert, jaune, bleu du drapeau'], ['soleil', 'Soleil', 'Rayons de soleil, produits façon autocollant'], ['bonbon', 'Bonbon', 'Pois rose et menthe'],
+    ['tropical', 'Tropical', 'Turquoise, feuilles et corail'], ['pop', 'Pop', 'Style bande dessinée'], ['crepuscule', 'Crépuscule', 'Violet, rose et orange'],
+    ['fete', 'Fête', 'Confettis multicolores'], ['bogolan', 'Bogolan', 'Terre cuite et zigzags'], ['lagon', 'Lagon', 'Vagues turquoise et soleil'], ['agrumes', 'Agrumes', 'Orange et citron vert']];
+  const lookPicker = s => `<h3 style="margin:var(--space-5) 0 var(--space-2)">Design de ma boutique</h3>
+      <p class="muted" style="margin:0 0 var(--space-3)">Choisissez l'habillage que vos clients voient en entrant dans votre boutique : couleurs, motifs et style des produits. Le menu du marché, le panier et la disposition de la page ne changent pas. Si vous avez une photo de couverture, elle reste visible sous les couleurs du design.</p>
+      <div class="look-grid" role="radiogroup" aria-label="Design de ma boutique">${LOOKS.map(([k, n, hint]) => `<label class="look-opt" title="${MG.esc(hint)}"><input type="radio" name="look" value="${k}"${(s.look || '') === k ? ' checked' : ''}>
+        <span class="look-prev"${k ? ` data-look="${k}"` : ''}><span class="card shop-hero"><span class="look-av"></span><span class="look-tx"><b>${MG.esc(s.name)}</b><span><span class="tag">Produits</span> <span class="tag promo">Promo</span></span></span></span>
+        <span class="look-tiles"><span class="tile"></span><span class="tile"></span><span class="tile"></span></span></span><span class="look-name">${MG.esc(n)}</span></label>`).join('')}</div>
+      ${s.status === 'active' ? '<p style="margin:var(--space-3) 0 0"><a id="lookSee" target="_blank" rel="noopener" href="#">Voir ma boutique avec ce design ↗</a> <span class="muted" style="font-size:.85rem">(aperçu, pensez à enregistrer)</span></p>' : ''}`;
   async function shopTab() {
     const { shop: s, pending_account: pend } = await MG.api('/api/seller/shop'); shop = s;
     S('pane').innerHTML = `<form class="card" id="sf"><h3>Informations de la boutique</h3>
@@ -380,6 +392,7 @@
       <label>Photo de couverture (fond de la page de votre boutique)</label>
       ${s.cover_photo ? `<div id="cvBox"><img src="${MG.photo(s.cover_photo)}" alt="" style="width:100%;max-height:140px;object-fit:cover;border-radius:var(--radius-m);display:block"><label style="display:flex;gap:.4rem;align-items:center;margin:.4rem 0"><input type="checkbox" id="cvDel" style="width:auto"> Retirer la couverture</label></div>` : ''}
       <input id="cv" type="file" accept="image/*"><p class="muted" style="margin:.3rem 0 0;font-size:.85rem">Conseil : une photo large (paysage) de votre boutique ou de vos produits. Sans couverture, la page utilise une photo de vos produits.</p>
+      ${lookPicker(s)}
       <h3 style="margin:var(--space-5) 0 var(--space-2)">Où vos clients vous paient</h3>
       <p class="muted" style="margin:0 0 var(--space-3)">Au moment de payer, le client voit ce compte et y envoie l'argent de ses achats. Vous confirmez ensuite la réception dans « Commandes ». Les autres personnes ne voient jamais ces informations. <b>Pour la sécurité de vos clients, ce compte doit être validé par l'équipe du marché</b> avant d'être montré. Ensuite, tout changement doit aussi être accepté (le compte actuel reste actif d'ici là). Tant qu'il n'est pas validé, vos clients paient via le marché.</p>
       ${pend ? `<div class="notice">${s.payout_number ? 'Modification' : 'Compte'} en attente de validation par l'équipe du marché : ${MG.esc(pend.number || 'suppression du compte')}${pend.name ? ' · ' + MG.esc(pend.name) : ''}</div>` : ''}
@@ -393,6 +406,9 @@
       <p><button class="btn">Enregistrer</button></p></form>`;
     const dbox = document.createElement('div'); dbox.style.marginTop = 'var(--space-4)'; S('pane').appendChild(dbox);
     MG.docsCard(dbox, { title: 'Document administratif de la boutique', intro: 'L\'autorisation d\'ouverture de votre commerce délivrée par l\'administration, en photo ou en PDF.' }).catch(() => {});
+    const lookVal = () => (S('sf').querySelector('input[name=look]:checked') || {}).value || '';
+    const syncLook = () => { if (S('lookSee')) S('lookSee').href = '/boutique/' + encodeURIComponent(s.slug) + '?look=' + (lookVal() || 'marche'); };
+    S('sf').querySelectorAll('input[name=look]').forEach(r => { r.onchange = syncLook; }); syncLook();
     const syncPay = () => { const bank = S('pm').value === 'bank'; S('pbw').hidden = !bank; S('pcw').hidden = bank; S('pnl').textContent = bank ? 'Numéro de compte (IBAN ou RIB)' : 'Numéro où faire le dépôt'; };
     S('pm').onchange = syncPay; syncPay();
     let pos = null;
@@ -401,7 +417,7 @@
       e.preventDefault();
       try {
         const f = S('ph').files[0];
-        const body = { name: S('n').value, category: S('c').value, description: S('d').value, address: S('a').value, phone: S('p').value, whatsapp: S('w').value, payout_method: S('pm').value, payout_number: S('pn').value, payout_name: S('pnm').value, payout_code: S('pc').value, payout_bank: S('pb').value, lat: pos && pos.lat, lng: pos && pos.lng };
+        const body = { name: S('n').value, category: S('c').value, description: S('d').value, address: S('a').value, phone: S('p').value, whatsapp: S('w').value, payout_method: S('pm').value, payout_number: S('pn').value, payout_name: S('pnm').value, payout_code: S('pc').value, payout_bank: S('pb').value, look: lookVal(), lat: pos && pos.lat, lng: pos && pos.lng };
         if (f) body.photo_id = await MG.uploadPhoto(f);
         const cf = S('cv').files[0];
         if (cf) body.cover_photo = await MG.uploadPhoto(cf); else if (S('cvDel') && S('cvDel').checked) body.cover_photo = null;

@@ -122,6 +122,10 @@ export const CATEGORIES = [
   ['quincaillerie', 'Quincaillerie'], ['electronique', 'Électronique'], ['maison', 'Maison et déco'], ['autres', 'Autres']
 ];
 
+// Designs que le gestionnaire peut choisir pour l'intérieur de sa boutique (styles dans public/looks.css)
+export const SHOP_LOOKS = ['wax', 'chic', 'frais', 'lagune', 'douceur', 'gabon', 'soleil', 'bonbon', 'tropical', 'pop', 'crepuscule', 'fete', 'bogolan', 'lagon', 'agrumes'];
+export const lookOf = v => (SHOP_LOOKS.includes(v) ? v : null);
+
 export const ORDER_STATUS = {
   awaiting_payment: 'En attente de paiement', paid: 'Payée, en attente de la boutique', preparing: 'En préparation',
   ready: 'Prête, un livreur est recherché', delivering: 'En cours de livraison', delivered: 'Livrée', cancelled: 'Annulée'
@@ -225,7 +229,7 @@ const MIGRATIONS = {
   notifications: [['kind', 'TEXT']],
   products: [['unit', "TEXT NOT NULL DEFAULT 'piece'"], ['qty_step', 'REAL NOT NULL DEFAULT 1'], ['promo_price', 'INTEGER'], ['promo_until', 'INTEGER'], ['promo_start', 'INTEGER'], ['stock_updated_at', 'INTEGER'], ['photos', 'TEXT']],
   shops: [['loyalty_enabled', 'INTEGER NOT NULL DEFAULT 0'], ['loyalty_every', 'INTEGER'], ['loyalty_kind', 'TEXT'], ['loyalty_value', 'INTEGER'],
-    ['loyalty_min', 'INTEGER'], ['loyalty_days', 'INTEGER'], ['cover_photo', 'TEXT'],
+    ['loyalty_min', 'INTEGER'], ['loyalty_days', 'INTEGER'], ['cover_photo', 'TEXT'], ['look', 'TEXT'],
     ['payout_method', 'TEXT'], ['payout_number', 'TEXT'], ['payout_name', 'TEXT'], ['payout_code', 'TEXT'], ['payout_bank', 'TEXT']],
   couriers: [['pay_method', 'TEXT'], ['pay_number', 'TEXT'], ['pay_name', 'TEXT'], ['pay_code', 'TEXT'], ['pay_bank', 'TEXT']],
   order_items: [['unit', "TEXT NOT NULL DEFAULT 'piece'"]],

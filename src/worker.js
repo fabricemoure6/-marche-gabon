@@ -3,7 +3,7 @@ import {
   json, bad, rand, uid, now, sha256, safeEqual, hashPassword, createSession, clearCookie, currentUser, destroySession,
   CATEGORIES, ORDER_STATUS, ensureSchema, loadSettings, saveSettings, toBase64, fromBase64, sniffImage, sniffDocument, DOC_KINDS,
   withSecurityHeaders, recentCount, recordEvent, cached, clearCache, PUBLIC_TTL,
-  validCoord, distanceKm, slugify, EFFECTIVE_PRICE, promoActive, publicProduct, voucherDiscount, loyaltyProgram, LOW_STOCK, photoList, SOLD, EXPENSE_CATS, period, UNITS, r3, unitOf, stepOf, fmtQty, lineTotal, cleanAccount, METHOD_LABEL } from './lib.js';
+  validCoord, distanceKm, slugify, EFFECTIVE_PRICE, promoActive, publicProduct, voucherDiscount, loyaltyProgram, LOW_STOCK, photoList, SOLD, EXPENSE_CATS, period, UNITS, r3, unitOf, stepOf, fmtQty, lineTotal, cleanAccount, METHOD_LABEL, lookOf } from './lib.js';
 import { backupStep, backupStatus, backupStream, backupWatch } from './backup.js';
 import { notify, confirmCheckout, rejectCheckout, cancelOrders, releaseVoucher, restock, createVoucher, awardLoyalty, startOnlinePayment, singpayVerify, singpayOn, singpayCall, sp } from './pay.js';
 import { botReply, searchProducts } from './bot.js';
@@ -346,7 +346,7 @@ async function route(request, env) {
         return json(await searchProducts(env, { cat, q, limit }));
       }
       if (method === 'GET' && (m = p.match(/^\/api\/shops\/([a-z0-9-]{1,60})$/))) {
-        const shopRow = await cached('shop:' + m[1], PUBLIC_TTL, () => env.DB.prepare(`SELECT id,name,slug,category,description,address,photo_id,cover_photo,phone,loyalty_enabled,loyalty_every,loyalty_kind,loyalty_value,loyalty_min,loyalty_days
+        const shopRow = await cached('shop:' + m[1], PUBLIC_TTL, () => env.DB.prepare(`SELECT id,name,slug,category,description,address,photo_id,cover_photo,look,phone,loyalty_enabled,loyalty_every,loyalty_kind,loyalty_value,loyalty_min,loyalty_days
           FROM shops WHERE slug=?1 AND status='active'`).bind(m[1]).first());
         if (!shopRow) return bad('Boutique introuvable', 404);
         const s = { ...shopRow }; // copie : l'original reste intact dans la mémoire courte
@@ -776,6 +776,9 @@ async function route(request, env) {
             cover = null;
             if (b.cover_photo && await env.DB.prepare('SELECT 1 FROM photos WHERE id=?1 AND owner_id=?2').bind(String(b.cover_photo), user.id).first()) cover = String(b.cover_photo);
           }
+          // Design de la page boutique : seulement un nom de la liste, sinon on garde l'actuel ('' revient au design du marché)
+          const look = b.look === undefined ? shop.look || null : b.look === '' || b.look === null ? null : lookOf(b.look);
+          if (b.look && !look) return bad('Design inconnu');
           // Compte où les clients paient la boutique : toute saisie ou modification est soumise à l'administrateur
           let accState = null;
           if (b.payout_number !== undefined) {
@@ -783,9 +786,9 @@ async function route(request, env) {
             if (acc.error) return bad(acc.error);
             accState = await requestAccount(env, user, 'shop', shop.id, shop.name, { method: shop.payout_method, number: shop.payout_number, name: shop.payout_name, code: shop.payout_code, bank: shop.payout_bank }, acc);
           }
-          await env.DB.prepare('UPDATE shops SET name=?2,category=?3,description=?4,address=?5,phone=?6,whatsapp=?7,lat=?8,lng=?9,photo_id=?10,cover_photo=?11 WHERE id=?1')
+          await env.DB.prepare('UPDATE shops SET name=?2,category=?3,description=?4,address=?5,phone=?6,whatsapp=?7,lat=?8,lng=?9,photo_id=?10,cover_photo=?11,look=?12 WHERE id=?1')
             .bind(shop.id, name, cat, cleanText(b.description, 600), cleanText(b.address, 200), cleanText(b.phone, 30), cleanText(b.whatsapp, 30),
-              pos ? lat : shop.lat, pos ? lng : shop.lng, photo, cover).run();
+              pos ? lat : shop.lat, pos ? lng : shop.lng, photo, cover, look).run();
           return json({ ok: true, account: accState });
         }
         if (method === 'GET' && p === '/api/seller/products') {
