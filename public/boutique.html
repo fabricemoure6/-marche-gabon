@@ -16,6 +16,7 @@
     <div class="rail" id="promoRail"></div>
   </section>
   <div class="section-head"><h2 id="prodTitle">Les produits</h2><span class="muted" id="count"></span></div>
+  <div id="toolMark" aria-hidden="true"></div>
   <div class="toolbar" id="toolbar" hidden>
     <label class="search" style="margin:0"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
       <input id="q" type="search" placeholder="Chercher dans la boutique…" aria-label="Chercher dans la boutique"></label>
@@ -91,8 +92,21 @@
     $('#empty').hidden = list.length > 0;
     if (!list.length && products.length) { $('#emptyTitle').textContent = 'Aucun produit ne correspond'; $('#emptyText').textContent = 'Essayez un autre mot ou retirez le filtre.'; }
   }
-  $('#q').oninput = draw; $('#sort').onchange = draw;
-  $('#onlyPromo').onclick = () => { onlyPromo = !onlyPromo; $('#onlyPromo').classList.toggle('on', onlyPromo); $('#onlyPromo').setAttribute('aria-pressed', onlyPromo); draw(); };
+  // Barre de recherche collée sous l'en-tête quand on descend dans la liste : toujours à portée de main
+  const bar = $('#toolbar'), mark = $('#toolMark'), head = document.querySelector('header#top');
+  const headH = () => head ? head.offsetHeight : 0;
+  const setHead = () => document.documentElement.style.setProperty('--head-h', headH() + 'px');
+  let tick = false;
+  const stick = () => { tick = false; bar.classList.toggle('stuck', mark.getBoundingClientRect().top < headH()); };
+  if (!bar.hidden) {
+    setHead(); stick();
+    addEventListener('resize', () => { setHead(); stick(); });
+    addEventListener('scroll', () => { if (!tick) { tick = true; requestAnimationFrame(stick); } }, { passive: true });
+  }
+  // Quand la barre est collée, on remonte au début des résultats pour voir ce qui correspond
+  const redraw = () => { draw(); if (bar.classList.contains('stuck')) scrollTo(0, mark.getBoundingClientRect().top + scrollY - headH()); };
+  $('#q').oninput = redraw; $('#sort').onchange = redraw;
+  $('#onlyPromo').onclick = () => { onlyPromo = !onlyPromo; $('#onlyPromo').classList.toggle('on', onlyPromo); $('#onlyPromo').setAttribute('aria-pressed', onlyPromo); redraw(); };
   draw();
 })();
 </script></body></html>
