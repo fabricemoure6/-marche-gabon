@@ -5,7 +5,7 @@
 <link rel="apple-touch-icon" href="/img/icon-180.png"><link rel="manifest" href="/manifest.webmanifest">
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600..800&family=Figtree:wght@400;500;600;700;800&display=swap" media="print" onload="this.media='all'"><noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600..800&family=Figtree:wght@400;500;600;700;800&display=swap"></noscript>
-<link rel="stylesheet" href="/styles.css">
+<link rel="stylesheet" href="/styles.css"><link rel="stylesheet" href="/looks.css">
 <script>try{var t=localStorage.getItem("mg-theme");if(t==="dark"||t==="light")document.documentElement.dataset.theme=t}catch(e){}</script></head>
 <body><header id="top"></header>
 <main>
@@ -41,6 +41,10 @@
   }
   catch { $('#head').innerHTML = '<div class="card empty-state"><h2>Boutique introuvable</h2><p class="muted">Elle a peut-être changé d\'adresse ou n\'est plus en ligne.</p><a class="btn" href="/">Retour au marché</a></div>'; $('#prodTitle').parentElement.hidden = true; return; }
   const { shop, products } = data;
+  // Design choisi par la boutique (déjà posé par le serveur) ; ?look=… sert à l'aperçu depuis « Ma boutique »
+  const look = MG.param('look') || shop.look, main = document.querySelector('main');
+  if (look && /^(wax|chic|frais|lagune|douceur|gabon|soleil|bonbon|tropical|pop|crepuscule|fete|bogolan|lagon|agrumes)$/.test(look)) main.dataset.look = look;
+  else if (MG.param('look') || !shop.look) delete main.dataset.look;
   if (!document.title.includes(shop.name)) document.title = shop.name + ' · ' + MG.config.site_name; // garde le titre complet préparé par le serveur
   const promos = products.filter(p => p.promo_pct && p.stock > 0);
   // Photo de couverture : celle choisie par la boutique, sinon une photo de produit, sinon un motif coloré
