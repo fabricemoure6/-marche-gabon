@@ -737,3 +737,17 @@ label.consent input{width:20px;height:20px;min-height:0;flex:none;margin-top:2px
 .gr-tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:var(--space-3)}
 .gr-tile{background:var(--surface-100);border-radius:var(--radius-m);padding:var(--space-3) var(--space-4);display:flex;flex-direction:column;gap:2px}
 .gr-tile b{font:800 1.35rem var(--font-display)}.gr-tile span{font-weight:600;font-size:.9rem}.gr-tile small{font-size:.78rem}
+
+/* ---------- Abonnements ---------- */
+.tag.pro{background:var(--nuit);color:var(--soleil)}
+.notice.danger{background:var(--danger-tint);color:var(--ink)}
+.notice a[data-sub-go]{font-weight:700;margin-left:.3rem}
+.sub-plans{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:var(--space-3);margin-bottom:var(--space-4)}
+.sub-plan{position:relative;display:flex;flex-direction:column;gap:4px;margin:0;padding:var(--space-4) var(--space-5);background:var(--surface-200);border:2px solid var(--line);border-radius:var(--radius-l);cursor:pointer;font-weight:400}
+.sub-plan input{position:absolute;opacity:0;pointer-events:none}
+.sub-plan:has(input:checked){border-color:var(--papaye);box-shadow:0 0 0 3px var(--papaye-tint)}
+.sub-plan:has(input:focus-visible){outline:3px solid var(--focus)}
+.sp-name{font:800 1.2rem var(--font-display)}
+.sp-price{font:800 1.6rem var(--font-display);color:var(--papaye-text)}.sp-price small{font:600 .9rem var(--font-sans);color:var(--ink-muted)}
+.sub-plan ul{margin:.4rem 0 0;padding-left:1.1rem;color:var(--ink-muted);font-size:.92rem}
+.sub-howto{background:var(--surface-100);border-radius:var(--radius-m);padding:0 var(--space-4);margin-top:var(--space-3)}

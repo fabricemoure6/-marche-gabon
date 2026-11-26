@@ -44,7 +44,7 @@ function shopCard(s) {
   return `<a class="tile shop${s.promos ? ' has-promo' : ''}" href="/boutique/${encodeURIComponent(s.slug)}">
     <div class="cover" style="background-image:url('${cover}')">${s.promos ? `<span class="ribbon">Promo${s.best_pct ? '<span class="rl"> jusqu\'à</span> −' + s.best_pct + ' %' : ''}</span>` : ''}</div>
     <div class="body"><span class="logo"${s.photo_id ? ` style="background-image:url('${photo(s.photo_id)}')"` : ''}>${s.photo_id ? '' : esc(s.name.trim().charAt(0).toUpperCase())}</span><h3>${esc(s.name)}</h3>
-    ${s.loyalty_enabled ? '<span class="tag fid">Carte fidélité</span>' : ''}<p class="muted" style="margin:0;font-size:.9rem">${s.products ? `${s.products} produit${s.products > 1 ? 's' : ''}` : 'Vitrine en préparation'}${s.promos ? ` · <b style="color:var(--papaye-text)">${s.promos} en promo</b>` : ''}${s.address ? ' · ' + esc(s.address) : ''}</p></div></a>`;
+    ${s.pro ? '<span class="tag pro">★ Pro</span> ' : ''}${s.loyalty_enabled ? '<span class="tag fid">Carte fidélité</span>' : ''}<p class="muted" style="margin:0;font-size:.9rem">${s.products ? `${s.products} produit${s.products > 1 ? 's' : ''}` : 'Vitrine en préparation'}${s.promos ? ` · <b style="color:var(--papaye-text)">${s.promos} en promo</b>` : ''}${s.address ? ' · ' + esc(s.address) : ''}</p></div></a>`;
 }
 
 async function activeShops(env) {
@@ -57,8 +57,8 @@ async function activeShopsDb(env) {
             (SELECT COUNT(*) FROM products p WHERE p.shop_id=s.id AND p.active=1 AND p.stock>0 AND ${EFFECTIVE_PRICE} < p.price) AS promos,
             (SELECT MAX(ROUND(100 - 100.0 * p.promo_price / p.price)) FROM products p WHERE p.shop_id=s.id AND p.active=1 AND p.stock>0 AND ${EFFECTIVE_PRICE} < p.price) AS best_pct,
             COALESCE(s.cover_photo, (SELECT p.photo_id FROM products p WHERE p.shop_id=s.id AND p.active=1 AND p.photo_id IS NOT NULL ORDER BY p.created_at DESC LIMIT 1)) AS cover_id,
-            (SELECT MAX(p.created_at) FROM products p WHERE p.shop_id=s.id) AS last_product
-     FROM shops s WHERE s.status='active' ORDER BY promos > 0 DESC, s.name`).all();
+            (SELECT MAX(p.created_at) FROM products p WHERE p.shop_id=s.id) AS last_product, s.pro
+     FROM shops s WHERE s.status='active' ORDER BY s.pro DESC, promos > 0 DESC, s.name`).all();
   return results;
 }
 

@@ -11,11 +11,11 @@
 <body><header id="top"></header>
 <main>
   <div id="state"></div>
-  <div class="tabs" id="tabs"><button data-t="orders" class="on">Commandes</button><button data-t="products">Produits</button><button data-t="loyalty">Fidélité</button><button data-t="compta">Comptabilité</button><button data-t="shop">Ma boutique</button><button data-t="kit">Partager</button></div>
+  <div class="tabs" id="tabs"><button data-t="orders" class="on">Commandes</button><button data-t="products">Produits</button><button data-t="loyalty">Fidélité</button><button data-t="compta">Comptabilité</button><button data-t="shop">Ma boutique</button><button data-t="kit">Partager</button><button data-t="sub">Abonnement</button></div>
   <div id="pane"></div>
   <div id="detail"></div>
 </main>
-<script src="/common.js"></script><script src="/vendor/qrcode.js"></script><script src="/kit.js"></script>
+<script src="/common.js"></script><script src="/vendor/qrcode.js"></script><script src="/kit.js"></script><script src="/abonnement.js"></script>
 <script>
 (async () => {
   if (!(await MG.require(['seller']))) return;
@@ -23,15 +23,20 @@
   const S = id => MG.$('#' + id);
   async function init() {
     const d = await MG.api('/api/seller/shop'); shop = d.shop;
-    S('state').innerHTML = shop.status === 'active' ? '' : `<div class="notice">Votre boutique est <b>${shop.status === 'pending' ? 'en attente de validation' : 'suspendue'}</b>. ${shop.status === 'pending' ? 'Complétez-la : elle sera visible des clients dès sa validation.' : 'Contactez l\'administrateur.'}</div>`;
+    const sub = await MG.api('/api/sub').catch(() => null);
+    S('state').innerHTML = shop.status === 'unpaid' ? MG.subBanner(sub, '#abonnement') || '<div class="notice danger">Votre boutique est masquée aux clients : abonnement à régler. <a href="#abonnement" data-sub-go>Mon abonnement</a></div>'
+      : shop.status === 'active' ? MG.subBanner(sub, '#abonnement') : `<div class="notice">Votre boutique est <b>${shop.status === 'pending' ? 'en attente de validation' : 'suspendue'}</b>. ${shop.status === 'pending' ? 'Complétez-la : elle sera visible des clients dès sa validation.' : 'Contactez l\'administrateur.'}</div>`;
+    S('state').onclick = e => { if (e.target.closest('[data-sub-go]')) { e.preventDefault(); openTab('sub'); } };
     show();
   }
   S('tabs').onclick = e => { const b = e.target.closest('[data-t]'); if (!b) return; tab = b.dataset.t; [...S('tabs').children].forEach(x => x.classList.toggle('on', x === b)); show(); };
   if (location.hash === '#compta') { tab = 'compta'; [...S('tabs').children].forEach(x => x.classList.toggle('on', x.dataset.t === 'compta')); }
   if (location.hash === '#boutique') { tab = 'shop'; [...S('tabs').children].forEach(x => x.classList.toggle('on', x.dataset.t === 'shop')); }
+  const openTab = t => { tab = t; [...S('tabs').children].forEach(x => x.classList.toggle('on', x.dataset.t === t)); show(); };
+  if (location.hash === '#abonnement') { tab = 'sub'; [...S('tabs').children].forEach(x => x.classList.toggle('on', x.dataset.t === 'sub')); }
   if (location.hash === '#partager') { tab = 'kit'; [...S('tabs').children].forEach(x => x.classList.toggle('on', x.dataset.t === 'kit')); }
   if (location.hash === '#produits') { tab = 'products'; [...S('tabs').children].forEach(x => x.classList.toggle('on', x.dataset.t === 'products')); }
-  function show() { clearInterval(timer); S('detail').innerHTML = ''; ({ orders, products, loyalty, compta, shop: shopTab, kit })[tab](); }
+  function show() { clearInterval(timer); S('detail').innerHTML = ''; ({ orders, products, loyalty, compta, shop: shopTab, kit, sub: () => MG.subPane(S('pane')) })[tab](); }
 
   async function orders() {
     async function draw() {
