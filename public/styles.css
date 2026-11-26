@@ -857,3 +857,7 @@ main[data-template="agence"] #products .tile.service .pbody{flex:1}
 .site-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:var(--space-2) var(--space-3)}
 .site-grid.nums{grid-template-columns:repeat(auto-fit,minmax(260px,1fr))}
 @media (max-width:720px){.tpl-hero.agence::before{background:linear-gradient(180deg,rgba(17,14,12,.35) 0%,rgba(17,14,12,.92) 60%)}}
+
+/* Prestation ouverte depuis un lien partagé */
+.tile.flash{animation:mg-flash 1.6s ease 2;outline:3px solid var(--papaye);outline-offset:3px}
+@keyframes mg-flash{50%{outline-color:transparent}}

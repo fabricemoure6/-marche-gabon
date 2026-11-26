@@ -142,6 +142,12 @@
     $('#fid').innerHTML = links.length > 1 ? `<div class="svc-nav" role="navigation" aria-label="Sur cette page">${links.join('')}</div>` : '';
     if (tpl !== 'classique') main.dataset.template = tpl; else delete main.dataset.template;
     main.dataset.ready = '1';
+    // Lien partagé (statut WhatsApp, QR code) : on montre directement la prestation ou le modèle, sans forcer la connexion
+    const prest = MG.param('prest'), modele = MG.param('modele');
+    if (prest) { const card = (document.querySelector(`[data-svc="${CSS.escape(prest)}"]`) || {}).closest ? document.querySelector(`[data-svc="${CSS.escape(prest)}"]`).closest('.tile') : null;
+      if (card) { setTimeout(() => card.scrollIntoView({ behavior: 'smooth', block: 'center' }), 300); card.classList.add('flash'); } }
+    if (modele) { const it = (items.modeles || []).find(x => x.id === modele);
+      if (it) MG.itemSheet(it, { service: (services.find(x => x.id === it.service_id) || {}).name || '', want: m => ask(services.find(x => x.id === m.service_id), m) }); }
   }
   function ask(sv, model) {
     if (!sv) return;
