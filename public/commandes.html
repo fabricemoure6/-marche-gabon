@@ -13,6 +13,7 @@
   <h1>Mes commandes</h1>
   <div id="msg"></div>
   <div id="list"></div>
+  <div id="demandes"></div>
   <div id="detail"></div>
 </main>
 <script src="/common.js"></script>
@@ -112,6 +113,29 @@
   }
 
   await list();
+  // ----- Mes demandes de services (devis, réservations) -----
+  const RQ_TAG = { new: 'pending', quoted: 'preparing', accepted: 'active', refused: 'cancelled', declined: 'cancelled', cancelled: 'cancelled', done: 'delivered' };
+  async function requests() {
+    const box = MG.$('#demandes'), rq = await MG.api('/api/my/requests');
+    if (!rq.length) { box.innerHTML = ''; return; }
+    const d = s => (s ? s.split('-').reverse().join('/') : '—');
+    box.innerHTML = `<h2 style="margin-top:var(--space-6)">Mes demandes de services</h2>` + rq.map(r => `<div class="card"><div class="split"><div><span class="tag ${RQ_TAG[r.status] || ''}">${MG.esc(r.status_label)}</span> <b>${MG.esc(r.service)}</b><br>
+      <span class="muted"><a href="/boutique/${encodeURIComponent(r.shop.slug)}">${MG.esc(r.shop.name)}</a> · le ${d(r.wanted_date)} · ${MG.esc(r.place)} · réf. ${MG.esc(r.ref)}</span></div>
+      ${r.quote_amount && r.status !== 'refused' ? `<div style="text-align:right"><span class="muted">Devis</span><br><b style="font-size:1.3rem">${MG.fcfa(r.quote_amount)}</b></div>` : ''}</div>
+      ${r.quote_note ? `<p class="${r.status === 'refused' ? 'muted' : 'notice'}" style="margin:.7rem 0 0">${r.status === 'refused' ? 'Motif : ' : 'Ce que comprend le devis : '}${MG.esc(r.quote_note)}</p>` : ''}
+      ${r.status === 'new' ? '<p class="muted" style="margin:.6rem 0 0">En attente de la réponse du prestataire.</p>' : ''}
+      ${r.shop.phone ? `<p style="margin:.6rem 0 0">Contact du prestataire : <a href="tel:${MG.esc(r.shop.phone)}">${MG.esc(r.shop.phone)}</a>${r.shop.whatsapp || r.shop.phone ? ` · <a target="_blank" rel="noopener" href="${MG.waLink(r.shop.whatsapp || r.shop.phone, 'Bonjour, au sujet de ma réservation ' + r.ref)}">WhatsApp</a>` : ''}</p>` : ''}
+      <p class="row" style="margin-top:.7rem">${r.status === 'quoted' ? `<button class="btn small green" data-rq="accept" data-r="${r.ref}">Accepter le devis</button><button class="btn small alt" data-rq="decline" data-r="${r.ref}">Refuser</button>` : ''}
+      ${['new', 'quoted', 'accepted'].includes(r.status) ? `<button class="btn small alt" data-rq="cancel" data-r="${r.ref}">Annuler la demande</button>` : ''}</p></div>`).join('');
+    box.onclick = async e => {
+      const b = e.target.closest('[data-rq]'); if (!b) return;
+      const q = { accept: 'Accepter ce devis ? Le prestataire est prévenu et ses coordonnées s\'affichent pour organiser la prestation.', decline: 'Refuser ce devis ?', cancel: 'Annuler cette demande ?' }[b.dataset.rq];
+      if (!confirm(q)) return;
+      try { await MG.api('/api/my/requests/' + b.dataset.r + '/' + b.dataset.rq, { method: 'POST', body: {} }); MG.toast(b.dataset.rq === 'accept' ? 'Devis accepté : contactez le prestataire' : 'C\'est noté'); requests(); } catch (er) { MG.fail(er); }
+    };
+  }
+  await requests().catch(() => {});
+  if (location.hash === '#demandes' && MG.$('#demandes').innerHTML) MG.$('#demandes').scrollIntoView({ behavior: 'smooth' });
   const want = MG.param('ref') && MG.param('ref').startsWith('CMD-') ? MG.param('ref') : null;
   if (want) open(want);
 })();

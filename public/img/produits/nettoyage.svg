@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 300" width="400" height="300"><rect width="400" height="300" fill="#E3FAFC"/><circle cx="320" cy="72" r="60" fill="#C5F6FA"/><ellipse cx="200" cy="268" rx="150" ry="12" fill="#B4E4EA"/>
+<path d="M120 150 h120 l-14 112 h-92 z" fill="#0C8599" stroke="#1F1A17" stroke-width="5" stroke-linejoin="round"/>
+<path d="M126 150 q54-70 108 0" fill="none" stroke="#1F1A17" stroke-width="5"/>
+<g fill="#fff" stroke="#1F1A17" stroke-width="3"><circle cx="150" cy="140" r="16"/><circle cx="178" cy="128" r="20"/><circle cx="210" cy="140" r="15"/><circle cx="196" cy="112" r="11"/></g>
+<path d="M300 40 l-30 180" stroke="#8A5A00" stroke-width="9" stroke-linecap="round"/>
+<path d="M248 214 h52 l14 50 h-80 z" fill="#FFC53D" stroke="#1F1A17" stroke-width="5" stroke-linejoin="round"/>
+<g stroke="#C98A00" stroke-width="3"><path d="M250 236 l-4 26 M264 236 l-2 26 M278 236 v26 M292 236 l2 26 M306 236 l4 26"/></g>
+<g fill="#FFC53D"><path d="M80 90 l6 14 l14 6 l-14 6 l-6 14 l-6-14 l-14-6 l14-6z"/><path d="M340 160 l4 10 l10 4 l-10 4 l-4 10 l-4-10 l-10-4 l10-4z"/></g></svg>

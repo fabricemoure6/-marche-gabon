@@ -7,7 +7,14 @@
   MG.date = iso => { try { return new Date(iso).toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' }); } catch { return ''; } };
   MG.$ = (s, r) => (r || document).querySelector(s);
   MG.param = k => new URLSearchParams(location.search).get(k);
-  MG.catName = id => ((MG.config.categories.find(c => c[0] === id) || [])[1]) || id;
+  MG.catName = id => ((MG.config.categories.concat(MG.config.service_categories || []).find(c => c[0] === id) || [])[1]) || id;
+  MG.isServiceCat = id => (MG.config.service_categories || []).some(c => c[0] === id);
+  // Prestation (univers Services) : même balisage que serviceCard côté serveur
+  MG.servicePrice = sv => sv.price_type === 'devis' ? '<span class="price">Sur devis</span>'
+    : `<span class="price">${MG.fcfa(sv.price)}</span>${sv.price_type === 'heure' ? '<small class="per"> / heure</small>' : sv.price_type === 'jour' ? '<small class="per"> / jour</small>' : ''}`;
+  MG.serviceCard = (sv, opts = {}) => `<article class="tile product service"><div class="pimg"><img src="${sv.photo_id ? MG.photo(sv.photo_id) : MG.illu(opts.category)}" alt="${MG.esc(sv.name)}" width="400" height="300" loading="lazy"></div>
+    <div class="pbody">${opts.shop ? `<a class="pshop" href="/boutique/${encodeURIComponent(opts.shop.slug)}">${MG.esc(opts.shop.name)}</a>` : ''}<h3 class="pname">${MG.esc(sv.name)}</h3>${sv.description ? `<p class="pdesc">${MG.esc(sv.description)}</p>` : ''}
+    <div class="pfoot"><div>${MG.servicePrice(sv)}</div><button class="btn small" data-svc="${MG.esc(sv.id)}">${sv.price_type === 'devis' ? 'Demander un devis' : 'Réserver'}</button></div></div></article>`;
   MG.waLink = (digits, text) => digits ? 'https://wa.me/' + encodeURIComponent(String(digits).replace(/\D/g, '')) + (text ? '?text=' + encodeURIComponent(text) : '') : '';
 
   MG.api = async function (path, opts = {}) {
@@ -163,7 +170,8 @@
   MG.icon = (n, s = 20) => `<svg class="ico" viewBox="0 0 24 24" width="${s}" height="${s}" aria-hidden="true">${ICONS[n] || ''}</svg>`;
 
   // Illustration de remplacement quand un produit ou une boutique n'a pas de photo
-  const ILLU = { habits: 'pagne-wax', parfumerie: 'parfum', alimentation: 'bananes-plantain', quincaillerie: 'sac-riz', electronique: 'smartphone', maison: 'marmite', autres: 'panier-tresse' };
+  const ILLU = { habits: 'pagne-wax', parfumerie: 'parfum', alimentation: 'bananes-plantain', quincaillerie: 'sac-riz', electronique: 'smartphone', maison: 'marmite', autres: 'panier-tresse',
+    location_voiture: 'voiture', evenementiel: 'fete', nettoyage: 'nettoyage', reparation: 'outils', btp: 'chantier', architecture: 'plan', beaute_domicile: 'coiffure', cours: 'livres', autres_services: 'services' };
   MG.illu = cat => '/img/produits/' + (ILLU[cat] || 'panier-tresse') + '.svg';
   MG.img = (photoId, cat) => (photoId ? MG.photo(photoId) : MG.illu(cat));
 
@@ -258,7 +266,7 @@
     return `<${tag} class="tile shop${s.promos ? ' has-promo' : ''}"${opts.demo ? '' : ` href="/boutique/${encodeURIComponent(s.slug)}"`}>
       <div class="cover" style="background-image:url('${cover}')">${s.promos ? `<span class="ribbon">Promo${s.best_pct ? '<span class="rl"> jusqu\'à</span> −' + s.best_pct + ' %' : ''}</span>` : ''}</div>
       <div class="body"><span class="logo" ${logo}>${s.photo_id ? '' : MG.esc(s.name.trim().charAt(0).toUpperCase())}</span><h3>${MG.esc(s.name)}</h3>
-       ${s.pro ? '<span class="tag pro">★ Pro</span> ' : ''}${s.loyalty_enabled ? '<span class="tag fid">Carte fidélité</span>' : ''}<p class="muted" style="margin:0;font-size:.9rem">${s.products ? `${s.products} produit${s.products > 1 ? 's' : ''}` : 'Vitrine en préparation'}${s.promos ? ` · <b style="color:var(--papaye-text)">${s.promos} en promo</b>` : ''}${s.address ? ' · ' + MG.esc(s.address) : ''}</p></div></${tag}>`;
+       ${s.pro ? '<span class="tag pro">★ Pro</span> ' : ''}${s.loyalty_enabled ? '<span class="tag fid">Carte fidélité</span>' : ''}<p class="muted" style="margin:0;font-size:.9rem">${MG.isServiceCat(s.category) ? (s.services ? `${s.services} prestation${s.services > 1 ? 's' : ''}` : 'Prestations en préparation') : s.products ? `${s.products} produit${s.products > 1 ? 's' : ''}` : 'Vitrine en préparation'}${s.promos ? ` · <b style="color:var(--papaye-text)">${s.promos} en promo</b>` : ''}${s.address ? ' · ' + MG.esc(s.address) : ''}</p></div></${tag}>`;
   };
 
   // ---------- Fidélité ----------

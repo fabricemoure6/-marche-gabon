@@ -1,13 +1,24 @@
 // Référencement : pages rendues côté serveur (contenu, titres, aperçus de partage, données structurées),
 // sitemap.xml et robots.txt. Le JavaScript du navigateur reprend ensuite la main sur les mêmes éléments.
+import { isServiceCat, ALL_CATEGORIES, SERVICE_CATEGORIES } from './lib.js';
+import { servicesOfShop, PRICE_TYPES } from './services.js';
 import { CATEGORIES, loadSettings, publicProduct, EFFECTIVE_PRICE, LOW_STOCK, UNITS, fmtQty, cached, PUBLIC_TTL, lookOf } from './lib.js';
 
-const ILLU = { habits: 'pagne-wax', parfumerie: 'parfum', alimentation: 'bananes-plantain', quincaillerie: 'sac-riz', electronique: 'smartphone', maison: 'marmite', autres: 'panier-tresse' };
+const ILLU = { habits: 'pagne-wax', parfumerie: 'parfum', alimentation: 'bananes-plantain', quincaillerie: 'sac-riz', electronique: 'smartphone', maison: 'marmite', autres: 'panier-tresse',
+  location_voiture: 'voiture', evenementiel: 'fete', nettoyage: 'nettoyage', reparation: 'outils', btp: 'chantier', architecture: 'plan', beaute_domicile: 'coiffure', cours: 'livres', autres_services: 'services' };
 const illu = cat => '/img/produits/' + (ILLU[cat] || 'panier-tresse') + '.svg';
 const photo = id => (id ? '/api/photos/' + id : '');
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const fcfa = n => new Intl.NumberFormat('fr-FR').format(Math.round(Number(n) || 0)).replace(/[\u00a0\u202f ]/g, '\u202f') + '\u00a0FCFA';
-const catName = id => (CATEGORIES.find(c => c[0] === id) || [])[1] || id;
+const catName = id => (ALL_CATEGORIES.find(c => c[0] === id) || [])[1] || id;
+// Même balisage que MG.serviceCard côté navigateur
+const priceHtml = sv => sv.price_type === 'devis' ? '<span class="price">Sur devis</span>'
+  : `<span class="price">${fcfa(sv.price)}</span>${sv.price_type === 'heure' ? '<small class="per"> / heure</small>' : sv.price_type === 'jour' ? '<small class="per"> / jour</small>' : ''}`;
+function serviceCard(sv, cat) {
+  return `<article class="tile product service"><div class="pimg"><img src="${sv.photo_id ? photo(sv.photo_id) : illu(cat)}" alt="${esc(sv.name)}" width="400" height="300" loading="lazy"></div>
+    <div class="pbody"><h3 class="pname">${esc(sv.name)}</h3>${sv.description ? `<p class="pdesc">${esc(sv.description)}</p>` : ''}
+    <div class="pfoot"><div>${priceHtml(sv)}</div><button class="btn small" data-svc="${esc(sv.id)}">${sv.price_type === 'devis' ? 'Demander un devis' : 'Réserver'}</button></div></div></article>`;
+}
 const cut = (s, n) => { s = String(s || '').replace(/\s+/g, ' ').trim(); return s.length <= n ? s : s.slice(0, n - 1).replace(/\s+\S*$/, '') + '…'; };
 const jsonLd = o => `<script type="application/ld+json">${JSON.stringify(o).replace(/</g, '\\u003c')}</script>`;
 const ICO = {
@@ -44,7 +55,7 @@ function shopCard(s) {
   return `<a class="tile shop${s.promos ? ' has-promo' : ''}" href="/boutique/${encodeURIComponent(s.slug)}">
     <div class="cover" style="background-image:url('${cover}')">${s.promos ? `<span class="ribbon">Promo${s.best_pct ? '<span class="rl"> jusqu\'à</span> −' + s.best_pct + ' %' : ''}</span>` : ''}</div>
     <div class="body"><span class="logo"${s.photo_id ? ` style="background-image:url('${photo(s.photo_id)}')"` : ''}>${s.photo_id ? '' : esc(s.name.trim().charAt(0).toUpperCase())}</span><h3>${esc(s.name)}</h3>
-    ${s.pro ? '<span class="tag pro">★ Pro</span> ' : ''}${s.loyalty_enabled ? '<span class="tag fid">Carte fidélité</span>' : ''}<p class="muted" style="margin:0;font-size:.9rem">${s.products ? `${s.products} produit${s.products > 1 ? 's' : ''}` : 'Vitrine en préparation'}${s.promos ? ` · <b style="color:var(--papaye-text)">${s.promos} en promo</b>` : ''}${s.address ? ' · ' + esc(s.address) : ''}</p></div></a>`;
+    ${s.pro ? '<span class="tag pro">★ Pro</span> ' : ''}${s.loyalty_enabled ? '<span class="tag fid">Carte fidélité</span>' : ''}<p class="muted" style="margin:0;font-size:.9rem">${isServiceCat(s.category) ? (s.services ? `${s.services} prestation${s.services > 1 ? 's' : ''}` : 'Prestations en préparation') : s.products ? `${s.products} produit${s.products > 1 ? 's' : ''}` : 'Vitrine en préparation'}${s.promos ? ` · <b style="color:var(--papaye-text)">${s.promos} en promo</b>` : ''}${s.address ? ' · ' + esc(s.address) : ''}</p></div></a>`;
 }
 
 async function activeShops(env) {
@@ -57,7 +68,8 @@ async function activeShopsDb(env) {
             (SELECT COUNT(*) FROM products p WHERE p.shop_id=s.id AND p.active=1 AND p.stock>0 AND ${EFFECTIVE_PRICE} < p.price) AS promos,
             (SELECT MAX(ROUND(100 - 100.0 * p.promo_price / p.price)) FROM products p WHERE p.shop_id=s.id AND p.active=1 AND p.stock>0 AND ${EFFECTIVE_PRICE} < p.price) AS best_pct,
             COALESCE(s.cover_photo, (SELECT p.photo_id FROM products p WHERE p.shop_id=s.id AND p.active=1 AND p.photo_id IS NOT NULL ORDER BY p.created_at DESC LIMIT 1)) AS cover_id,
-            (SELECT MAX(p.created_at) FROM products p WHERE p.shop_id=s.id) AS last_product, s.pro
+            (SELECT MAX(p.created_at) FROM products p WHERE p.shop_id=s.id) AS last_product, s.pro,
+            (SELECT COUNT(*) FROM services sv WHERE sv.shop_id=s.id AND sv.active=1) AS services
      FROM shops s WHERE s.status='active' ORDER BY s.pro DESC, promos > 0 DESC, s.name`).all();
   return results;
 }
@@ -104,13 +116,15 @@ async function shopPage(env, url, slug) {
   const st = await loadSettings(env);
   const s = await cached('seo-shop:' + slug, PUBLIC_TTL, () => env.DB.prepare(`SELECT id,name,slug,category,description,address,photo_id,cover_photo,look,phone,created_at,loyalty_enabled,loyalty_every,loyalty_kind,loyalty_value,loyalty_min FROM shops WHERE slug=?1 AND status='active'`).bind(slug).first());
   if (!s) return null;
-  const results = await cached('shop-products:' + s.id, PUBLIC_TTL, async () => (await env.DB.prepare(`SELECT id,name,description,price,promo_price,promo_until,stock,unit,qty_step,photo_id,photos,created_at FROM products WHERE shop_id=?1 AND active=1 ORDER BY created_at DESC`).bind(s.id).all()).results);
+  const svc = isServiceCat(s.category) ? await cached('shop-services:' + s.id, PUBLIC_TTL, () => servicesOfShop(env, s.id)) : null; // prestataire de services
+  const results = svc ? [] : await cached('shop-products:' + s.id, PUBLIC_TTL, async () => (await env.DB.prepare(`SELECT id,name,description,price,promo_price,promo_until,stock,unit,qty_step,photo_id,photos,created_at FROM products WHERE shop_id=?1 AND active=1 ORDER BY created_at DESC`).bind(s.id).all()).results);
   const products = results.map(publicProduct).sort((a, b) => (b.promo_pct ? 1 : 0) - (a.promo_pct ? 1 : 0) || (b.stock > 0) - (a.stock > 0));
   const origin = url.origin, site = st.site_name, pageUrl = `${origin}/boutique/${encodeURIComponent(s.slug)}`;
   const cat = catName(s.category), promos = products.filter(p => p.promo_pct && p.stock > 0);
   const title = `${s.name} · ${cat}${s.address ? ' à ' + cut(s.address, 40) : ''} | ${site}`;
-  const names = products.slice(0, 4).map(p => p.name).join(', ');
+  const names = (svc || products).slice(0, 4).map(p => p.name).join(', ');
   const description = cut(s.description && s.description.length >= 40 ? s.description
+    : svc ? `${s.name}, ${cat.toLowerCase()}${s.address ? ' à ' + s.address : ''}. ${svc.length} prestation${svc.length > 1 ? 's' : ''}${names ? ' : ' + names : ''}. Demandez un devis en ligne.`
     : `${s.name}, boutique ${cat.toLowerCase()}${s.address ? ' à ' + s.address : ''}. ${products.length} produit${products.length > 1 ? 's' : ''}${names ? ' : ' + names : ''}. Commandez en ligne, livraison rapide.`, 158);
   const imgId = s.photo_id || (products.find(p => p.photo_id) || {}).photo_id;
   let image = imgId ? origin + photo(imgId) : origin + '/img/partage.png';
@@ -140,20 +154,22 @@ async function shopPage(env, url, slug) {
   const hero = `<a href="/?cat=${encodeURIComponent(s.category)}" style="display:inline-block;margin-bottom:var(--space-3)">← ${esc(cat)}</a>
     <section class="card shop-hero${coverId ? ' has-cover' : ''}"${coverId ? `  style="--cover-img:url('${photo(coverId)}')"` : ''}><span class="av"><img class="avatar-xl" src="${s.photo_id ? photo(s.photo_id) : illu(s.category)}" alt="" width="104" height="104"></span>
       <div style="flex:1;min-width:220px"><h1 style="margin:0 0 .3rem">${esc(s.name)}</h1>
-        <div class="stats"><span class="tag">${esc(cat)}</span><span class="tag">${products.length} produit${products.length > 1 ? 's' : ''}</span>${promos.length ? `<span class="tag promo">${promos.length} en promo</span>` : ''}</div>
+        <div class="stats"><span class="tag">${esc(cat)}</span><span class="tag">${svc ? `${svc.length} prestation${svc.length > 1 ? 's' : ''}` : `${products.length} produit${products.length > 1 ? 's' : ''}`}</span>${promos.length ? `<span class="tag promo">${promos.length} en promo</span>` : ''}</div>
         ${s.description ? `<p style="margin:.7rem 0 0">${esc(s.description)}</p>` : ''}${s.address ? `<p class="muted" style="margin:.4rem 0 0">${icon('pin', 18)} ${esc(s.address)}</p>` : ''}</div></section>`;
   // Données pour le navigateur : évite un second appel réseau au chargement
-  const loyalty = s.loyalty_enabled ? { every: s.loyalty_every, kind: s.loyalty_kind, value: s.loyalty_value, min: s.loyalty_min || 0 } : null;
+  const loyalty = !svc && s.loyalty_enabled ? { every: s.loyalty_every, kind: s.loyalty_kind, value: s.loyalty_value, min: s.loyalty_min || 0 } : null;
   const shopPub = { id: s.id, name: s.name, slug: s.slug, category: s.category, description: s.description, address: s.address, photo_id: s.photo_id, cover_photo: s.cover_photo, look: lookOf(s.look), phone: s.phone, loyalty };
-  const boot = `<script>window.__SHOP__=${JSON.stringify({ shop: shopPub, products, mine: null }).replace(/</g, '\\u003c')};</script>`;
+  if (svc) shopPub.kind = 'services';
+  const boot = `<script>window.__SHOP__=${JSON.stringify({ shop: shopPub, products, ...(svc ? { services: svc } : {}), mine: null }).replace(/</g, '\\u003c')};</script>`;
   const res = await page(env, url, '/boutique');
   return new HTMLRewriter()
     .on('title', { element: e => e.setInnerContent(shareTitle) })
     .on('head', { element: e => e.append(headTags({ title: shareTitle, description: shareDesc, url: shareUrl, image, imageAlt: prod ? prod.name : s.name, site }) + ld.map(jsonLd).join('') + boot, { html: true }) })
     .on('main', { element: e => { if (shopPub.look) e.setAttribute('data-look', shopPub.look); } }) // design choisi : présent dès le premier affichage
     .on('#head', { element: e => e.setInnerContent(hero, { html: true }) })
-    .on('#products', { element: e => e.setInnerContent(products.map((p, i) => productCard(p, s.category, i < 4)).join(''), { html: true }) })
-    .on('#empty', { element: e => { if (!products.length) e.removeAttribute('hidden'); } })
+    .on('#products', { element: e => e.setInnerContent(svc ? svc.map(sv => serviceCard(sv, s.category)).join('') : products.map((p, i) => productCard(p, s.category, i < 4)).join(''), { html: true }) })
+    .on('#prodTitle', { element: e => { if (svc) e.setInnerContent('Les prestations'); } })
+    .on('#empty', { element: e => { if (!(svc || products).length) e.removeAttribute('hidden'); } })
     .transform(res);
 }
 

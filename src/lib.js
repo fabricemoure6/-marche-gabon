@@ -126,6 +126,15 @@ export const CATEGORIES = [
 export const SHOP_LOOKS = ['wax', 'chic', 'frais', 'lagune', 'douceur', 'gabon', 'soleil', 'bonbon', 'tropical', 'pop', 'crepuscule', 'fete', 'bogolan', 'lagon', 'agrumes'];
 export const lookOf = v => (SHOP_LOOKS.includes(v) ? v : null);
 
+// Rayons de services : le prestataire publie des prestations (et non des produits) et répond aux demandes de devis
+export const SERVICE_CATEGORIES = [
+  ['location_voiture', 'Location de voitures'], ['evenementiel', 'Événementiel'], ['nettoyage', 'Nettoyage et entretien'],
+  ['reparation', 'Réparations et dépannage'], ['btp', 'Bâtiment et travaux'], ['architecture', 'Architecture et études'],
+  ['beaute_domicile', 'Beauté à domicile'], ['cours', 'Cours et formations'], ['autres_services', 'Autres services']
+];
+export const isServiceCat = c => SERVICE_CATEGORIES.some(x => x[0] === c);
+export const ALL_CATEGORIES = [...CATEGORIES, ...SERVICE_CATEGORIES];
+
 export const ORDER_STATUS = {
   awaiting_payment: 'En attente de paiement', paid: 'Payée, en attente de la boutique', preparing: 'En préparation',
   ready: 'Prête, un livreur est recherché', delivering: 'En cours de livraison', delivered: 'Livrée', cancelled: 'Annulée'
@@ -226,6 +235,15 @@ const SCHEMA = [
   `CREATE INDEX IF NOT EXISTS idx_users_role ON users(role)`,                            // administrateurs à prévenir
   `CREATE INDEX IF NOT EXISTS idx_shops_status ON shops(status)`,                        // boutiques actives
   `CREATE INDEX IF NOT EXISTS idx_login_attempts_at ON login_attempts(at)`,              // ménage des essais anciens
+  // Univers « Services » : prestations et demandes de devis
+  `CREATE TABLE IF NOT EXISTS services (id TEXT PRIMARY KEY, shop_id TEXT NOT NULL, name TEXT NOT NULL, description TEXT, price_type TEXT NOT NULL,
+     price INTEGER, photo_id TEXT, photos TEXT, active INTEGER NOT NULL DEFAULT 1, created_at TEXT)`,
+  `CREATE INDEX IF NOT EXISTS idx_services_shop ON services(shop_id, active)`,
+  `CREATE TABLE IF NOT EXISTS service_requests (id TEXT PRIMARY KEY, ref TEXT UNIQUE NOT NULL, service_id TEXT NOT NULL, shop_id TEXT NOT NULL,
+     customer_id TEXT NOT NULL, wanted_date TEXT, place TEXT, details TEXT, phone TEXT, status TEXT NOT NULL DEFAULT 'new',
+     quote_amount INTEGER, quote_note TEXT, created_at TEXT, updated_at TEXT)`,
+  `CREATE INDEX IF NOT EXISTS idx_service_requests_shop ON service_requests(shop_id, status)`,
+  `CREATE INDEX IF NOT EXISTS idx_service_requests_customer ON service_requests(customer_id)`,
   // Paiements d'abonnement envoyés par les gestionnaires et livreurs, validés par l'administrateur
   `CREATE TABLE IF NOT EXISTS sub_payments (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, plan TEXT NOT NULL, months INTEGER NOT NULL, amount INTEGER NOT NULL,
      method TEXT, txn_ref TEXT, status TEXT NOT NULL DEFAULT 'pending', note TEXT, created_at TEXT, decided_at TEXT, decided_by TEXT)`,
@@ -342,10 +360,28 @@ export function fromBase64(b64) {
   return out;
 }
 // Pièces justificatives : un livreur peut fournir carte d'identité, permis ou passeport ; une boutique, son document administratif d'ouverture.
+// Prestataires de services : les papiers demandés dépendent du métier (cats). Liste à confirmer auprès de l'ANPI-Gabon ou d'un juriste.
+const SVC = ['location_voiture', 'evenementiel', 'nettoyage', 'reparation', 'btp', 'architecture', 'beaute_domicile', 'cours', 'autres_services'];
 export const DOC_KINDS = {
   cni: { label: 'Carte d\'identité', roles: ['courier'] }, permis: { label: 'Permis de conduire', roles: ['courier'] },
-  passeport: { label: 'Passeport', roles: ['courier'] }, autorisation: { label: 'Autorisation d\'ouverture du commerce', roles: ['seller'] }
+  passeport: { label: 'Passeport', roles: ['courier'] },
+  autorisation: { label: 'Autorisation d\'ouverture du commerce', roles: ['seller'], cats: ['habits', 'parfumerie', 'alimentation', 'quincaillerie', 'electronique', 'maison', 'autres'] },
+  identite: { label: 'Pièce d\'identité du responsable', roles: ['seller'], cats: SVC },
+  rccm: { label: 'RCCM (registre du commerce)', roles: ['seller'], cats: SVC },
+  nif: { label: 'NIF (numéro d\'identification fiscale)', roles: ['seller'], cats: SVC },
+  carte_grise: { label: 'Cartes grises des véhicules (un PDF pour tous)', roles: ['seller'], cats: ['location_voiture'] },
+  assurance_auto: { label: 'Assurances des véhicules en cours de validité', roles: ['seller'], cats: ['location_voiture'] },
+  visite_technique: { label: 'Visites techniques des véhicules', roles: ['seller'], cats: ['location_voiture'] },
+  agrement_transport: { label: 'Autorisation de location de véhicules (si exigée)', roles: ['seller'], cats: ['location_voiture'] },
+  hygiene: { label: 'Certificat d\'hygiène ou autorisation sanitaire (traiteur)', roles: ['seller'], cats: ['evenementiel'] },
+  assurance_rc: { label: 'Assurance responsabilité civile professionnelle', roles: ['seller'], cats: ['evenementiel', 'nettoyage', 'reparation', 'btp', 'architecture'] },
+  habilitation: { label: 'Qualification ou habilitation (électricité, gaz…)', roles: ['seller'], cats: ['reparation'] },
+  agrement_btp: { label: 'Agrément BTP du ministère des Travaux publics', roles: ['seller'], cats: ['btp'] },
+  cnss: { label: 'Attestation de régularité CNSS et fiscale', roles: ['seller'], cats: ['btp'] },
+  ordre_architectes: { label: 'Inscription à l\'Ordre des architectes', roles: ['seller'], cats: ['architecture'] },
+  diplome: { label: 'Diplôme ou attestation de formation', roles: ['seller'], cats: ['beaute_domicile', 'cours'] }
 };
+export const docKindsFor = (role, category) => Object.entries(DOC_KINDS).filter(([, k]) => k.roles.includes(role) && (!k.cats || !category || k.cats.includes(category)));
 export function sniffDocument(buf) {
   const b = new Uint8Array(buf.slice(0, 5));
   if (b[0] === 0x25 && b[1] === 0x50 && b[2] === 0x44 && b[3] === 0x46 && b[4] === 0x2d) return 'application/pdf';
