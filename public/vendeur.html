@@ -507,14 +507,26 @@
 
   // ===== Kit pour faire connaître la boutique : lien, affiche QR code, images de statut WhatsApp =====
   async function kit() {
-    const [{ shop: s }, list] = await Promise.all([MG.api('/api/seller/shop'), MG.api('/api/seller/products')]);
+    const { shop: s } = await MG.api('/api/seller/shop'), svcShop = s.kind === 'services';
     const url = location.origin + '/boutique/' + encodeURIComponent(s.slug);
-    const prods = list.filter(p => p.active).map(p => ({ ...p, price: p.promo_active ? p.promo_price : p.price, old_price: p.promo_active ? p.price : null, promo_pct: p.promo_active ? p.promo_pct : null }))
-      .sort((a, b) => (b.promo_pct ? 1 : 0) - (a.promo_pct ? 1 : 0));
+    // Ce qu'on peut mettre en statut : produits (boutique) ou prestations et modèles (prestataire), chacun avec son lien direct
+    let prods;
+    if (svcShop) {
+      const [svcs, items] = await Promise.all([MG.api('/api/seller/services'), MG.api('/api/seller/items')]);
+      const SUF = { heure: ' / heure', jour: ' / jour' };
+      prods = [...items.filter(i => i.kind === 'modele' && i.photos.length && svcs.some(x => x.id === i.service_id)).map(i => ({ id: 'm' + i.id, label: 'Modèle · ' + i.title, name: i.title, photo_id: i.photos[0],
+          price: i.price, prefix: i.price ? 'à partir de' : null, priceText: i.price ? null : 'Sur devis', link: url + '?modele=' + i.id })),
+        ...svcs.map(v => ({ id: 's' + v.id, label: v.name, name: v.name, photo_id: v.photo_id, price: v.price, priceText: v.price_type === 'devis' ? 'Sur devis' : null, suffix: SUF[v.price_type] || '', link: url + '?prest=' + v.id }))];
+    } else {
+      const list = await MG.api('/api/seller/products');
+      prods = list.filter(p => p.active).map(p => ({ ...p, price: p.promo_active ? p.promo_price : p.price, old_price: p.promo_active ? p.price : null, promo_pct: p.promo_active ? p.promo_pct : null }))
+        .sort((a, b) => (b.promo_pct ? 1 : 0) - (a.promo_pct ? 1 : 0)).map(p => ({ ...p, label: (p.promo_pct ? '−' + p.promo_pct + ' % · ' : '') + p.name, link: MG.productLink({ ...p, slug: s.slug }) }));
+    }
+    const statusOpts = svcShop ? { cta: 'Réservez ici', sub: 'Devis gratuit, sans engagement' } : {};
     const off = s.status !== 'active';
     S('pane').innerHTML = `${off ? '<div class="notice">Votre boutique n\'est pas encore visible des clients : le lien et le QR code marcheront dès sa validation par l\'équipe du marché. Vous pouvez déjà préparer vos images.</div>' : ''}
       <div class="card"><h3 style="margin-top:0">1. Le lien de votre boutique</h3>
-        <p class="muted" style="margin:0 0 var(--space-3)">Envoyez-le à vos clients, mettez-le en statut WhatsApp, dans votre bio Facebook ou TikTok. Chaque produit a aussi son propre lien : bouton « Partager ce produit » sur sa fiche.</p>
+        <p class="muted" style="margin:0 0 var(--space-3)">Envoyez-le à vos clients, mettez-le en statut WhatsApp, dans votre bio Facebook ou TikTok. ${svcShop ? 'Chaque prestation et chaque modèle a aussi son propre lien : il est dans le QR code de son image de statut ci-dessous.' : 'Chaque produit a aussi son propre lien : bouton « Partager ce produit » sur sa fiche.'}</p>
         <div class="row" style="gap:var(--space-2);flex-wrap:wrap"><input id="kUrl" readonly value="${MG.esc(url)}" style="flex:1;min-width:220px" aria-label="Lien de votre boutique">
         <button type="button" class="btn small alt" id="kCopy">Copier</button><button type="button" class="btn small" id="kShare">${MG.icon('share', 16)}Partager</button></div></div>
       <div class="card"><h3 style="margin-top:0">2. Votre affiche avec QR code</h3>
@@ -523,13 +535,13 @@
         <div class="kit-actions"><button type="button" class="btn" id="kPrint">Imprimer l'affiche</button><button type="button" class="btn alt" id="kPosterDl">Télécharger (image)</button>
         <p class="muted" style="font-size:.85rem;margin:0">Format A4. Une imprimerie ou un cybercafé peut l'imprimer depuis l'image téléchargée.</p></div></div></div>
       <div class="card"><h3 style="margin-top:0">3. Images pour vos statuts WhatsApp</h3>
-        <p class="muted" style="margin:0 0 var(--space-3)">Choisissez un produit : l'image est prête avec la photo, le prix et un QR code vers votre boutique. Sur téléphone, « Partager l'image » l'envoie directement dans WhatsApp. Conseil : 2 statuts par semaine, surtout vos promotions.</p>
-        <div class="kit-pick" id="kPick"><button type="button" class="on" data-k="">Ma boutique</button>${prods.map(p => `<button type="button" data-k="${MG.esc(p.id)}">${p.promo_pct ? '−' + p.promo_pct + ' % · ' : ''}${MG.esc(p.name)}</button>`).join('')}</div>
-        ${prods.length || s.kind === 'services' ? '' : '<p class="muted">Ajoutez des produits (onglet Produits) pour créer une image par produit.</p>'}
+        <p class="muted" style="margin:0 0 var(--space-3)">Choisissez ${svcShop ? 'une prestation ou un modèle' : 'un produit'} : l'image est prête avec la photo, le prix et un QR code qui y mène directement. Sur téléphone, « Partager l'image » l'envoie directement dans WhatsApp. Conseil : 2 statuts par semaine, surtout vos promotions.</p>
+        <div class="kit-pick" id="kPick"><button type="button" class="on" data-k="">Ma boutique</button>${prods.map(p => `<button type="button" data-k="${MG.esc(p.id)}">${MG.esc(p.label)}</button>`).join('')}</div>
+        ${prods.length ? '' : `<p class="muted">${svcShop ? 'Ajoutez des prestations (onglet Prestations) et des modèles (onglet Vitrine) pour créer une image pour chacun.' : 'Ajoutez des produits (onglet Produits) pour créer une image par produit.'}</p>`}
         <div class="kit-row"><div class="kit-prev tall" id="kStatus"><span class="muted">Préparation…</span></div>
         <div class="kit-actions"><button type="button" class="btn" id="kStShare">${MG.icon('share', 16)}Partager l'image</button><button type="button" class="btn alt" id="kStDl">Télécharger</button></div></div></div>`;
     S('kCopy').onclick = async () => { try { await navigator.clipboard.writeText(url); } catch { S('kUrl').select(); document.execCommand('copy'); } MG.toast('Lien copié'); };
-    S('kShare').onclick = () => MG.share({ title: s.name, url, text: `${s.name} : commandez en ligne, livré chez vous avec ${MG.config.site_name}` });
+    S('kShare').onclick = () => MG.share({ title: s.name, url, text: `${s.name} : ${svcShop ? 'demandez un devis en ligne' : 'commandez en ligne, livré chez vous'} avec ${MG.config.site_name}` });
     const fileName = t => (t || 'boutique').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || 'boutique';
     let posterCv = null, statusCv = null, current = null, seq = 0;
     const put = (box, cv) => { const img = new Image(); img.src = cv.toDataURL('image/png'); img.alt = 'Aperçu'; S(box).replaceChildren(img); };
@@ -537,7 +549,7 @@
     async function drawStatus(id) {
       const my = ++seq; current = prods.find(p => p.id === id) || null;
       S('kStatus').innerHTML = '<span class="muted">Préparation…</span>';
-      const cv = await MGKit.status(s, current, current ? MG.productLink({ ...current, slug: s.slug }) : url);
+      const cv = await MGKit.status(s, current, current ? current.link : url, statusOpts);
       if (my !== seq || !S('kStatus')) return; // un autre choix a été fait entre-temps
       statusCv = cv; put('kStatus', cv);
     }
@@ -548,7 +560,7 @@
     S('kStDl').onclick = () => statusCv && MGKit.download(statusCv, 'statut-' + fileName(current ? current.name : s.name) + '.png');
     S('kStShare').onclick = async () => {
       if (!statusCv) return;
-      const link = current ? MG.productLink({ ...current, slug: s.slug }) : url;
+      const link = current ? current.link : url;
       const r = await MGKit.shareImage(statusCv, 'statut-' + fileName(current ? current.name : s.name) + '.png', (current ? current.name + ' : ' : '') + link);
       if (r === 'downloaded') MG.toast('Image téléchargée : ajoutez-la à votre statut WhatsApp depuis votre galerie');
     };

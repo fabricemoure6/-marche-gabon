@@ -132,6 +132,21 @@ async function shopPage(env, url, slug) {
   // Lien partagé vers un produit (?p=…) : l'aperçu WhatsApp / Facebook montre ce produit, sa photo et son prix
   const pid = url.searchParams.get('p'), prod = pid && products.find(p => p.id === pid);
   let shareTitle = title, shareDesc = description, shareUrl = pageUrl;
+  const prestId = svc && url.searchParams.get('prest'), modId = svc && url.searchParams.get('modele');
+  const sv = prestId && svc.find(x => x.id === prestId), mo = modId && items && items.modeles.find(x => x.id === modId);
+  const svcPrice = x => x.price_type === 'devis' || !x.price ? 'sur devis' : fcfa(x.price) + (x.price_type === 'heure' ? ' / heure' : x.price_type === 'jour' ? ' / jour' : '');
+  if (sv) {
+    shareTitle = `${sv.name} · ${svcPrice(sv)} | ${s.name}`;
+    shareDesc = cut(`${sv.description ? sv.description + ' ' : ''}${s.name}${s.address ? ', ' + s.address : ''}. Demandez un devis en ligne.`, 158);
+    shareUrl = `${pageUrl}?prest=${encodeURIComponent(sv.id)}`;
+    if (sv.photo_id) image = origin + photo(sv.photo_id);
+  }
+  if (mo) {
+    shareTitle = `Modèle « ${mo.title} »${mo.price ? ' · à partir de ' + fcfa(mo.price) : ''} | ${s.name}`;
+    shareDesc = cut(`${mo.description ? mo.description + ' ' : ''}${s.name}. Choisissez ce modèle et recevez un devis.`, 158);
+    shareUrl = `${pageUrl}?modele=${encodeURIComponent(mo.id)}`;
+    if (mo.photos[0]) image = origin + photo(mo.photos[0]);
+  }
   if (prod) {
     shareTitle = `${prod.name} · ${fcfa(prod.price)}${prod.old_price ? ' (au lieu de ' + fcfa(prod.old_price) + ')' : ''} | ${s.name}`;
     shareDesc = cut(`${prod.description ? prod.description + ' ' : ''}Chez ${s.name}${s.address ? ', ' + s.address : ''}. Commandez en ligne, livraison rapide.`, 158);
@@ -165,7 +180,7 @@ async function shopPage(env, url, slug) {
   const res = await page(env, url, '/boutique');
   return new HTMLRewriter()
     .on('title', { element: e => e.setInnerContent(shareTitle) })
-    .on('head', { element: e => e.append(headTags({ title: shareTitle, description: shareDesc, url: shareUrl, image, imageAlt: prod ? prod.name : s.name, site }) + ld.map(jsonLd).join('') + boot, { html: true }) })
+    .on('head', { element: e => e.append(headTags({ title: shareTitle, description: shareDesc, url: shareUrl, image, imageAlt: prod ? prod.name : sv ? sv.name : mo ? mo.title : s.name, site }) + ld.map(jsonLd).join('') + boot, { html: true }) })
     .on('main', { element: e => { if (shopPub.look) e.setAttribute('data-look', shopPub.look); if (shopPub.template && shopPub.template !== 'classique') e.setAttribute('data-template', shopPub.template); } }) // design choisi : présent dès le premier affichage
     .on('#head', { element: e => e.setInnerContent(hero, { html: true }) })
     .on('#products', { element: e => e.setInnerContent(svc ? svc.map(sv => serviceCard(sv, s.category)).join('') : products.map((p, i) => productCard(p, s.category, i < 4)).join(''), { html: true }) })

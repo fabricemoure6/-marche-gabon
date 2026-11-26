@@ -74,7 +74,9 @@
   }
 
   // Image de statut WhatsApp (1080 × 1920) : un produit, ou la boutique si product est vide
-  async function status(shop, product, url) {
+  // product : { name, photo_id, price, old_price?, promo_pct? } ; pour un service : priceText (« Sur devis »), suffix (« / jour »), prefix (« à partir de »)
+  // opts : { cta, sub } pour adapter l'appel à l'action (« Réservez ici », « Devis gratuit »…)
+  async function status(shop, product, url, opts = {}) {
     await fonts();
     const W = 1080, H = 1920, cv = document.createElement('canvas'); cv.width = W; cv.height = H;
     const ctx = cv.getContext('2d');
@@ -95,7 +97,14 @@
     let y = py + ps + 120;
     ctx.font = `800 76px ${DISPLAY}`;
     y += textC(ctx, product ? product.name : shop.name, W / 2, y, W - 120, 84, 2);
-    if (product) {
+    if (product && (product.priceText || product.suffix || product.prefix)) { // prestation ou modèle
+      if (product.prefix) { ctx.font = `600 40px ${SANS}`; ctx.fillStyle = C.muted; ctx.fillText(product.prefix, W / 2, y - 18); y += 34; }
+      const price = product.priceText || MG.fcfa(product.price) + (product.suffix || '');
+      let size = 92; ctx.font = `800 ${size}px ${DISPLAY}`;
+      while (ctx.measureText(price).width > W - 120 && size > 52) { size -= 4; ctx.font = `800 ${size}px ${DISPLAY}`; }
+      ctx.fillStyle = C.papayeText; ctx.fillText(price, W / 2, y + 40);
+      ctx.font = `600 42px ${SANS}`; ctx.fillStyle = C.muted; ctx.fillText(MG.chez(shop.name), W / 2, y + 110);
+    } else if (product) {
       ctx.font = `800 92px ${DISPLAY}`; ctx.fillStyle = C.papayeText;
       const price = MG.fcfa(product.price), pw = ctx.measureText(price).width;
       if (product.old_price) {
@@ -113,9 +122,9 @@
     ctx.fillStyle = '#fff'; rr(ctx, 60, by, W - 120, bh, 44); ctx.fill();
     qr(ctx, url, 100, by + 35, 200);
     ctx.textAlign = 'left'; ctx.fillStyle = C.nuit; ctx.font = `800 56px ${DISPLAY}`;
-    ctx.fillText('Commandez ici', 340, by + 105);
+    ctx.fillText(opts.cta || 'Commandez ici', 340, by + 105);
     ctx.font = `600 34px ${SANS}`; ctx.fillStyle = C.muted;
-    ctx.fillText('Livraison rapide à domicile', 340, by + 160);
+    ctx.fillText(opts.sub || 'Livraison rapide à domicile', 340, by + 160);
     ctx.font = `700 30px ${SANS}`; ctx.fillStyle = C.papayeText;
     ctx.fillText(fit(ctx, host(url).split('?')[0], W - 120 - 300), 340, by + 210);
     stripe(ctx, 0, H - 20, W, 20);
