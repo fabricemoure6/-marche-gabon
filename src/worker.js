@@ -8,6 +8,7 @@ import { backupStep, backupStatus, backupStream, backupWatch } from './backup.js
 import { notify, confirmCheckout, rejectCheckout, cancelOrders, releaseVoucher, restock, createVoucher, awardLoyalty, startOnlinePayment, singpayVerify, singpayOn, singpayCall, sp } from './pay.js';
 import { botReply, searchProducts } from './bot.js';
 import { seoRoute } from './seo.js';
+import { subSweep, subRoutes, subAdminRoutes, subState, isBlocked } from './subs.js';
 
 const cleanText = (v, max) => String(v ?? '').replace(/[\u0000-\u001f\u007f]/g, ' ').trim().slice(0, max);
 const validEmail = e => /^[^\s@]{1,64}@[^\s@]{1,190}\.[^\s@]{2,}$/.test(e) && e.length <= 254;
@@ -278,13 +279,16 @@ export default {
   // Déclencheur planifié (toutes les 15 min) : fait avancer la sauvegarde du jour puis surveille qu'elle ne prend pas de retard
   async scheduled(event, env, ctx) {
     ctx.waitUntil((async () => {
-      try { if (!env.BACKUPS) return; await ensureSchema(env.DB); await backupStep(env); await backupWatch(env); }
+      try { await ensureSchema(env.DB); await subSweep(env, true); } catch (e) { console.error('abonnements', e && e.message); }
+      try { if (!env.BACKUPS) return; await backupStep(env); await backupWatch(env); }
       catch (e) { console.error('sauvegarde', e && e.message); }
     })());
   },
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     const res = await route(request, env);
     if (!['GET', 'HEAD'].includes(request.method)) clearCache(); // une écriture : la mémoire courte repart de zéro
+    // Abonnements : échéances, rappels et boutiques à masquer, vérifiés au plus toutes les 10 minutes, après la réponse
+    if (ctx && ctx.waitUntil) ctx.waitUntil(ensureSchema(env.DB).then(() => subSweep(env)).catch(e => console.error('abonnements', e && e.message)));
     return withSecurityHeaders(res);
   }
 };
@@ -322,8 +326,8 @@ async function route(request, env) {
                   (SELECT COUNT(*) FROM products p WHERE p.shop_id=s.id AND p.active=1 AND p.stock>0 AND ${EFFECTIVE_PRICE} < p.price) AS promos,
                   (SELECT MAX(ROUND(100 - 100.0 * p.promo_price / p.price)) FROM products p WHERE p.shop_id=s.id AND p.active=1 AND p.stock>0 AND ${EFFECTIVE_PRICE} < p.price) AS best_pct,
                   COALESCE(s.cover_photo, (SELECT p.photo_id FROM products p WHERE p.shop_id=s.id AND p.active=1 AND p.photo_id IS NOT NULL ORDER BY p.created_at DESC LIMIT 1)) AS cover_id,
-                  s.loyalty_enabled
-           FROM shops s WHERE s.status='active' ORDER BY promos > 0 DESC, s.name`).all()).results);
+                  s.loyalty_enabled, s.pro
+           FROM shops s WHERE s.status='active' ORDER BY s.pro DESC, promos > 0 DESC, s.name`).all()).results);
         return json(results.filter(s => (!cat || s.category === cat) && (!q || (s.name + ' ' + (s.description || '')).toLowerCase().includes(q))));
       }
       if (method === 'GET' && p === '/api/by-weight') { // produits vendus au kilo, au litre, au tas…
@@ -422,6 +426,8 @@ async function route(request, env) {
 
       // ===== Connecté =====
       if (!user) return bad('Connexion requise', 401);
+      const subRes = await subRoutes(env, request, user, p, method, { readJson, cleanText });
+      if (subRes) return subRes;
 
       if (method === 'GET' && p === '/api/notifications') {
         const { results } = await env.DB.prepare('SELECT id,title,body,url,read,created_at,kind FROM notifications WHERE user_id=?1 ORDER BY created_at DESC LIMIT 30').bind(user.id).all();
@@ -820,6 +826,13 @@ async function route(request, env) {
           const unit = unitOf(b && b.unit), step = stepOf(unit, b && b.qty_step);
           const name = cleanText(b && b.name, 100), price = Math.round(num(b && b.price)), stock = UNITS[unit].decimal ? r3(num(b && b.stock)) : Math.floor(num(b && b.stock));
           if (name.length < 2) return bad('Indiquez le nom du produit');
+          { // formule Essentiel : nombre de produits en ligne limité (Pro : illimité)
+            const st = await loadSettings(env);
+            if (st.sub_enabled && !shop.pro) {
+              const n = (await env.DB.prepare('SELECT COUNT(*) AS n FROM products WHERE shop_id=?1 AND active=1').bind(shop.id).first()).n;
+              if (n >= st.sub_product_limit) return bad(`Vous avez atteint ${st.sub_product_limit} produits en ligne, la limite de la formule Essentiel. Passez à la formule Pro (onglet Abonnement) pour en ajouter sans limite, ou retirez un ancien produit.`, 403);
+            }
+          }
           if (!Number.isFinite(price) || price < 50 || price > 50000000) return bad('Prix invalide');
           if (!Number.isFinite(stock) || stock < 0 || stock > 100000) return bad('Stock invalide');
           const pics = await ownPhotos(env, user, Array.isArray(b.photos) ? b.photos : b.photo_id ? [b.photo_id] : []);
@@ -989,8 +1002,11 @@ async function route(request, env) {
         const me = await env.DB.prepare('SELECT * FROM couriers WHERE user_id=?1').bind(user.id).first();
 
         if (method === 'GET' && p === '/api/courier/me') return json({ ...me, pending_account: await pendingAccount(env, 'courier', user.id) });
+        const courierSub = subState(await loadSettings(env), await env.DB.prepare('SELECT role,sub_until,sub_trial,sub_plan FROM users WHERE id=?1').bind(user.id).first());
+        const SUB_OFF = 'Votre abonnement livreur n\'est pas réglé : payez-le dans « Mon abonnement » pour recevoir à nouveau des courses.';
         if (method === 'POST' && p === '/api/courier/availability') {
           const b = await readJson(request);
+          if (b && b.available && isBlocked(courierSub)) return bad(SUB_OFF, 402);
           await env.DB.prepare('UPDATE couriers SET available=?2 WHERE user_id=?1').bind(user.id, b && b.available ? 1 : 0).run();
           return json({ ok: true });
         }
@@ -1039,9 +1055,10 @@ async function route(request, env) {
               status: j.status, statusLabel: { paid: 'Commande reçue', preparing: 'En préparation', ready: 'Prête à récupérer' }[j.status], items: j.items, slat: j.slat, slng: j.slng,
               far: d !== null && d > settings.courier_radius_km };
           }).sort((a, b) => (b.status === 'ready') - (a.status === 'ready') || (a.toShopKm ?? 1e9) - (b.toShopKm ?? 1e9));
-          return json({ jobs, available: !!me.available, hasPosition: validCoord(me.lat, me.lng) });
+          return json({ jobs, available: !!me.available, hasPosition: validCoord(me.lat, me.lng), sub: courierSub });
         }
         if (method === 'POST' && (m = p.match(/^\/api\/courier\/jobs\/(CMD-[A-F0-9]{6})\/accept$/))) {
+          if (isBlocked(courierSub)) return bad(SUB_OFF, 402);
           if (!me.available) return bad('Activez d\'abord votre disponibilité');
           const r = await env.DB.prepare(`UPDATE orders SET courier_id=?2, updated_at=?3 WHERE ref=?1 AND status IN ('paid','preparing','ready') AND courier_id IS NULL`).bind(m[1], user.id, now()).run();
           if (!r.meta.changes) return bad('Cette course vient d\'être prise par un autre livreur', 409);
@@ -1078,6 +1095,8 @@ async function route(request, env) {
       // ===== Administration =====
       if (p.startsWith('/api/admin/')) {
         if (user.role !== 'admin') return bad('Accès réservé à l\'administrateur', 403);
+        const subAdm = await subAdminRoutes(env, request, user, p, method, { readJson, cleanText, logAction });
+        if (subAdm) return subAdm;
 
         if (method === 'GET' && p === '/api/admin/overview') {
           const c = async q => (await env.DB.prepare(q).first()).n;
@@ -1087,6 +1106,39 @@ async function route(request, env) {
             paymentsToCheck: await c(`SELECT COUNT(*) AS n FROM checkouts WHERE status='submitted'`),
             revenue: await c(`SELECT COALESCE(SUM(total),0) AS n FROM orders WHERE status IN ('paid','preparing','ready','delivering','delivered')`)
           });
+        }
+        // ----- Croissance : les chiffres de la stratégie, semaine par semaine -----
+        if (method === 'GET' && p === '/api/admin/growth') {
+          const one = async (q, ...a) => (await env.DB.prepare(q).bind(...a).first()) || {};
+          const all = async (q, ...a) => (await env.DB.prepare(q).bind(...a).all()).results;
+          // 8 périodes de 7 jours glissants (0 = les 7 derniers jours). Une commande livrée compte à sa date de livraison (dernière mise à jour).
+          const weeks = await all(`SELECT CAST((julianday('now') - julianday(updated_at)) / 7 AS INTEGER) AS w, COUNT(*) AS n, COALESCE(SUM(total),0) AS gmv
+            FROM orders WHERE status='delivered' AND julianday('now') - julianday(updated_at) < 56 GROUP BY w`);
+          const newCust = await all(`SELECT CAST((julianday('now') - julianday(created_at)) / 7 AS INTEGER) AS w, COUNT(*) AS n
+            FROM users WHERE role='customer' AND julianday('now') - julianday(created_at) < 56 GROUP BY w`);
+          const series = Array.from({ length: 8 }, (_, w) => ({ w, delivered: 0, gmv: 0, customers: 0 }));
+          for (const r of weeks) if (series[r.w]) { series[r.w].delivered = r.n; series[r.w].gmv = r.gmv; }
+          for (const r of newCust) if (series[r.w]) series[r.w].customers = r.n;
+          const shops = await one(`SELECT COUNT(*) AS active,
+              SUM(CASE WHEN (SELECT COUNT(*) FROM products p WHERE p.shop_id=s.id AND p.active=1) >= 10 THEN 1 ELSE 0 END) AS stocked,
+              SUM(CASE WHEN EXISTS (SELECT 1 FROM orders o WHERE o.shop_id=s.id AND o.status='delivered' AND julianday('now') - julianday(o.updated_at) < 30) THEN 1 ELSE 0 END) AS selling
+            FROM shops s WHERE s.status='active'`);
+          // Fidélité des clients : parmi ceux qui ont eu une 1re livraison entre 60 et 30 jours avant aujourd'hui (fenêtre de 30 jours terminée),
+          // combien ont été livrés une 2e fois dans les 30 jours qui ont suivi. Les clients plus récents sont « en attente », pas comptés.
+          const rep = await one(`WITH f AS (SELECT customer_id, MIN(updated_at) AS first FROM orders WHERE status='delivered' GROUP BY customer_id)
+            SELECT COUNT(*) AS cohort,
+              SUM(CASE WHEN EXISTS (SELECT 1 FROM orders o WHERE o.customer_id=f.customer_id AND o.status='delivered' AND o.updated_at > f.first
+                AND julianday(o.updated_at) - julianday(f.first) <= 30) THEN 1 ELSE 0 END) AS repeat
+            FROM f WHERE julianday('now') - julianday(f.first) BETWEEN 30 AND 60`);
+          const pending = await one(`SELECT COUNT(*) AS n FROM (SELECT customer_id, MIN(updated_at) AS first FROM orders WHERE status='delivered' GROUP BY customer_id) WHERE julianday('now') - julianday(first) < 30`);
+          const speed = await one(`SELECT AVG((julianday(updated_at) - julianday(created_at)) * 24) AS h, COUNT(*) AS n FROM orders WHERE status='delivered' AND julianday('now') - julianday(updated_at) < 30`);
+          const trouble = await one(`SELECT SUM(CASE WHEN status='cancelled' THEN 1 ELSE 0 END) AS cancelled,
+              SUM(CASE WHEN pay_dispute IS NOT NULL OR fee_dispute IS NOT NULL THEN 1 ELSE 0 END) AS disputes, COUNT(*) AS n
+            FROM orders WHERE julianday('now') - julianday(created_at) < 30`);
+          return json({ series, shops: { active: shops.active || 0, stocked: shops.stocked || 0, selling: shops.selling || 0 },
+            repeat: { cohort: rep.cohort || 0, repeat: rep.repeat || 0, pending: pending.n || 0 },
+            speed: { hours: speed.h == null ? null : Math.round(speed.h * 10) / 10, n: speed.n || 0 },
+            trouble: { cancelled: trouble.cancelled || 0, disputes: trouble.disputes || 0, orders: trouble.n || 0 }, goal: 50 });
         }
         // ----- Sauvegardes de la base (R2) -----
         if (method === 'GET' && p === '/api/admin/backups') return json(await backupStatus(env));
@@ -1361,8 +1413,17 @@ async function route(request, env) {
             invite_required: ['none', 'pro', 'all'].includes(b.invite_required) ? b.invite_required : cur.invite_required,
             promo_max_pct: nn(b.promo_max_pct, cur.promo_max_pct ?? 70, 5, 90), promo_max_days: nn(b.promo_max_days, cur.promo_max_days ?? 30, 1, 90),
             loyalty_max_pct: nn(b.loyalty_max_pct, cur.loyalty_max_pct ?? 30, 5, 80),
-            commission_pct: nn(b.commission_pct, cur.commission_pct ?? 0, 0, 50)
+            commission_pct: nn(b.commission_pct, cur.commission_pct ?? 0, 0, 50),
+            sub_enabled: b.sub_enabled === undefined ? !!cur.sub_enabled : !!b.sub_enabled,
+            sub_trial_days: nn(b.sub_trial_days, cur.sub_trial_days, 0, 365), sub_grace_days: nn(b.sub_grace_days, cur.sub_grace_days, 0, 60),
+            sub_price_essentiel: nn(b.sub_price_essentiel, cur.sub_price_essentiel, 0, 1000000), sub_price_pro: nn(b.sub_price_pro, cur.sub_price_pro, 0, 1000000),
+            sub_price_courier: nn(b.sub_price_courier, cur.sub_price_courier, 0, 1000000), sub_product_limit: nn(b.sub_product_limit, cur.sub_product_limit, 1, 10000),
+            moov_number: b.moov_number === undefined ? cur.moov_number || '' : cleanText(b.moov_number, 30)
           });
+          if (!!cur.sub_enabled !== (b.sub_enabled === undefined ? !!cur.sub_enabled : !!b.sub_enabled)) {
+            await logAction(env, user, b.sub_enabled ? 'Abonnements activés' : 'Abonnements désactivés', 'settings', '', '', '');
+            await subSweep(env, true); // essais démarrés tout de suite, ou boutiques rétablies si on désactive
+          }
           return json({ ok: true });
         }
         // Diagnostic SingPay : ne renvoie jamais les clés, seulement des statuts et des longueurs

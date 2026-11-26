@@ -11,11 +11,11 @@
 <body><header id="top"></header>
 <main>
   <div id="state"></div>
-  <div class="tabs" id="tabs"><button data-t="orders" class="on">Commandes</button><button data-t="products">Produits</button><button data-t="loyalty">Fidélité</button><button data-t="compta">Comptabilité</button><button data-t="shop">Ma boutique</button></div>
+  <div class="tabs" id="tabs"><button data-t="orders" class="on">Commandes</button><button data-t="products">Produits</button><button data-t="loyalty">Fidélité</button><button data-t="compta">Comptabilité</button><button data-t="shop">Ma boutique</button><button data-t="kit">Partager</button><button data-t="sub">Abonnement</button></div>
   <div id="pane"></div>
   <div id="detail"></div>
 </main>
-<script src="/common.js"></script>
+<script src="/common.js"></script><script src="/vendor/qrcode.js"></script><script src="/kit.js"></script><script src="/abonnement.js"></script>
 <script>
 (async () => {
   if (!(await MG.require(['seller']))) return;
@@ -23,14 +23,20 @@
   const S = id => MG.$('#' + id);
   async function init() {
     const d = await MG.api('/api/seller/shop'); shop = d.shop;
-    S('state').innerHTML = shop.status === 'active' ? '' : `<div class="notice">Votre boutique est <b>${shop.status === 'pending' ? 'en attente de validation' : 'suspendue'}</b>. ${shop.status === 'pending' ? 'Complétez-la : elle sera visible des clients dès sa validation.' : 'Contactez l\'administrateur.'}</div>`;
+    const sub = await MG.api('/api/sub').catch(() => null);
+    S('state').innerHTML = shop.status === 'unpaid' ? MG.subBanner(sub, '#abonnement') || '<div class="notice danger">Votre boutique est masquée aux clients : abonnement à régler. <a href="#abonnement" data-sub-go>Mon abonnement</a></div>'
+      : shop.status === 'active' ? MG.subBanner(sub, '#abonnement') : `<div class="notice">Votre boutique est <b>${shop.status === 'pending' ? 'en attente de validation' : 'suspendue'}</b>. ${shop.status === 'pending' ? 'Complétez-la : elle sera visible des clients dès sa validation.' : 'Contactez l\'administrateur.'}</div>`;
+    S('state').onclick = e => { if (e.target.closest('[data-sub-go]')) { e.preventDefault(); openTab('sub'); } };
     show();
   }
   S('tabs').onclick = e => { const b = e.target.closest('[data-t]'); if (!b) return; tab = b.dataset.t; [...S('tabs').children].forEach(x => x.classList.toggle('on', x === b)); show(); };
   if (location.hash === '#compta') { tab = 'compta'; [...S('tabs').children].forEach(x => x.classList.toggle('on', x.dataset.t === 'compta')); }
   if (location.hash === '#boutique') { tab = 'shop'; [...S('tabs').children].forEach(x => x.classList.toggle('on', x.dataset.t === 'shop')); }
+  const openTab = t => { tab = t; [...S('tabs').children].forEach(x => x.classList.toggle('on', x.dataset.t === t)); show(); };
+  if (location.hash === '#abonnement') { tab = 'sub'; [...S('tabs').children].forEach(x => x.classList.toggle('on', x.dataset.t === 'sub')); }
+  if (location.hash === '#partager') { tab = 'kit'; [...S('tabs').children].forEach(x => x.classList.toggle('on', x.dataset.t === 'kit')); }
   if (location.hash === '#produits') { tab = 'products'; [...S('tabs').children].forEach(x => x.classList.toggle('on', x.dataset.t === 'products')); }
-  function show() { clearInterval(timer); S('detail').innerHTML = ''; ({ orders, products, loyalty, compta, shop: shopTab })[tab](); }
+  function show() { clearInterval(timer); S('detail').innerHTML = ''; ({ orders, products, loyalty, compta, shop: shopTab, kit, sub: () => MG.subPane(S('pane')) })[tab](); }
 
   async function orders() {
     async function draw() {
@@ -364,6 +370,55 @@
     S('pane').onclick = async e => {
       const d = e.target.closest('[data-delx]'); if (!d || !confirm('Supprimer cette dépense ?')) return;
       try { await MG.api('/api/seller/expenses/' + d.dataset.delx, { method: 'DELETE', body: {} }); MG.toast('Dépense supprimée'); compta(); } catch (er) { MG.fail(er); }
+    };
+  }
+
+  // ===== Kit pour faire connaître la boutique : lien, affiche QR code, images de statut WhatsApp =====
+  async function kit() {
+    const [{ shop: s }, list] = await Promise.all([MG.api('/api/seller/shop'), MG.api('/api/seller/products')]);
+    const url = location.origin + '/boutique/' + encodeURIComponent(s.slug);
+    const prods = list.filter(p => p.active).map(p => ({ ...p, price: p.promo_active ? p.promo_price : p.price, old_price: p.promo_active ? p.price : null, promo_pct: p.promo_active ? p.promo_pct : null }))
+      .sort((a, b) => (b.promo_pct ? 1 : 0) - (a.promo_pct ? 1 : 0));
+    const off = s.status !== 'active';
+    S('pane').innerHTML = `${off ? '<div class="notice">Votre boutique n\'est pas encore visible des clients : le lien et le QR code marcheront dès sa validation par l\'équipe du marché. Vous pouvez déjà préparer vos images.</div>' : ''}
+      <div class="card"><h3 style="margin-top:0">1. Le lien de votre boutique</h3>
+        <p class="muted" style="margin:0 0 var(--space-3)">Envoyez-le à vos clients, mettez-le en statut WhatsApp, dans votre bio Facebook ou TikTok. Chaque produit a aussi son propre lien : bouton « Partager ce produit » sur sa fiche.</p>
+        <div class="row" style="gap:var(--space-2);flex-wrap:wrap"><input id="kUrl" readonly value="${MG.esc(url)}" style="flex:1;min-width:220px" aria-label="Lien de votre boutique">
+        <button type="button" class="btn small alt" id="kCopy">Copier</button><button type="button" class="btn small" id="kShare">${MG.icon('share', 16)}Partager</button></div></div>
+      <div class="card"><h3 style="margin-top:0">2. Votre affiche avec QR code</h3>
+        <p class="muted" style="margin:0 0 var(--space-3)">Imprimez-la et collez-la sur votre étal, votre vitrine ou vos sacs : vos clients scannent avec l'appareil photo et arrivent directement dans votre boutique.</p>
+        <div class="kit-row"><div class="kit-prev" id="kPoster"><span class="muted">Préparation…</span></div>
+        <div class="kit-actions"><button type="button" class="btn" id="kPrint">Imprimer l'affiche</button><button type="button" class="btn alt" id="kPosterDl">Télécharger (image)</button>
+        <p class="muted" style="font-size:.85rem;margin:0">Format A4. Une imprimerie ou un cybercafé peut l'imprimer depuis l'image téléchargée.</p></div></div></div>
+      <div class="card"><h3 style="margin-top:0">3. Images pour vos statuts WhatsApp</h3>
+        <p class="muted" style="margin:0 0 var(--space-3)">Choisissez un produit : l'image est prête avec la photo, le prix et un QR code vers votre boutique. Sur téléphone, « Partager l'image » l'envoie directement dans WhatsApp. Conseil : 2 statuts par semaine, surtout vos promotions.</p>
+        <div class="kit-pick" id="kPick"><button type="button" class="on" data-k="">Ma boutique</button>${prods.map(p => `<button type="button" data-k="${MG.esc(p.id)}">${p.promo_pct ? '−' + p.promo_pct + ' % · ' : ''}${MG.esc(p.name)}</button>`).join('')}</div>
+        ${prods.length ? '' : '<p class="muted">Ajoutez des produits (onglet Produits) pour créer une image par produit.</p>'}
+        <div class="kit-row"><div class="kit-prev tall" id="kStatus"><span class="muted">Préparation…</span></div>
+        <div class="kit-actions"><button type="button" class="btn" id="kStShare">${MG.icon('share', 16)}Partager l'image</button><button type="button" class="btn alt" id="kStDl">Télécharger</button></div></div></div>`;
+    S('kCopy').onclick = async () => { try { await navigator.clipboard.writeText(url); } catch { S('kUrl').select(); document.execCommand('copy'); } MG.toast('Lien copié'); };
+    S('kShare').onclick = () => MG.share({ title: s.name, url, text: `${s.name} : commandez en ligne, livré chez vous avec ${MG.config.site_name}` });
+    const fileName = t => (t || 'boutique').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || 'boutique';
+    let posterCv = null, statusCv = null, current = null, seq = 0;
+    const put = (box, cv) => { const img = new Image(); img.src = cv.toDataURL('image/png'); img.alt = 'Aperçu'; S(box).replaceChildren(img); };
+    MGKit.poster(s, url).then(cv => { posterCv = cv; if (S('kPoster')) put('kPoster', cv); }).catch(er => MG.fail(er));
+    async function drawStatus(id) {
+      const my = ++seq; current = prods.find(p => p.id === id) || null;
+      S('kStatus').innerHTML = '<span class="muted">Préparation…</span>';
+      const cv = await MGKit.status(s, current, current ? MG.productLink({ ...current, slug: s.slug }) : url);
+      if (my !== seq || !S('kStatus')) return; // un autre choix a été fait entre-temps
+      statusCv = cv; put('kStatus', cv);
+    }
+    drawStatus('');
+    S('kPick').onclick = e => { const b = e.target.closest('[data-k]'); if (!b) return; [...S('kPick').children].forEach(x => x.classList.toggle('on', x === b)); drawStatus(b.dataset.k); };
+    S('kPrint').onclick = () => posterCv && MGKit.printCanvas(posterCv);
+    S('kPosterDl').onclick = () => posterCv && MGKit.download(posterCv, 'affiche-' + fileName(s.name) + '.png');
+    S('kStDl').onclick = () => statusCv && MGKit.download(statusCv, 'statut-' + fileName(current ? current.name : s.name) + '.png');
+    S('kStShare').onclick = async () => {
+      if (!statusCv) return;
+      const link = current ? MG.productLink({ ...current, slug: s.slug }) : url;
+      const r = await MGKit.shareImage(statusCv, 'statut-' + fileName(current ? current.name : s.name) + '.png', (current ? current.name + ' : ' : '') + link);
+      if (r === 'downloaded') MG.toast('Image téléchargée : ajoutez-la à votre statut WhatsApp depuis votre galerie');
     };
   }
 

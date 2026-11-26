@@ -146,6 +146,13 @@ export const DEFAULT_SETTINGS = {
   promo_max_days: 30,       // durée maximale d'une promotion (jours)
   loyalty_max_pct: 30,
   commission_pct: 0,        // commission du marché sur les ventes des boutiques (%)      // valeur maximale d'un bon d'achat en pourcentage
+  // Abonnements (le marché vit des abonnements, pas de commission) : rien ne change tant que sub_enabled est faux
+  sub_enabled: false,
+  sub_trial_days: 90,       // essai gratuit, démarré à l'activation (ou à l'inscription ensuite)
+  sub_grace_days: 7,        // délai après l'échéance avant de masquer la boutique / couper les courses
+  sub_price_essentiel: 10000, sub_price_pro: 15000, sub_price_courier: 3000, // FCFA par mois
+  sub_product_limit: 50,    // produits en ligne avec la formule Essentiel (Pro : illimité)
+  moov_number: '',          // numéro Moov Money qui reçoit les abonnements (le numéro Airtel est airtel_number)
   invite_required: 'none'   // 'none' : inscription libre · 'pro' : invitation obligatoire pour boutiques et livreurs · 'all' : pour tous
 };
 
@@ -219,17 +226,22 @@ const SCHEMA = [
   `CREATE INDEX IF NOT EXISTS idx_users_role ON users(role)`,                            // administrateurs à prévenir
   `CREATE INDEX IF NOT EXISTS idx_shops_status ON shops(status)`,                        // boutiques actives
   `CREATE INDEX IF NOT EXISTS idx_login_attempts_at ON login_attempts(at)`,              // ménage des essais anciens
+  // Paiements d'abonnement envoyés par les gestionnaires et livreurs, validés par l'administrateur
+  `CREATE TABLE IF NOT EXISTS sub_payments (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, plan TEXT NOT NULL, months INTEGER NOT NULL, amount INTEGER NOT NULL,
+     method TEXT, txn_ref TEXT, status TEXT NOT NULL DEFAULT 'pending', note TEXT, created_at TEXT, decided_at TEXT, decided_by TEXT)`,
+  `CREATE INDEX IF NOT EXISTS idx_sub_payments_user ON sub_payments(user_id, created_at)`,
+  `CREATE INDEX IF NOT EXISTS idx_sub_payments_status ON sub_payments(status)`,
   // Le stock ne peut jamais devenir négatif : deux paiements simultanés du dernier article échouent proprement
   `CREATE TRIGGER IF NOT EXISTS products_stock_nonneg BEFORE UPDATE OF stock ON products WHEN NEW.stock < 0 BEGIN SELECT RAISE(ABORT, 'stock_insuffisant'); END`
 ];
 
 // Colonnes ajoutées après la première version : créées sur les bases existantes
 const MIGRATIONS = {
-  users: [['avatar_id', 'TEXT']],
+  users: [['avatar_id', 'TEXT'], ['sub_plan', 'TEXT'], ['sub_until', 'INTEGER'], ['sub_trial', 'INTEGER NOT NULL DEFAULT 0'], ['sub_notice', 'TEXT']],
   notifications: [['kind', 'TEXT']],
   products: [['unit', "TEXT NOT NULL DEFAULT 'piece'"], ['qty_step', 'REAL NOT NULL DEFAULT 1'], ['promo_price', 'INTEGER'], ['promo_until', 'INTEGER'], ['promo_start', 'INTEGER'], ['stock_updated_at', 'INTEGER'], ['photos', 'TEXT']],
   shops: [['loyalty_enabled', 'INTEGER NOT NULL DEFAULT 0'], ['loyalty_every', 'INTEGER'], ['loyalty_kind', 'TEXT'], ['loyalty_value', 'INTEGER'],
-    ['loyalty_min', 'INTEGER'], ['loyalty_days', 'INTEGER'], ['cover_photo', 'TEXT'], ['look', 'TEXT'],
+    ['loyalty_min', 'INTEGER'], ['loyalty_days', 'INTEGER'], ['cover_photo', 'TEXT'], ['look', 'TEXT'], ['pro', 'INTEGER NOT NULL DEFAULT 0'],
     ['payout_method', 'TEXT'], ['payout_number', 'TEXT'], ['payout_name', 'TEXT'], ['payout_code', 'TEXT'], ['payout_bank', 'TEXT']],
   couriers: [['pay_method', 'TEXT'], ['pay_number', 'TEXT'], ['pay_name', 'TEXT'], ['pay_code', 'TEXT'], ['pay_bank', 'TEXT']],
   order_items: [['unit', "TEXT NOT NULL DEFAULT 'piece'"]],

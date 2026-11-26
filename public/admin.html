@@ -13,7 +13,7 @@
   <h1>Administration</h1>
   <div class="tabs" id="tabs">
     <button data-t="overview" class="on">Vue d'ensemble</button><button data-t="payments">Paiements</button><button data-t="shops">Boutiques</button>
-    <button data-t="orders">Commandes</button><button data-t="users">Utilisateurs</button><button data-t="review">À valider</button><button data-t="docs">Pièces</button><button data-t="invites">Invitations</button><button data-t="compta">Comptabilité</button><button data-t="settings">Réglages</button></div>
+    <button data-t="orders">Commandes</button><button data-t="users">Utilisateurs</button><button data-t="review">À valider</button><button data-t="docs">Pièces</button><button data-t="invites">Invitations</button><button data-t="subs">Abonnements</button><button data-t="compta">Comptabilité</button><button data-t="settings">Réglages</button></div>
   <div id="pane"></div>
 </main>
 <script src="/common.js"></script>
@@ -23,7 +23,8 @@
   const S = id => MG.$('#' + id), pane = S('pane');
   let tab = 'overview';
   S('tabs').onclick = e => { const b = e.target.closest('[data-t]'); if (!b) return; tab = b.dataset.t; [...S('tabs').children].forEach(x => x.classList.toggle('on', x === b)); show(); };
-  const T = { overview, payments, shops, orders, users, review, docs, invites, compta, settings };
+  const T = { overview, payments, shops, orders, users, review, docs, invites, compta, settings, subs };
+  if (location.hash === '#abonnements') { tab = 'subs'; [...S('tabs').children].forEach(x => x.classList.toggle('on', x.dataset.t === 'subs')); }
   const show = () => T[tab]().catch(MG.fail);
 
   // Fenêtre de confirmation sécurisée : motif + mot de passe de l'administrateur.
@@ -55,11 +56,34 @@
   const MLAB = { airtel_money: 'Airtel Money', moov_money: 'Moov Money', bank: 'Compte bancaire' };
   const ROLE = { customer: 'Client', seller: 'Boutique', courier: 'Livreur', admin: 'Admin' };
 
+  // Croissance : objectif de la stratégie = 50 commandes livrées par semaine
+  function growthCard(g) {
+    const s = g.series, now = s[0], prev = s[1], max = Math.max(g.goal, ...s.map(x => x.delivered));
+    const trend = now.delivered - prev.delivered;
+    const pct = (a, b) => (b ? Math.round((100 * a) / b) + ' %' : '—');
+    const tile = (v, l, sub) => `<div class="gr-tile"><b>${v}</b><span>${l}</span>${sub ? `<small class="muted">${sub}</small>` : ''}</div>`;
+    const bars = s.slice().reverse().map(x => `<div class="gr-bar" title="${x.delivered} commande${x.delivered > 1 ? 's' : ''} livrée${x.delivered > 1 ? 's' : ''} · ${MG.fcfa(x.gmv)}">
+      <span class="gr-n">${x.delivered}</span><i style="height:${Math.max(2, Math.round((100 * x.delivered) / max))}%"></i><small>${x.w === 0 ? '7 derniers j.' : 'S-' + x.w}</small></div>`).join('');
+    return `<div class="card growth"><div class="gr-head"><div><h2 style="margin:0">Croissance</h2>
+        <p class="muted" style="margin:.2rem 0 0">Le chiffre qui compte : les commandes livrées chaque semaine. Objectif : ${g.goal} par semaine.</p></div>
+        <div class="gr-big"><b>${now.delivered}</b><span>livrées ces 7 derniers jours</span><small class="${trend > 0 ? 'up' : trend < 0 ? 'down' : 'muted'}">${trend > 0 ? '▲ +' + trend : trend < 0 ? '▼ ' + trend : '='} par rapport à la semaine d'avant</small></div></div>
+      <div class="gr-chart" role="img" aria-label="Commandes livrées sur les 8 dernières semaines"><div class="gr-goal" style="bottom:calc(${Math.round((100 * g.goal) / max)}% * .78 + 34px)"><span>objectif ${g.goal}</span></div>${bars}</div>
+      <div class="gr-tiles">
+        ${tile(MG.fcfa(now.gmv), 'ventes livrées (7 j.)')}
+        ${tile(now.customers, 'nouveaux clients (7 j.)', prev.customers ? 'semaine d\'avant : ' + prev.customers : '')}
+        ${tile(g.shops.selling + ' / ' + g.shops.active, 'boutiques qui vendent', 'au moins 1 livraison en 30 j.')}
+        ${tile(g.shops.stocked + ' / ' + g.shops.active, 'boutiques bien garnies', '10 produits ou plus')}
+        ${tile(g.repeat.cohort ? pct(g.repeat.repeat, g.repeat.cohort) : '—', 'clients qui reviennent', g.repeat.cohort ? `${g.repeat.repeat} sur ${g.repeat.cohort} ont recommandé dans les 30 j.` : 'pas encore assez de recul')}
+        ${tile(g.speed.hours == null ? '—' : (g.speed.hours < 24 ? g.speed.hours + ' h' : Math.round(g.speed.hours / 24 * 10) / 10 + ' j'), 'délai moyen commande → livraison', g.speed.n ? 'sur ' + g.speed.n + ' livraisons (30 j.)' : '')}
+        ${tile(g.trouble.cancelled + g.trouble.disputes, 'commandes à problème (30 j.)', `${g.trouble.cancelled} annulée${g.trouble.cancelled > 1 ? 's' : ''}, ${g.trouble.disputes} litige${g.trouble.disputes > 1 ? 's' : ''} sur ${g.trouble.orders}`)}
+      </div>${g.repeat.pending ? `<p class="muted" style="margin:var(--space-3) 0 0;font-size:.85rem">${g.repeat.pending} client${g.repeat.pending > 1 ? 's' : ''} livré${g.repeat.pending > 1 ? 's' : ''} pour la 1re fois il y a moins de 30 jours : comptés dans « clients qui reviennent » quand leurs 30 jours seront passés.</p>` : ''}</div>`;
+  }
+
   async function overview() {
-    const o = await MG.api('/api/admin/overview');
+    const [o, g] = await Promise.all([MG.api('/api/admin/overview'), MG.api('/api/admin/growth').catch(() => null)]);
     const cell = (v, l) => `<div class="card"><div style="font-size:1.8rem;font-weight:800">${v}</div><div class="muted">${l}</div></div>`;
     const log = await MG.api('/api/admin/actions');
-    pane.innerHTML = `<div class="grid">${cell(o.users, 'Utilisateurs')}${cell(o.shopsActive, 'Boutiques actives')}${cell(o.shopsPending, 'Boutiques à valider')}${cell(o.paymentsToCheck, 'Paiements à vérifier')}${cell(o.orders, 'Commandes')}${cell(MG.fcfa(o.revenue), 'Ventes payées')}</div>
+    pane.innerHTML = `${g ? growthCard(g) : ''}<div class="grid">${cell(o.users, 'Utilisateurs')}${cell(o.shopsActive, 'Boutiques actives')}${cell(o.shopsPending, 'Boutiques à valider')}${cell(o.paymentsToCheck, 'Paiements à vérifier')}${cell(o.orders, 'Commandes')}${cell(MG.fcfa(o.revenue), 'Ventes payées')}</div>
       <div class="card scroll" style="margin-top:var(--space-5)"><h2>Journal des actions</h2>${log.length ? `<table><thead><tr><th>Date</th><th>Action</th><th>Concerné</th><th>Motif</th><th>Par</th></tr></thead><tbody>${log.map(a => `<tr>
         <td><small>${MG.date(a.created_at)}</small></td><td><b>${MG.esc(a.action)}</b></td><td>${MG.esc(a.target_name)}</td><td>${MG.esc(a.reason || '—')}</td><td>${MG.esc(a.admin_name)}</td></tr>`).join('')}</tbody></table>`
         : '<p class="muted">Aucune action enregistrée pour le moment.</p>'}</div>`;
@@ -82,7 +106,7 @@
     const list = await MG.api('/api/admin/shops');
     pane.innerHTML = `<div class="card scroll"><table><thead><tr><th>Boutique</th><th>Gestionnaire</th><th>Catégorie</th><th>État</th><th></th></tr></thead><tbody>${list.map(s => `<tr>
       <td>${MG.esc(s.name)}<br><small class="muted">${MG.esc(s.address || '')}</small><br><small>${s.payout_number ? (MLAB[s.payout_method] || 'Airtel Money') + ' : ' + MG.esc(s.payout_number) : '<span class="muted">Numéro de versement : non renseigné</span>'}</small></td><td>${MG.esc(s.owner)}<br><small>${MG.esc(s.phone || '')}</small></td><td>${MG.esc(MG.catName(s.category))}</td>
-      <td><span class="tag ${s.status}">${s.status}</span><br><small class="muted">${{ verified: 'Document vérifié', pending: 'Document à vérifier', rejected: 'Document refusé' }[s.doc_status] || 'Pas de document'}</small></td>
+      <td><span class="tag ${s.status === 'unpaid' ? 'cancelled' : s.status}">${s.status === 'unpaid' ? 'masquée : abonnement impayé' : s.status}</span><br><small class="muted">${{ verified: 'Document vérifié', pending: 'Document à vérifier', rejected: 'Document refusé' }[s.doc_status] || 'Pas de document'}</small></td>
       <td>${s.status !== 'active' ? `<button class="btn small green" data-s="active" data-id="${s.id}">${s.status === 'pending' ? 'Valider' : 'Réactiver'}</button>` : `<button class="btn small red" data-s="suspended" data-id="${s.id}">Suspendre</button>`}</td></tr>`).join('')}</tbody></table></div>`;
     pane.onclick = async e => {
       const b = e.target.closest('[data-s]'); if (!b) return;
@@ -302,6 +326,42 @@
     };
   }
 
+  // ===== Abonnements : paiements à valider, abonnés, revenu =====
+  async function subs() {
+    const d = await MG.api('/api/admin/subs');
+    const st = { trial: ['Essai', 'ready'], active: ['Actif', 'active'], late: ['En retard', 'pending'], suspended: ['Suspendu', 'cancelled'], off: ['—', ''] };
+    const tile = (v, l) => `<div class="gr-tile"><b>${v}</b><span>${l}</span></div>`;
+    pane.innerHTML = `${d.enabled ? '' : '<div class="notice"><b>Les abonnements ne sont pas activés</b> : le site est gratuit pour tout le monde. Fixez les montants puis activez-les dans <b>Réglages → Abonnements</b>. À l\'activation, chaque gestionnaire et livreur reçoit son essai gratuit.</div>'}
+      <div class="card"><h2 style="margin-top:0">Abonnements</h2><div class="gr-tiles">
+        ${tile(MG.fcfa(d.stats.monthly), 'revenu mensuel des abonnés payants')}${tile(MG.fcfa(d.stats.month_revenue), `encaissé ce mois (${d.stats.month_payments} paiement${d.stats.month_payments > 1 ? 's' : ''})`)}
+        ${tile(d.stats.active, 'abonnés actifs')}${tile(d.stats.trial, 'en essai gratuit')}${tile(d.stats.trials_ending, 'essais finissant sous 14 j')}
+        ${tile(d.stats.late, 'en retard (délai de grâce)')}${tile(d.stats.suspended, 'suspendus')}</div></div>
+      <div class="card scroll"><h3 style="margin-top:0">Paiements à vérifier (${d.pending.length})</h3>${d.pending.length ? `<table><thead><tr><th>Date</th><th>Qui</th><th>Formule</th><th>Montant</th><th>Moyen · réf.</th><th></th></tr></thead><tbody>
+        ${d.pending.map(p => `<tr><td><small>${MG.date(p.created_at)}</small></td><td><b>${MG.esc(p.shop_name || p.name)}</b><br><small class="muted">${p.role === 'courier' ? 'Livreur' : 'Boutique'} · ${MG.esc(p.phone || '')}</small></td>
+          <td>${MG.esc(p.plan_label)} · ${p.months} mois</td><td><b>${MG.fcfa(p.amount)}</b></td><td>${MG.esc(p.method_label)}<br><small>${MG.esc(p.txn_ref)}</small></td>
+          <td><button class="btn small green" data-sp="confirm" data-id="${p.id}">Valider</button> <button class="btn small red" data-sp="reject" data-id="${p.id}">Refuser</button></td></tr>`).join('')}</tbody></table>`
+        : '<p class="muted" style="margin:0">Aucun paiement en attente.</p>'}</div>
+      <div class="card scroll"><h3 style="margin-top:0">Gestionnaires et livreurs</h3><table><thead><tr><th>Compte</th><th>Formule</th><th>État</th><th>Échéance</th><th></th></tr></thead><tbody>
+        ${d.members.map(u => `<tr><td><b>${MG.esc(u.shop_name || u.name)}</b><br><small class="muted">${u.role === 'courier' ? 'Livreur' : 'Boutique'} · ${MG.esc(u.name || '')} ${MG.esc(u.phone || '')}</small></td>
+          <td>${MG.esc(u.sub_trial || !u.sub_until ? 'Essai' : u.plan_label)}</td><td><span class="tag ${(st[u.state] || st.off)[1]}">${(st[u.state] || st.off)[0]}</span></td>
+          <td><small>${u.until ? new Date(u.until).toLocaleDateString('fr-FR') : '—'}</small></td>
+          <td><button class="btn small alt" data-gift="${u.id}" data-name="${MG.esc(u.shop_name || u.name || '')}">Offrir des jours</button></td></tr>`).join('')}</tbody></table></div>`;
+    pane.onclick = async e => {
+      const b = e.target.closest('[data-sp]'), g = e.target.closest('[data-gift]');
+      try {
+        if (b) {
+          if (b.dataset.sp === 'confirm') { if (!confirm('Confirmer que vous avez bien reçu cet argent ? L\'abonnement sera prolongé.')) return; await MG.api('/api/admin/subs/' + b.dataset.id + '/confirm', { method: 'POST', body: {} }); MG.toast('Abonnement validé'); }
+          else { const note = prompt('Motif du refus (envoyé à la personne) :', 'Paiement non retrouvé'); if (note === null) return; await MG.api('/api/admin/subs/' + b.dataset.id + '/reject', { method: 'POST', body: { note } }); MG.toast('Paiement refusé'); }
+          subs();
+        }
+        if (g) {
+          const days = prompt(`Combien de jours offrir à « ${g.dataset.name} » ? (geste commercial, tarif pionnier…)`, '30'); if (days === null) return;
+          await MG.api('/api/admin/subs/user/' + g.dataset.gift + '/gift', { method: 'POST', body: { days: Number(days) } }); MG.toast('Jours offerts'); subs();
+        }
+      } catch (er) { MG.fail(er); }
+    };
+  }
+
   async function settings() {
     const s = await MG.api('/api/admin/settings');
     const f = (id, label, v, type = 'text') => `<label for="${id}">${label}</label><input id="${id}" type="${type}" value="${MG.esc(v)}">`;
@@ -319,6 +379,13 @@
       <h3 style="margin-top:1rem">Commission du marché</h3>
       ${f('commission_pct', 'Commission sur les ventes des boutiques (%) — s\'applique aux nouvelles commandes', s.commission_pct ?? 0, 'number')}
       ${f('loyalty_max_pct', 'Bons d\'achat fidélité : réduction maximale (%)', s.loyalty_max_pct ?? 30, 'number')}
+      <h3 style="margin-top:1rem">Abonnements</h3>
+      <p class="muted" style="margin:0 0 .5rem">Le marché vit des abonnements des boutiques et des livreurs. Tant qu'ils ne sont pas activés, le site reste gratuit pour tout le monde.</p>
+      <label style="display:flex;gap:.5rem;align-items:center"><input type="checkbox" id="sub_enabled" style="width:auto"${s.sub_enabled ? ' checked' : ''}> <b>Abonnements activés</b></label>
+      ${f('sub_price_essentiel', 'Boutique : formule Essentiel (FCFA par mois)', s.sub_price_essentiel, 'number')}${f('sub_price_pro', 'Boutique : formule Pro (FCFA par mois)', s.sub_price_pro, 'number')}
+      ${f('sub_price_courier', 'Livreur (FCFA par mois)', s.sub_price_courier, 'number')}${f('sub_product_limit', 'Produits en ligne avec Essentiel (Pro : illimité)', s.sub_product_limit, 'number')}
+      ${f('sub_trial_days', 'Essai gratuit (jours), démarre à l\'activation ou à l\'inscription', s.sub_trial_days, 'number')}${f('sub_grace_days', 'Délai de grâce après l\'échéance avant de masquer la boutique (jours)', s.sub_grace_days, 'number')}
+      ${f('moov_number', 'Numéro Moov Money qui reçoit les abonnements (le numéro Airtel est celui du dessus)', s.moov_number || '', 'tel')}
       <h3 style="margin-top:1rem">Inscriptions</h3>
       <label for="invite_required">Qui peut créer un compte ?</label>
       <select id="invite_required"><option value="none">Tout le monde (inscription libre)</option><option value="pro">Clients libres ; boutiques et livreurs uniquement avec un lien d'invitation</option><option value="all">Uniquement avec un lien d'invitation</option></select>
@@ -327,7 +394,10 @@
     S('invite_required').value = s.invite_required || 'none';
     S('sf').onsubmit = async e => {
       e.preventDefault();
-      const body = {}; ['site_name', 'tagline', 'payment_mode', 'airtel_number', 'merchant_name', 'payment_instructions', 'delivery_base', 'delivery_per_km', 'courier_radius_km', 'invite_required', 'promo_max_pct', 'promo_max_days', 'loyalty_max_pct', 'commission_pct'].forEach(k => (body[k] = S(k).value));
+      const body = {}; ['site_name', 'tagline', 'payment_mode', 'airtel_number', 'merchant_name', 'payment_instructions', 'delivery_base', 'delivery_per_km', 'courier_radius_km', 'invite_required', 'promo_max_pct', 'promo_max_days', 'loyalty_max_pct', 'commission_pct',
+        'sub_price_essentiel', 'sub_price_pro', 'sub_price_courier', 'sub_product_limit', 'sub_trial_days', 'sub_grace_days', 'moov_number'].forEach(k => (body[k] = S(k).value));
+      body.sub_enabled = S('sub_enabled').checked;
+      if (body.sub_enabled && !s.sub_enabled && !confirm(`Activer les abonnements ? Chaque boutique et chaque livreur commence un essai gratuit de ${body.sub_trial_days} jours et sera prévenu avant la fin.`)) return;
       try { await MG.api('/api/admin/settings', { method: 'PUT', body }); MG.toast('Réglages enregistrés'); } catch (er) { MG.fail(er); }
     };
     S('chk').onclick = async () => { try { S('chkOut').textContent = JSON.stringify(await MG.api('/api/admin/singpay-check'), null, 2); } catch (er) { MG.fail(er); } };

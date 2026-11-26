@@ -11,18 +11,20 @@
 <body><header id="top"></header>
 <main>
   <h1>Espace livreur</h1>
+  <div id="subBan"></div>
   <div class="card split"><div><b id="avail">…</b><br><span class="muted" id="posState">Position inconnue</span></div>
     <div class="row"><button class="btn" id="toggle">Se mettre disponible</button></div></div>
   <h2>Courses disponibles près de vous</h2>
   <div id="jobs"></div>
   <h2>Mes courses</h2>
   <div id="mine"></div>
+  <div id="sub" style="margin-top:var(--space-5)"></div>
   <div id="acct" style="margin-top:var(--space-5)"></div>
   <div id="docs" style="margin-top:var(--space-5)"></div>
   <div id="detail"></div>
 </main>
 <script src="/common.js"></script>
-<script src="/osm-map.js"></script>
+<script src="/osm-map.js"></script><script src="/abonnement.js"></script>
 <script>
 (async () => {
   if (!(await MG.require(['courier']))) return;
@@ -112,6 +114,11 @@
     S('af').onsubmit = async e => { e.preventDefault(); try { const r = await MG.api('/api/courier/account', { method: 'POST', body: { method: S('am').value, number: S('an').value, name: S('anm').value, code: S('ac').value, bank: S('ab').value } }); MG.toast(r.account === 'pending' ? 'Demande envoyée : l\'équipe du marché doit l\'accepter' : r.account === 'unchanged' ? 'Rien à modifier' : 'Compte envoyé'); account(); } catch (er) { MG.fail(er); } };
   }
   account().catch(() => {});
+  // Mon abonnement (et bandeau en haut si l'échéance approche ou est passée)
+  const subLoad = async () => { try { S('subBan').innerHTML = MG.subBanner(await MG.api('/api/sub'), '#abonnement'); await MG.subPane(S('sub')); } catch { /* ignoré */ } };
+  subLoad();
+  S('subBan').onclick = e => { if (e.target.closest('[data-sub-go]')) { e.preventDefault(); S('sub').scrollIntoView({ behavior: 'smooth' }); } };
+  if (location.hash === '#abonnement') setTimeout(() => S('sub').scrollIntoView(), 600);
   S('toggle').onclick = async () => {
     try {
       await MG.api('/api/courier/availability', { method: 'POST', body: { available: !available } });

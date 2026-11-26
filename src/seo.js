@@ -44,7 +44,7 @@ function shopCard(s) {
   return `<a class="tile shop${s.promos ? ' has-promo' : ''}" href="/boutique/${encodeURIComponent(s.slug)}">
     <div class="cover" style="background-image:url('${cover}')">${s.promos ? `<span class="ribbon">Promo${s.best_pct ? '<span class="rl"> jusqu\'à</span> −' + s.best_pct + ' %' : ''}</span>` : ''}</div>
     <div class="body"><span class="logo"${s.photo_id ? ` style="background-image:url('${photo(s.photo_id)}')"` : ''}>${s.photo_id ? '' : esc(s.name.trim().charAt(0).toUpperCase())}</span><h3>${esc(s.name)}</h3>
-    ${s.loyalty_enabled ? '<span class="tag fid">Carte fidélité</span>' : ''}<p class="muted" style="margin:0;font-size:.9rem">${s.products ? `${s.products} produit${s.products > 1 ? 's' : ''}` : 'Vitrine en préparation'}${s.promos ? ` · <b style="color:var(--papaye-text)">${s.promos} en promo</b>` : ''}${s.address ? ' · ' + esc(s.address) : ''}</p></div></a>`;
+    ${s.pro ? '<span class="tag pro">★ Pro</span> ' : ''}${s.loyalty_enabled ? '<span class="tag fid">Carte fidélité</span>' : ''}<p class="muted" style="margin:0;font-size:.9rem">${s.products ? `${s.products} produit${s.products > 1 ? 's' : ''}` : 'Vitrine en préparation'}${s.promos ? ` · <b style="color:var(--papaye-text)">${s.promos} en promo</b>` : ''}${s.address ? ' · ' + esc(s.address) : ''}</p></div></a>`;
 }
 
 async function activeShops(env) {
@@ -57,8 +57,8 @@ async function activeShopsDb(env) {
             (SELECT COUNT(*) FROM products p WHERE p.shop_id=s.id AND p.active=1 AND p.stock>0 AND ${EFFECTIVE_PRICE} < p.price) AS promos,
             (SELECT MAX(ROUND(100 - 100.0 * p.promo_price / p.price)) FROM products p WHERE p.shop_id=s.id AND p.active=1 AND p.stock>0 AND ${EFFECTIVE_PRICE} < p.price) AS best_pct,
             COALESCE(s.cover_photo, (SELECT p.photo_id FROM products p WHERE p.shop_id=s.id AND p.active=1 AND p.photo_id IS NOT NULL ORDER BY p.created_at DESC LIMIT 1)) AS cover_id,
-            (SELECT MAX(p.created_at) FROM products p WHERE p.shop_id=s.id) AS last_product
-     FROM shops s WHERE s.status='active' ORDER BY promos > 0 DESC, s.name`).all();
+            (SELECT MAX(p.created_at) FROM products p WHERE p.shop_id=s.id) AS last_product, s.pro
+     FROM shops s WHERE s.status='active' ORDER BY s.pro DESC, promos > 0 DESC, s.name`).all();
   return results;
 }
 
@@ -113,7 +113,16 @@ async function shopPage(env, url, slug) {
   const description = cut(s.description && s.description.length >= 40 ? s.description
     : `${s.name}, boutique ${cat.toLowerCase()}${s.address ? ' à ' + s.address : ''}. ${products.length} produit${products.length > 1 ? 's' : ''}${names ? ' : ' + names : ''}. Commandez en ligne, livraison rapide.`, 158);
   const imgId = s.photo_id || (products.find(p => p.photo_id) || {}).photo_id;
-  const image = imgId ? origin + photo(imgId) : origin + '/img/partage.png';
+  let image = imgId ? origin + photo(imgId) : origin + '/img/partage.png';
+  // Lien partagé vers un produit (?p=…) : l'aperçu WhatsApp / Facebook montre ce produit, sa photo et son prix
+  const pid = url.searchParams.get('p'), prod = pid && products.find(p => p.id === pid);
+  let shareTitle = title, shareDesc = description, shareUrl = pageUrl;
+  if (prod) {
+    shareTitle = `${prod.name} · ${fcfa(prod.price)}${prod.old_price ? ' (au lieu de ' + fcfa(prod.old_price) + ')' : ''} | ${s.name}`;
+    shareDesc = cut(`${prod.description ? prod.description + ' ' : ''}Chez ${s.name}${s.address ? ', ' + s.address : ''}. Commandez en ligne, livraison rapide.`, 158);
+    shareUrl = `${pageUrl}?p=${encodeURIComponent(prod.id)}`;
+    if (prod.photo_id) image = origin + photo(prod.photo_id);
+  }
   const ld = [
     { '@context': 'https://schema.org', '@type': 'Store', name: s.name, url: pageUrl, image, description: cut(s.description || description, 300),
       address: { '@type': 'PostalAddress', streetAddress: s.address || undefined, addressLocality: 'Libreville', addressCountry: 'GA' },
@@ -139,8 +148,8 @@ async function shopPage(env, url, slug) {
   const boot = `<script>window.__SHOP__=${JSON.stringify({ shop: shopPub, products, mine: null }).replace(/</g, '\\u003c')};</script>`;
   const res = await page(env, url, '/boutique');
   return new HTMLRewriter()
-    .on('title', { element: e => e.setInnerContent(title) })
-    .on('head', { element: e => e.append(headTags({ title, description, url: pageUrl, image, imageAlt: s.name, site }) + ld.map(jsonLd).join('') + boot, { html: true }) })
+    .on('title', { element: e => e.setInnerContent(shareTitle) })
+    .on('head', { element: e => e.append(headTags({ title: shareTitle, description: shareDesc, url: shareUrl, image, imageAlt: prod ? prod.name : s.name, site }) + ld.map(jsonLd).join('') + boot, { html: true }) })
     .on('main', { element: e => { if (shopPub.look) e.setAttribute('data-look', shopPub.look); } }) // design choisi : présent dès le premier affichage
     .on('#head', { element: e => e.setInnerContent(hero, { html: true }) })
     .on('#products', { element: e => e.setInnerContent(products.map((p, i) => productCard(p, s.category, i < 4)).join(''), { html: true }) })
