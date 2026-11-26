@@ -18,7 +18,7 @@ export function publicService(r) {
 }
 function reqRow(r, forCustomer) {
   const open = ['accepted', 'done'].includes(r.status);
-  return { ref: r.ref, status: r.status, status_label: REQ_STATUS[r.status] || r.status, service: r.service_name, service_id: r.service_id,
+  return { ref: r.ref, status: r.status, status_label: REQ_STATUS[r.status] || r.status, service: r.service_name, service_id: r.service_id, model: r.model_title || null,
     wanted_date: r.wanted_date, place: r.place, details: r.details, quote_amount: r.quote_amount, quote_note: r.quote_note,
     created_at: r.created_at, updated_at: r.updated_at,
     ...(forCustomer
@@ -26,8 +26,9 @@ function reqRow(r, forCustomer) {
       : { customer: { name: r.customer_name, phone: r.phone || r.customer_phone } }) };
 }
 const REQ_SELECT = `SELECT r.*, sv.name AS service_name, s.name AS shop_name, s.slug, s.category, s.photo_id AS shop_photo, s.phone AS shop_phone, s.whatsapp AS shop_whatsapp,
-  s.owner_id, u.name AS customer_name, u.phone AS customer_phone
-  FROM service_requests r JOIN services sv ON sv.id=r.service_id JOIN shops s ON s.id=r.shop_id JOIN users u ON u.id=r.customer_id`;
+  s.owner_id, u.name AS customer_name, u.phone AS customer_phone, mi.title AS model_title
+  FROM service_requests r JOIN services sv ON sv.id=r.service_id JOIN shops s ON s.id=r.shop_id JOIN users u ON u.id=r.customer_id
+  LEFT JOIN service_items mi ON mi.id=r.model_id`;
 const validDate = d => /^\d{4}-\d{2}-\d{2}$/.test(d) && !isNaN(new Date(d + 'T12:00:00Z'));
 
 async function cleanServiceBody(env, user, b, cleanText) {
@@ -50,6 +51,44 @@ export async function servicesOfShop(env, shopId) {
   return results.map(publicService);
 }
 
+// ---------- Vitrine : réalisations (albums photos) et modèles (catalogue) ----------
+export const ITEM_KINDS = { realisation: 'Réalisation', modele: 'Modèle' };
+const MAX_ITEMS = 40, MAX_ITEM_PHOTOS = 8;
+const itemPhotos = r => { let l = []; try { l = JSON.parse(r.photos || '[]'); } catch { l = []; } return (Array.isArray(l) ? l : []).filter(x => /^[a-f0-9]{16}$/.test(x)).slice(0, MAX_ITEM_PHOTOS); };
+export const publicItem = r => ({ id: r.id, kind: r.kind, title: r.title, description: r.description, photos: itemPhotos(r), service_id: r.service_id, price: r.price, created_at: r.created_at });
+export async function itemsOfShop(env, shopId) {
+  const { results } = await env.DB.prepare(`SELECT i.* FROM service_items i LEFT JOIN services sv ON sv.id=i.service_id
+    WHERE i.shop_id=?1 AND i.active=1 AND (i.kind='realisation' OR sv.active=1) ORDER BY i.created_at DESC`).bind(shopId).all();
+  const all = results.map(publicItem).filter(i => i.photos.length);
+  return { realisations: all.filter(i => i.kind === 'realisation'), modeles: all.filter(i => i.kind === 'modele') };
+}
+async function cleanItemBody(env, user, shop, b, cleanText, keepPhotos) {
+  const kind = ITEM_KINDS[b.kind] ? b.kind : null;
+  if (!kind) return { error: 'Choisissez « Réalisation » ou « Modèle »' };
+  const title = cleanText(b.title, 100);
+  if (title.length < 2) return { error: 'Donnez un titre' };
+  let service_id = null;
+  if (b.service_id) {
+    const sv = await env.DB.prepare('SELECT id FROM services WHERE id=?1 AND shop_id=?2 AND active=1').bind(String(b.service_id), shop.id).first();
+    if (!sv) return { error: 'Prestation introuvable' };
+    service_id = sv.id;
+  }
+  if (kind === 'modele' && !service_id) return { error: 'Choisissez la prestation à laquelle ce modèle correspond : c\'est elle que le client réservera' };
+  let price = null;
+  if (kind === 'modele' && b.price !== undefined && b.price !== null && String(b.price).trim() !== '') {
+    price = Math.round(Number(b.price));
+    if (!(price >= 100 && price <= 100000000)) return { error: 'Prix « à partir de » invalide (100 FCFA minimum)' };
+  }
+  let photos = keepPhotos;
+  if (b.photos !== undefined) {
+    const ids = (Array.isArray(b.photos) ? b.photos : []).map(String).filter(x => /^[a-f0-9]{16}$/.test(x)).slice(0, MAX_ITEM_PHOTOS);
+    photos = [];
+    for (const id of ids) if (await env.DB.prepare('SELECT 1 FROM photos WHERE id=?1 AND owner_id=?2').bind(id, user.id).first()) photos.push(id);
+  }
+  if (!photos || !photos.length) return { error: 'Ajoutez au moins une photo' };
+  return { kind, title, description: cleanText(b.description, 1500), service_id, price, photos: JSON.stringify(photos) };
+}
+
 // ---------- Client : demander, suivre, accepter ou refuser un devis ----------
 export async function serviceCustomerRoutes(env, request, user, p, method, { readJson, cleanText }) {
   let m;
@@ -67,11 +106,16 @@ export async function serviceCustomerRoutes(env, request, user, p, method, { rea
     if (phone.replace(/\D/g, '').length < 8) return bad('Indiquez un numéro où le prestataire peut vous joindre');
     if (await env.DB.prepare(`SELECT 1 FROM service_requests WHERE customer_id=?1 AND service_id=?2 AND status IN ('new','quoted')`).bind(user.id, sv.id).first())
       return bad('Vous avez déjà une demande en cours pour cette prestation : retrouvez-la dans « Mes achats ».', 409);
+    let model = null; // « Je veux ce modèle » : le modèle doit appartenir à ce prestataire et viser cette prestation
+    if (b.model_id) {
+      model = await env.DB.prepare(`SELECT id,title FROM service_items WHERE id=?1 AND shop_id=?2 AND kind='modele' AND active=1 AND service_id=?3`).bind(String(b.model_id), sv.shop_id, sv.id).first();
+      if (!model) return bad('Ce modèle n\'est plus proposé');
+    }
     const ref = 'DEV-' + rand(3).toUpperCase();
-    await env.DB.prepare(`INSERT INTO service_requests (id,ref,service_id,shop_id,customer_id,wanted_date,place,details,phone,status,created_at,updated_at)
-      VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,'new',?10,?10)`).bind(uid(), ref, sv.id, sv.shop_id, user.id, date, place, details, phone, now()).run();
+    await env.DB.prepare(`INSERT INTO service_requests (id,ref,service_id,shop_id,customer_id,wanted_date,place,details,phone,status,created_at,updated_at,model_id)
+      VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,'new',?10,?10,?11)`).bind(uid(), ref, sv.id, sv.shop_id, user.id, date, place, details, phone, now(), model ? model.id : null).run();
     await recordEvent(env, 'svcreq:' + user.id);
-    await notify(env, sv.owner_id, 'Nouvelle demande de devis', `${user.name} : ${sv.name}, le ${date.split('-').reverse().join('/')} à ${place}. Réf. ${ref}`, '/vendeur.html#demandes', 'order');
+    await notify(env, sv.owner_id, 'Nouvelle demande de devis', `${user.name} : ${sv.name}${model ? ' (modèle « ' + model.title + ' »)' : ''}, le ${date.split('-').reverse().join('/')} à ${place}. Réf. ${ref}`, '/vendeur.html#demandes', 'order');
     return json({ ok: true, ref }, 201);
   }
   if (method === 'GET' && p === '/api/my/requests') {
@@ -97,7 +141,7 @@ export async function serviceCustomerRoutes(env, request, user, p, method, { rea
 
 // ---------- Prestataire : prestations et demandes (appelé dans le bloc /api/seller/, boutique déjà chargée) ----------
 export async function serviceSellerRoutes(env, request, user, shop, p, method, { readJson, cleanText }) {
-  if (!p.startsWith('/api/seller/services') && !p.startsWith('/api/seller/requests')) return null;
+  if (!p.startsWith('/api/seller/services') && !p.startsWith('/api/seller/requests') && !p.startsWith('/api/seller/items')) return null;
   if (!isServiceCat(shop.category)) return bad('Votre boutique vend des produits : les prestations sont réservées aux rayons de services', 403);
   let m;
   if (method === 'GET' && p === '/api/seller/services') {
@@ -127,6 +171,30 @@ export async function serviceSellerRoutes(env, request, user, shop, p, method, {
     if (v.error) return bad(v.error);
     await env.DB.prepare('UPDATE services SET name=?2,description=?3,price_type=?4,price=?5,photo_id=?6,photos=?7 WHERE id=?1')
       .bind(sv.id, v.name, v.description, v.price_type, v.price, v.photo_id, v.photos).run();
+    return json({ ok: true });
+  }
+  if (method === 'GET' && p === '/api/seller/items') {
+    const { results } = await env.DB.prepare('SELECT * FROM service_items WHERE shop_id=?1 AND active=1 ORDER BY created_at DESC').bind(shop.id).all();
+    return json(results.map(publicItem));
+  }
+  if (method === 'POST' && p === '/api/seller/items') {
+    const n = (await env.DB.prepare('SELECT COUNT(*) AS n FROM service_items WHERE shop_id=?1 AND active=1').bind(shop.id).first()).n;
+    if (n >= MAX_ITEMS) return bad(`Votre vitrine compte déjà ${MAX_ITEMS} réalisations et modèles : retirez-en un ancien pour en ajouter un nouveau.`, 403);
+    const v = await cleanItemBody(env, user, shop, await readJson(request) || {}, cleanText, null);
+    if (v.error) return bad(v.error);
+    const id = uid();
+    await env.DB.prepare(`INSERT INTO service_items (id,shop_id,kind,title,description,photos,service_id,price,active,created_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,1,?9)`)
+      .bind(id, shop.id, v.kind, v.title, v.description, v.photos, v.service_id, v.price, now()).run();
+    return json({ id }, 201);
+  }
+  if ((method === 'PUT' || method === 'DELETE') && (m = p.match(/^\/api\/seller\/items\/([a-f0-9]{16})$/))) {
+    const it = await env.DB.prepare('SELECT * FROM service_items WHERE id=?1 AND shop_id=?2 AND active=1').bind(m[1], shop.id).first();
+    if (!it) return bad('Élément introuvable', 404);
+    if (method === 'DELETE') { await env.DB.prepare('UPDATE service_items SET active=0 WHERE id=?1').bind(it.id).run(); return json({ ok: true }); }
+    const v = await cleanItemBody(env, user, shop, await readJson(request) || {}, cleanText, itemPhotos(it));
+    if (v.error) return bad(v.error);
+    await env.DB.prepare('UPDATE service_items SET kind=?2,title=?3,description=?4,photos=?5,service_id=?6,price=?7 WHERE id=?1')
+      .bind(it.id, v.kind, v.title, v.description, v.photos, v.service_id, v.price).run();
     return json({ ok: true });
   }
   if (method === 'GET' && p === '/api/seller/requests') {

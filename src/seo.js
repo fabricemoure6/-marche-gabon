@@ -1,7 +1,7 @@
 // Référencement : pages rendues côté serveur (contenu, titres, aperçus de partage, données structurées),
 // sitemap.xml et robots.txt. Le JavaScript du navigateur reprend ensuite la main sur les mêmes éléments.
 import { isServiceCat, ALL_CATEGORIES, SERVICE_CATEGORIES } from './lib.js';
-import { servicesOfShop, PRICE_TYPES } from './services.js';
+import { servicesOfShop, itemsOfShop, PRICE_TYPES } from './services.js';
 import { CATEGORIES, loadSettings, publicProduct, EFFECTIVE_PRICE, LOW_STOCK, UNITS, fmtQty, cached, PUBLIC_TTL, lookOf } from './lib.js';
 
 const ILLU = { habits: 'pagne-wax', parfumerie: 'parfum', alimentation: 'bananes-plantain', quincaillerie: 'sac-riz', electronique: 'smartphone', maison: 'marmite', autres: 'panier-tresse',
@@ -117,6 +117,7 @@ async function shopPage(env, url, slug) {
   const s = await cached('seo-shop:' + slug, PUBLIC_TTL, () => env.DB.prepare(`SELECT id,name,slug,category,description,address,photo_id,cover_photo,look,phone,created_at,loyalty_enabled,loyalty_every,loyalty_kind,loyalty_value,loyalty_min FROM shops WHERE slug=?1 AND status='active'`).bind(slug).first());
   if (!s) return null;
   const svc = isServiceCat(s.category) ? await cached('shop-services:' + s.id, PUBLIC_TTL, () => servicesOfShop(env, s.id)) : null; // prestataire de services
+  const items = svc ? await cached('shop-items:' + s.id, PUBLIC_TTL, () => itemsOfShop(env, s.id)) : null;
   const results = svc ? [] : await cached('shop-products:' + s.id, PUBLIC_TTL, async () => (await env.DB.prepare(`SELECT id,name,description,price,promo_price,promo_until,stock,unit,qty_step,photo_id,photos,created_at FROM products WHERE shop_id=?1 AND active=1 ORDER BY created_at DESC`).bind(s.id).all()).results);
   const products = results.map(publicProduct).sort((a, b) => (b.promo_pct ? 1 : 0) - (a.promo_pct ? 1 : 0) || (b.stock > 0) - (a.stock > 0));
   const origin = url.origin, site = st.site_name, pageUrl = `${origin}/boutique/${encodeURIComponent(s.slug)}`;
@@ -126,7 +127,7 @@ async function shopPage(env, url, slug) {
   const description = cut(s.description && s.description.length >= 40 ? s.description
     : svc ? `${s.name}, ${cat.toLowerCase()}${s.address ? ' à ' + s.address : ''}. ${svc.length} prestation${svc.length > 1 ? 's' : ''}${names ? ' : ' + names : ''}. Demandez un devis en ligne.`
     : `${s.name}, boutique ${cat.toLowerCase()}${s.address ? ' à ' + s.address : ''}. ${products.length} produit${products.length > 1 ? 's' : ''}${names ? ' : ' + names : ''}. Commandez en ligne, livraison rapide.`, 158);
-  const imgId = s.photo_id || (products.find(p => p.photo_id) || {}).photo_id;
+  const imgId = s.photo_id || (products.find(p => p.photo_id) || {}).photo_id || (items && (items.realisations[0] || items.modeles[0] || {}).photos || [])[0];
   let image = imgId ? origin + photo(imgId) : origin + '/img/partage.png';
   // Lien partagé vers un produit (?p=…) : l'aperçu WhatsApp / Facebook montre ce produit, sa photo et son prix
   const pid = url.searchParams.get('p'), prod = pid && products.find(p => p.id === pid);
@@ -160,7 +161,7 @@ async function shopPage(env, url, slug) {
   const loyalty = !svc && s.loyalty_enabled ? { every: s.loyalty_every, kind: s.loyalty_kind, value: s.loyalty_value, min: s.loyalty_min || 0 } : null;
   const shopPub = { id: s.id, name: s.name, slug: s.slug, category: s.category, description: s.description, address: s.address, photo_id: s.photo_id, cover_photo: s.cover_photo, look: lookOf(s.look), phone: s.phone, loyalty };
   if (svc) shopPub.kind = 'services';
-  const boot = `<script>window.__SHOP__=${JSON.stringify({ shop: shopPub, products, ...(svc ? { services: svc } : {}), mine: null }).replace(/</g, '\\u003c')};</script>`;
+  const boot = `<script>window.__SHOP__=${JSON.stringify({ shop: shopPub, products, ...(svc ? { services: svc, items } : {}), mine: null }).replace(/</g, '\\u003c')};</script>`;
   const res = await page(env, url, '/boutique');
   return new HTMLRewriter()
     .on('title', { element: e => e.setInnerContent(shareTitle) })

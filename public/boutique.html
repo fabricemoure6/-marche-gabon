@@ -26,6 +26,7 @@
     </select>
   </div>
   <div class="grid" id="products"></div>
+  <div id="svcExtra"></div>
   <div class="card empty-state" id="empty" hidden><img src="/img/produits/panier-tresse.svg" alt=""><h3 id="emptyTitle">Cette boutique n'a pas encore de produits</h3><p class="muted" id="emptyText">Revenez bientôt !</p></div>
 </main>
 <script src="/common.js"></script>
@@ -82,29 +83,47 @@
     };
     $('#q').oninput = drawSvc; drawSvc();
     $('#products').onclick = e => { const b = e.target.closest('[data-svc]'); if (b) ask(services.find(x => x.id === b.dataset.svc)); };
-    const want = MG.param('svc'); if (want && services.some(x => x.id === want)) ask(services.find(x => x.id === want));
+    // Vitrine : modèles (à choisir) puis réalisations (albums photos)
+    const items = data.items || { realisations: [], modeles: [] }, all = [...items.modeles, ...items.realisations];
+    const svcName = id => (services.find(x => x.id === id) || {}).name || '';
+    const cover = it => `<img src="${MG.photo(it.photos[0])}" alt="${MG.esc(it.title)}" loading="lazy"><span class="album-n">${MG.icon('camera', 14)}${it.photos.length}</span>`;
+    const model = it => `<article class="tile product model"><div class="pimg" data-item="${it.id}" role="button" tabindex="0" aria-label="Voir le modèle ${MG.esc(it.title)}">${cover(it)}</div>
+      <div class="pbody"><span class="pshop">${MG.esc(svcName(it.service_id))}</span><h3 class="pname">${MG.esc(it.title)}</h3>${it.description ? `<p class="pdesc">${MG.esc(it.description)}</p>` : ''}
+      <div class="pfoot"><div>${it.price ? `<small class="muted">à partir de</small><br><span class="price">${MG.fcfa(it.price)}</span>` : '<span class="price">Sur devis</span>'}</div><button class="btn small" data-want="${it.id}">Je veux ce modèle</button></div></div></article>`;
+    const album = it => `<button type="button" class="album" data-item="${it.id}" aria-label="Voir la réalisation ${MG.esc(it.title)}">${cover(it)}<span class="album-t">${MG.esc(it.title)}</span></button>`;
+    $('#svcExtra').innerHTML = (items.modeles.length ? `<section id="modeles"><div class="section-head"><h2>Nos modèles</h2><span class="muted">Choisissez, le prestataire vous fait un devis</span></div><div class="grid">${items.modeles.map(model).join('')}</div></section>` : '')
+      + (items.realisations.length ? `<section id="realisations"><div class="section-head"><h2>Nos réalisations</h2><span class="muted">${items.realisations.length} album${items.realisations.length > 1 ? 's' : ''}</span></div><div class="albums">${items.realisations.map(album).join('')}</div></section>` : '');
+    if (all.length) $('#fid').innerHTML = `<div class="svc-nav" role="navigation" aria-label="Sur cette page"><a href="#prodTitle">Prestations (${services.length})</a>${items.modeles.length ? `<a href="#modeles">Modèles (${items.modeles.length})</a>` : ''}${items.realisations.length ? `<a href="#realisations">Réalisations (${items.realisations.length})</a>` : ''}</div>`;
+    const wantIt = it => ask(services.find(x => x.id === it.service_id), it);
+    $('#svcExtra').onclick = e => {
+      const w = e.target.closest('[data-want]'), v = e.target.closest('[data-item]');
+      if (w) return wantIt(all.find(x => x.id === w.dataset.want));
+      if (v) { const it = all.find(x => x.id === v.dataset.item); MG.itemSheet(it, { service: svcName(it.service_id), want: it.kind === 'modele' ? wantIt : null }); }
+    };
+    $('#svcExtra').onkeydown = e => { const v = e.target.closest('.pimg[data-item]'); if (v && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); v.click(); } };
+    const want = MG.param('svc'); if (want && services.some(x => x.id === want)) ask(services.find(x => x.id === want), items.modeles.find(x => x.id === MG.param('model')));
   }
-  function ask(sv) {
+  function ask(sv, model) {
     if (!sv) return;
     const HINT = { location_voiture: 'Type de véhicule, nombre de jours, avec ou sans chauffeur, lieu de remise du véhicule…', evenementiel: 'Type d\'événement, nombre d\'invités, horaires, matériel souhaité…',
       nettoyage: 'Type de lieu, surface ou nombre de pièces, fréquence…', reparation: 'Ce qui ne marche pas, marque de l\'appareil, urgence…',
       btp: 'Nature des travaux, dimensions, plans ou photos disponibles…', architecture: 'Type de projet, surface du terrain, budget indicatif…',
       beaute_domicile: 'Prestation souhaitée, nombre de personnes, heure…', cours: 'Matière, niveau, nombre d\'heures par semaine…' };
-    if (!MG.user) { location.href = '/compte.html?next=' + encodeURIComponent(location.pathname + '?svc=' + sv.id); return; }
+    if (!MG.user) { location.href = '/compte.html?next=' + encodeURIComponent(location.pathname + '?svc=' + sv.id + (model ? '&model=' + model.id : '')); return; }
     if (MG.user.role !== 'customer') { MG.toast('Les demandes se font avec un compte client', true); return; }
     const today = new Date().toISOString().slice(0, 10);
     const m = MG.modal(`<form id="rq"><h2 style="margin-top:0">${sv.price_type === 'devis' ? 'Demander un devis' : 'Réserver'}</h2>
-      <p class="muted" style="margin-top:0">${MG.esc(sv.name)} · ${MG.esc(shop.name)}<br>${MG.servicePrice(sv)}</p>
+      <p class="muted" style="margin-top:0">${model ? `Modèle <b>« ${MG.esc(model.title)} »</b><br>` : ''}${MG.esc(sv.name)} · ${MG.esc(shop.name)}<br>${model && model.price ? 'à partir de <span class="price">' + MG.fcfa(model.price) + '</span>' : MG.servicePrice(sv)}</p>
       <label for="rqDate">Date souhaitée</label><input id="rqDate" type="date" min="${today}" required>
       <label for="rqPlace">Lieu de la prestation</label><input id="rqPlace" required maxlength="200" placeholder="Quartier, ville">
-      <label for="rqDet">Votre besoin</label><textarea id="rqDet" required minlength="5" maxlength="1000" placeholder="${MG.esc(HINT[shop.category] || 'Décrivez ce dont vous avez besoin')}"></textarea>
+      <label for="rqDet">Votre besoin</label><textarea id="rqDet" required minlength="5" maxlength="1000" placeholder="${MG.esc(HINT[shop.category] || 'Décrivez ce dont vous avez besoin')}">${model ? MG.esc('Je souhaite le modèle « ' + model.title + ' ». ') : ''}</textarea>
       <label for="rqTel">Téléphone où vous joindre</label><input id="rqTel" type="tel" required maxlength="30" value="${MG.esc(MG.user.phone || '')}">
       <p class="muted" style="font-size:.88rem">Le prestataire vous répond avec un prix ferme. Vous l'acceptez ou le refusez ensuite : rien n'est payé ni engagé avant.</p>
       <p class="err" id="rqErr"></p><div class="row"><button class="btn">Envoyer la demande</button><button type="button" class="btn alt" data-close>Annuler</button></div></form>`);
     m.el.querySelector('#rq').onsubmit = async e => {
       e.preventDefault();
       try {
-        const r = await MG.api('/api/services/' + sv.id + '/request', { method: 'POST', body: { wanted_date: m.el.querySelector('#rqDate').value, place: m.el.querySelector('#rqPlace').value, details: m.el.querySelector('#rqDet').value, phone: m.el.querySelector('#rqTel').value } });
+        const r = await MG.api('/api/services/' + sv.id + '/request', { method: 'POST', body: { model_id: model ? model.id : undefined, wanted_date: m.el.querySelector('#rqDate').value, place: m.el.querySelector('#rqPlace').value, details: m.el.querySelector('#rqDet').value, phone: m.el.querySelector('#rqTel').value } });
         m.el.innerHTML = `<div style="text-align:center"><h2>Demande envoyée</h2><p>Référence <b>${MG.esc(r.ref)}</b>. ${MG.esc(shop.name)} va vous répondre avec un devis : vous serez prévenu ici et dans « Mes achats ».</p>
           <p class="row" style="justify-content:center"><a class="btn" href="/commandes.html#demandes">Suivre ma demande</a><button class="btn alt" type="button" id="rqOk">Fermer</button></p></div>`;
         m.el.querySelector('#rqOk').onclick = m.close;

@@ -4,7 +4,7 @@ import {
   CATEGORIES, ORDER_STATUS, ensureSchema, loadSettings, saveSettings, toBase64, fromBase64, sniffImage, sniffDocument, DOC_KINDS,
   withSecurityHeaders, recentCount, recordEvent, cached, clearCache, PUBLIC_TTL,
   validCoord, distanceKm, slugify, EFFECTIVE_PRICE, promoActive, publicProduct, voucherDiscount, loyaltyProgram, LOW_STOCK, photoList, SOLD, EXPENSE_CATS, period, UNITS, r3, unitOf, stepOf, fmtQty, lineTotal, cleanAccount, METHOD_LABEL, lookOf, SERVICE_CATEGORIES, isServiceCat, docKindsFor } from './lib.js';
-import { serviceCustomerRoutes, serviceSellerRoutes, servicesOfShop } from './services.js';
+import { serviceCustomerRoutes, serviceSellerRoutes, servicesOfShop, itemsOfShop } from './services.js';
 import { backupStep, backupStatus, backupStream, backupWatch } from './backup.js';
 import { notify, confirmCheckout, rejectCheckout, cancelOrders, releaseVoucher, restock, createVoucher, awardLoyalty, startOnlinePayment, singpayVerify, singpayOn, singpayCall, sp } from './pay.js';
 import { botReply, searchProducts } from './bot.js';
@@ -357,7 +357,8 @@ async function route(request, env) {
         const s = { ...shopRow }; // copie : l'original reste intact dans la mémoire courte
         if (isServiceCat(s.category)) { // prestataire de services : ses prestations, pas de produits ni de fidélité
           for (const k of ['loyalty_enabled', 'loyalty_every', 'loyalty_kind', 'loyalty_value', 'loyalty_min', 'loyalty_days']) delete s[k];
-          return json({ shop: { ...s, kind: 'services' }, products: [], services: await cached('shop-services:' + s.id, PUBLIC_TTL, () => servicesOfShop(env, s.id)), mine: null });
+          return json({ shop: { ...s, kind: 'services' }, products: [], services: await cached('shop-services:' + s.id, PUBLIC_TTL, () => servicesOfShop(env, s.id)),
+            items: await cached('shop-items:' + s.id, PUBLIC_TTL, () => itemsOfShop(env, s.id)), mine: null });
         }
         const loyalty = loyaltyProgram(s);
         for (const k of ['loyalty_enabled', 'loyalty_every', 'loyalty_kind', 'loyalty_value', 'loyalty_min', 'loyalty_days']) delete s[k];

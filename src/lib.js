@@ -244,6 +244,10 @@ const SCHEMA = [
      quote_amount INTEGER, quote_note TEXT, created_at TEXT, updated_at TEXT)`,
   `CREATE INDEX IF NOT EXISTS idx_service_requests_shop ON service_requests(shop_id, status)`,
   `CREATE INDEX IF NOT EXISTS idx_service_requests_customer ON service_requests(customer_id)`,
+  // Vitrine des prestataires : albums de réalisations et catalogue de modèles
+  `CREATE TABLE IF NOT EXISTS service_items (id TEXT PRIMARY KEY, shop_id TEXT NOT NULL, kind TEXT NOT NULL, title TEXT NOT NULL, description TEXT,
+     photos TEXT, service_id TEXT, price INTEGER, active INTEGER NOT NULL DEFAULT 1, created_at TEXT)`,
+  `CREATE INDEX IF NOT EXISTS idx_service_items_shop ON service_items(shop_id, active)`,
   // Paiements d'abonnement envoyés par les gestionnaires et livreurs, validés par l'administrateur
   `CREATE TABLE IF NOT EXISTS sub_payments (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, plan TEXT NOT NULL, months INTEGER NOT NULL, amount INTEGER NOT NULL,
      method TEXT, txn_ref TEXT, status TEXT NOT NULL DEFAULT 'pending', note TEXT, created_at TEXT, decided_at TEXT, decided_by TEXT)`,
@@ -263,6 +267,7 @@ const MIGRATIONS = {
     ['payout_method', 'TEXT'], ['payout_number', 'TEXT'], ['payout_name', 'TEXT'], ['payout_code', 'TEXT'], ['payout_bank', 'TEXT']],
   couriers: [['pay_method', 'TEXT'], ['pay_number', 'TEXT'], ['pay_name', 'TEXT'], ['pay_code', 'TEXT'], ['pay_bank', 'TEXT']],
   order_items: [['unit', "TEXT NOT NULL DEFAULT 'piece'"]],
+  service_requests: [['model_id', 'TEXT']],
   orders: [['pay_account', 'TEXT'], ['fee_account', 'TEXT'], ['pay_dispute', 'TEXT'], ['fee_dispute', 'TEXT'], ['pay_direct', 'INTEGER NOT NULL DEFAULT 0'], ['pay_ref', 'TEXT'], ['pay_submitted_at', 'TEXT'], ['fee_state', 'TEXT'], ['fee_ref', 'TEXT'], ['discount', 'INTEGER NOT NULL DEFAULT 0'], ['voucher_id', 'TEXT'], ['commission', 'INTEGER NOT NULL DEFAULT 0']]
 };
 async function migrate(db) {

@@ -758,3 +758,25 @@ label.consent input{width:20px;height:20px;min-height:0;flex:none;margin-top:2px
 #services{margin-top:var(--space-6)}
 .rq-quote{margin-top:var(--space-3);padding-top:var(--space-3);border-top:1px solid var(--line)}
 @media (max-width:520px){.rq-quote>div{grid-template-columns:1fr!important}}
+
+/* ---------- Vitrine des prestataires ---------- */
+.svc-nav{display:flex;gap:var(--space-2);flex-wrap:wrap;margin:var(--space-4) 0 0}
+.svc-nav a{padding:8px 14px;border-radius:var(--radius-pill);background:var(--surface-200);border:1.5px solid var(--line);font:700 .9rem var(--font-sans);color:var(--ink);text-decoration:none}
+.svc-nav a:hover{border-color:var(--papaye)}
+#svcExtra section{scroll-margin-top:90px}
+.albums{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:var(--space-4)}
+.album{position:relative;display:block;padding:0;border:0;border-radius:var(--radius-l);overflow:hidden;aspect-ratio:4/3;cursor:pointer;background:var(--surface-300);box-shadow:var(--shadow-1)}
+.album img{width:100%;height:100%;object-fit:cover;display:block;transition:transform .3s}
+.album:hover img{transform:scale(1.04)}
+.album::after{content:"";position:absolute;inset:45% 0 0;background:linear-gradient(transparent,rgba(31,26,23,.78))}
+.album-t{position:absolute;left:14px;right:14px;bottom:12px;z-index:1;color:#fff;font:800 1rem/1.25 var(--font-display);text-align:left}
+.album-n{position:absolute;top:10px;right:10px;z-index:1;display:inline-flex;align-items:center;gap:4px;padding:3px 9px;border-radius:var(--radius-pill);background:rgba(31,26,23,.72);color:#fff;font:700 .75rem var(--font-sans)}
+.tile.model .pimg{position:relative;cursor:pointer}
+.tile.model .pimg img{aspect-ratio:4/3;object-fit:cover;width:100%}
+.vit-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:var(--space-3);margin-bottom:var(--space-5)}
+.vit-card{display:flex;flex-direction:column;background:var(--surface-200);border:1px solid var(--line);border-radius:var(--radius-m);overflow:hidden}
+.vit-img{position:relative;aspect-ratio:4/3;background:var(--surface-300)}.vit-img img{width:100%;height:100%;object-fit:cover;display:block}
+.vit-body{display:flex;flex-direction:column;gap:4px;padding:var(--space-3)}.vit-body .tag{align-self:flex-start}
+.vit-thumbs{display:flex;gap:6px;flex-wrap:wrap}.vit-thumbs img{width:64px;height:48px;object-fit:cover;border-radius:8px}
+.tile.model .pfoot{flex-direction:column;align-items:stretch;gap:var(--space-2)}
+.tile.model .pfoot .btn{width:100%;justify-content:center;white-space:nowrap}
