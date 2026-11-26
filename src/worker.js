@@ -133,6 +133,7 @@ async function register(request, env, secure) {
     shopName = cleanText(b.shopName, 80); category = String(b.category || ''); address = cleanText(b.address, 200);
     if (shopName.length < 2) return bad('Indiquez le nom de votre boutique');
     if (!CATEGORIES.some(c => c[0] === category) && !isServiceCat(category)) return bad('Choisissez la catégorie de la boutique');
+    if (invite && invite.kind === 'services' && !isServiceCat(category)) return bad('Ce lien est réservé aux prestataires de services : choisissez votre type de service.');
   }
   if (await env.DB.prepare('SELECT 1 FROM users WHERE email=?1').bind(email).first()) return bad('Un compte existe déjà avec cet e-mail', 409);
   if (invite) {
@@ -377,9 +378,9 @@ async function route(request, env) {
         return json({ shop: { ...s, loyalty }, products: list, mine });
       }
       if (method === 'GET' && (m = p.match(/^\/api\/invites\/([a-f0-9]{12})$/))) {
-        const inv = await env.DB.prepare('SELECT role,label,max_uses,uses,expires_at,auto_approve,revoked FROM invites WHERE code=?1').bind(m[1]).first();
+        const inv = await env.DB.prepare('SELECT role,kind,label,max_uses,uses,expires_at,auto_approve,revoked FROM invites WHERE code=?1').bind(m[1]).first();
         const state = inviteState(inv);
-        return json(state === 'valide' ? { state, role: inv.role, autoApprove: !!inv.auto_approve, expiresAt: inv.expires_at } : { state });
+        return json(state === 'valide' ? { state, role: inv.role, kind: inv.kind || null, autoApprove: !!inv.auto_approve, expiresAt: inv.expires_at } : { state });
       }
       if (method === 'GET' && (m = p.match(/^\/api\/photos\/([a-f0-9]{16})$/))) {
         const ph = await env.DB.prepare('SELECT mime,data FROM photos WHERE id=?1').bind(m[1]).first();
@@ -1064,14 +1065,17 @@ async function route(request, env) {
         if (method === 'GET' && p === '/api/courier/jobs') {
           const settings = await loadSettings(env);
           const { results } = await env.DB.prepare(
-            `SELECT o.ref,o.total,o.delivery_fee,o.address,o.distance_km,s.name AS shop_name,s.address AS shop_address,s.lat AS slat,s.lng AS slng,o.status,o.created_at,
+            `SELECT o.ref,o.total,o.delivery_fee,o.address,o.distance_km,o.lat AS dlat,o.lng AS dlng,s.name AS shop_name,s.address AS shop_address,s.lat AS slat,s.lng AS slng,o.status,o.created_at,
                (SELECT COALESCE(SUM(qty),0) FROM order_items WHERE order_id=o.id) AS items
              FROM orders o JOIN shops s ON s.id=o.shop_id WHERE o.status IN ('paid','preparing','ready') AND o.courier_id IS NULL ORDER BY o.created_at`).all();
+          // Destination avant acceptation : le centre d'une case d'environ 650 m, jamais le point exact du client
+          const G = 0.006, snap = v => Math.round(Math.round(v / G) * G * 1e4) / 1e4;
           const jobs = results.map(j => {
             const d = validCoord(me.lat, me.lng) && validCoord(j.slat, j.slng) ? Math.round(distanceKm(me.lat, me.lng, j.slat, j.slng) * 10) / 10 : null;
             // Avant acceptation, le livreur ne voit que la zone (le quartier), jamais l'adresse précise du client
             return { ref: j.ref, shop: j.shop_name, shopAddress: j.shop_address, zone: zoneOf(j.address), fee: j.delivery_fee, tripKm: j.distance_km, toShopKm: d,
               status: j.status, statusLabel: { paid: 'Commande reçue', preparing: 'En préparation', ready: 'Prête à récupérer' }[j.status], items: j.items, slat: j.slat, slng: j.slng,
+              dest: validCoord(j.dlat, j.dlng) ? { lat: snap(j.dlat), lng: snap(j.dlng), r: 700 } : null,
               far: d !== null && d > settings.courier_radius_km };
           }).sort((a, b) => (b.status === 'ready') - (a.status === 'ready') || (a.toShopKm ?? 1e9) - (b.toShopKm ?? 1e9));
           return json({ jobs, available: !!me.available, hasPosition: validCoord(me.lat, me.lng), sub: courierSub });
@@ -1328,7 +1332,7 @@ async function route(request, env) {
           const { results } = await env.DB.prepare('SELECT * FROM invites ORDER BY created_at DESC LIMIT 200').all();
           const { results: used } = await env.DB.prepare(
             `SELECT iu.invite_id,u.name,u.role,iu.created_at FROM invite_uses iu JOIN users u ON u.id=iu.user_id ORDER BY iu.created_at DESC LIMIT 1000`).all();
-          return json(results.map(i => ({ id: i.id, code: i.code, role: i.role, label: i.label, maxUses: i.max_uses, uses: i.uses, expiresAt: i.expires_at,
+          return json(results.map(i => ({ id: i.id, code: i.code, role: i.role, kind: i.kind || null, label: i.label, maxUses: i.max_uses, uses: i.uses, expiresAt: i.expires_at,
             autoApprove: !!i.auto_approve, createdAt: i.created_at, state: inviteState(i), people: used.filter(x => x.invite_id === i.id).map(x => x.name) })));
         }
         if (method === 'POST' && p === '/api/admin/invites') {
@@ -1339,8 +1343,9 @@ async function route(request, env) {
           const days = Math.round(num(b.days));
           const expiresAt = Number.isFinite(days) && days > 0 && days <= 365 ? Date.now() + days * 86400000 : null;
           const id = uid(), code = rand(6);
-          await env.DB.prepare('INSERT INTO invites (id,code,role,label,max_uses,uses,expires_at,auto_approve,revoked,created_by,created_at) VALUES (?1,?2,?3,?4,?5,0,?6,?7,0,?8,?9)')
-            .bind(id, code, b.role, cleanText(b.label, 80), maxUses, expiresAt, b.role === 'seller' && b.autoApprove ? 1 : 0, user.id, now()).run();
+          const kind = b.role === 'seller' && b.kind === 'services' ? 'services' : null;
+          await env.DB.prepare('INSERT INTO invites (id,code,role,label,max_uses,uses,expires_at,auto_approve,revoked,created_by,created_at,kind) VALUES (?1,?2,?3,?4,?5,0,?6,?7,0,?8,?9,?10)')
+            .bind(id, code, b.role, cleanText(b.label, 80), maxUses, expiresAt, b.role === 'seller' && b.autoApprove ? 1 : 0, user.id, now(), kind).run();
           await logAction(env, user, 'Lien d\'invitation créé', 'invite', id, cleanText(b.label, 80) || b.role, '');
           return json({ id, code, path: '/compte.html?invite=' + code }, 201);
         }

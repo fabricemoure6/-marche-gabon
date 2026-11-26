@@ -14,7 +14,10 @@
   <div id="subBan"></div>
   <div class="card split"><div><b id="avail">…</b><br><span class="muted" id="posState">Position inconnue</span></div>
     <div class="row"><button class="btn" id="toggle">Se mettre disponible</button></div></div>
-  <h2>Courses disponibles près de vous</h2>
+  <div class="split" style="align-items:center;margin:var(--space-6) 0 var(--space-3)"><h2 style="margin:0">Courses disponibles près de vous</h2>
+    <button type="button" class="btn small alt" id="mapToggle" hidden>🗺️ Voir les courses sur la carte</button></div>
+  <div class="card" id="jobsMapBox" hidden style="padding:var(--space-3)"><p class="muted" style="margin:0 0 var(--space-2);font-size:.9rem">🏪 = où récupérer le colis · cercle = zone de livraison (l'adresse exacte s'affiche quand vous prenez la course). Touchez un point pour voir le trajet.</p>
+    <div id="jobsMap" style="height:380px;border-radius:12px"></div></div>
   <div id="jobs"></div>
   <h2>Mes courses</h2>
   <div id="mine"></div>
@@ -42,8 +45,49 @@
     }, () => (S('posState').textContent = '⚠️ Position refusée : autorisez la localisation pour recevoir des courses.'), { enableHighAccuracy: true, maximumAge: 10000 });
   }
 
+  // Courses disponibles : liste + carte d'ensemble + trajet d'une course
+  let JOBS = [], jobsMapInst = null, jobsKey = '';
+  const zoneOfJob = j => j.dest ? { center: [j.dest.lat, j.dest.lng], r: j.dest.r } : null;
+  async function drawJobsMap(force) {
+    const box = S('jobsMapBox'); if (box.hidden) return;
+    const key = JOBS.map(j => j.ref).join() + '|' + !!myPos;
+    if (!force && key === jobsKey && jobsMapInst) return; // pas de changement : on ne touche pas au zoom du livreur
+    jobsKey = key;
+    try { await GabonMap.load(); } catch (er) { return MG.fail(er); }
+    if (jobsMapInst) jobsMapInst.stop();
+    jobsMapInst = GabonMap.jobsMap(S('jobsMap'), { me: myPos, onPick: ref => showRoute(ref),
+      jobs: JOBS.map(j => ({ ref: j.ref, shop: j.slat != null ? [j.slat, j.slng] : null, zone: zoneOfJob(j), title: j.shop + ' → ' + (j.zone || 'zone non précisée'),
+        sub: MG.fcfa(j.fee) + (j.tripKm ? ' · trajet ' + j.tripKm + ' km' : '') + (j.toShopKm != null ? ' · boutique à ' + j.toShopKm + ' km' : '') })) });
+  }
+  S('mapToggle').onclick = () => { const box = S('jobsMapBox'); box.hidden = !box.hidden; S('mapToggle').textContent = box.hidden ? '🗺️ Voir les courses sur la carte' : '✕ Fermer la carte'; if (!box.hidden) drawJobsMap(true); };
+  let routeInst = null;
+  async function showRoute(ref) {
+    const j = JOBS.find(x => x.ref === ref); if (!j) return;
+    if (routeInst) { routeInst.stop(); routeInst = null; }
+    if (tracker) { tracker.stop(); tracker.map.remove(); tracker = null; }
+    S('detail').innerHTML = `<div class="card"><div class="split"><h3 style="margin:0">Trajet de la course ${MG.esc(j.ref)}</h3><b>${MG.fcfa(j.fee)}</b></div>
+      <p class="muted" style="margin:.3rem 0 .6rem">🏪 Récupération : <b>${MG.esc(j.shop)}</b>${j.shopAddress ? ' · ' + MG.esc(j.shopAddress) : ''}<br>🏠 Livraison : <b>${MG.esc(j.zone || 'zone non précisée')}</b> <span style="font-size:.85rem">(adresse exacte visible après avoir pris la course)</span></p>
+      <div class="route-legs" id="legs"><span>Calcul des distances…</span></div>
+      <div id="routeMap" style="height:360px;border-radius:12px;margin-top:var(--space-3)"></div>
+      <p class="row" style="margin-top:var(--space-3)"><button class="btn green" data-acc="${MG.esc(j.ref)}">${j.status === 'ready' ? 'Accepter cette course' : 'Je prends cette course'}</button>${myPos ? '' : '<span class="muted" style="font-size:.85rem">Activez votre position pour voir le trajet depuis chez vous.</span>'}</p></div>`;
+    S('detail').scrollIntoView({ behavior: 'smooth' });
+    try { await GabonMap.load(); } catch (er) { return MG.fail(er); }
+    routeInst = GabonMap.jobRoute(S('routeMap'), { me: myPos, shop: j.slat != null ? [j.slat, j.slng] : null, zone: zoneOfJob(j) });
+    const leg = (icon, label, r) => r ? `<span>${icon} ${label} <b>${GabonMap.fmtDist(r.distance)}</b> · ~${GabonMap.fmtTime(r.duration)}</span>` : '';
+    routeInst.done.then(({ toShop, trip }) => {
+      const tot = (toShop ? toShop.distance : 0) + (trip ? trip.distance : 0), dur = (toShop ? toShop.duration : 0) + (trip ? trip.duration : 0);
+      if (S('legs')) S('legs').innerHTML = leg('🛵', 'Vous → boutique', toShop) + leg('📦', 'Boutique → zone du client', trip) + (toShop && trip ? `<span class="tot">Total ≈ <b>${GabonMap.fmtDist(tot)}</b> · ~${GabonMap.fmtTime(dur)}</span>` : '') || '<span class="muted">Positions indisponibles pour cette course.</span>';
+    });
+  }
+  S('detail').addEventListener('click', async e => {
+    const b = e.target.closest('[data-acc]'); if (!b) return;
+    try { await MG.api('/api/courier/jobs/' + b.dataset.acc + '/accept', { method: 'POST', body: {} }); MG.toast('Course acceptée'); if (routeInst) { routeInst.stop(); routeInst = null; } S('detail').innerHTML = ''; jobs(); mine(); } catch (er) { MG.fail(er); jobs(); }
+  });
+
   async function jobs() {
     const d = await MG.api('/api/courier/jobs');
+    JOBS = d.jobs || []; S('mapToggle').hidden = !(d.available && JOBS.length);
+    if (S('mapToggle').hidden && !S('jobsMapBox').hidden) S('mapToggle').click();
     available = d.available;
     S('avail').textContent = available ? '🟢 Vous êtes disponible' : '⚪ Vous êtes indisponible';
     S('toggle').textContent = available ? 'Me mettre indisponible' : 'Me mettre disponible';
@@ -51,10 +95,11 @@
     S('jobs').innerHTML = !available ? '<p class="muted">Activez votre disponibilité pour prendre des courses.</p>'
       : d.jobs.length ? d.jobs.map(j => `<div class="card"><div class="split"><div><span class="tag ${j.status === 'ready' ? 'ready' : 'preparing'}">${MG.esc(j.statusLabel)}</span> <b>${MG.esc(j.shop)}</b> → ${j.zone ? MG.esc(j.zone) : 'zone non précisée'}<br>
         <span class="muted" style="font-size:.85rem">Adresse exacte du client visible après avoir pris la course</span><br>
-        <span class="muted">Boutique : ${MG.esc(j.shopAddress || '—')}${j.toShopKm != null ? ' · à ' + j.toShopKm + ' km de vous' + (j.far ? ' (loin)' : '') : ''}${j.items ? ' · ' + j.items + ' article' + (j.items > 1 ? 's' : '') : ''}${j.tripKm ? ' · trajet ' + j.tripKm + ' km' : ''}</span></div>
+        <span class="muted">Boutique : ${MG.esc(j.shopAddress || '—')}${j.toShopKm != null ? ' · à ' + j.toShopKm + ' km de vous' + (j.far ? ' (loin)' : '') : ''}${j.items ? ' · ' + j.items + ' article' + (j.items > 1 ? 's' : '') : ''}${j.tripKm ? ' · trajet ' + j.tripKm + ' km' : ''}${j.toShopKm != null && j.tripKm ? ` · <b>total ≈ ${Math.round((j.toShopKm + j.tripKm) * 10) / 10} km</b>` : ''}</span></div>
         <div><b>${MG.fcfa(j.fee)}</b> <button class="btn small green" data-acc="${j.ref}">${j.status === 'ready' ? 'Accepter' : 'Je prends cette course'}</button></div></div>
-        ${j.slat != null ? `<div class="row" style="margin-top:.5rem"><a class="btn small alt" target="_blank" rel="noopener" href="https://www.openstreetmap.org/?mlat=${j.slat}&mlon=${j.slng}#map=16/${j.slat}/${j.slng}">Voir la boutique sur la carte</a></div>` : ''}</div>`).join('')
+        ${j.slat != null || j.dest ? `<div class="row" style="margin-top:.5rem"><button type="button" class="btn small alt" data-route="${MG.esc(j.ref)}">🗺️ Voir le trajet</button></div>` : ''}</div>`).join('')
       : '<p class="muted">Aucune course pour le moment.' + (d.hasPosition ? '' : ' Votre position n\'est pas encore connue.') + '</p>';
+    drawJobsMap();
   }
 
   async function mine() {
@@ -127,6 +172,7 @@
     } catch (er) { MG.fail(er); }
   };
   S('jobs').onclick = async e => {
+    const rt = e.target.closest('[data-route]'); if (rt) return showRoute(rt.dataset.route);
     const b = e.target.closest('[data-acc]'); if (!b) return;
     try { await MG.api('/api/courier/jobs/' + b.dataset.acc + '/accept', { method: 'POST', body: {} }); MG.toast('Course acceptée'); jobs(); mine(); } catch (er) { MG.fail(er); jobs(); }
   };

@@ -83,9 +83,9 @@
   }
 
   function authView(mode, role) {
-    const RL = { customer: 'client', seller: 'gestionnaire de boutique', courier: 'livreur' };
+    const RL = { customer: 'client', seller: 'gestionnaire de boutique', courier: 'livreur', services: 'prestataire de services' };
     const banner = invite ? `<div class="invite-banner"><span class="avatar">${MG.esc(MG.config.site_name.charAt(0))}</span><div><b>Vous êtes invité(e) à rejoindre ${MG.esc(MG.config.site_name)}</b><br>
-      <span class="muted">Compte ${RL[invite.role]}${invite.autoApprove ? ' · boutique validée dès l\'inscription' : ''}${invite.expiresAt ? ' · lien valable jusqu\'au ' + new Date(invite.expiresAt).toLocaleDateString('fr-FR') : ''}</span></div></div>` : '';
+      <span class="muted">Compte ${RL[invite.kind === 'services' ? 'services' : invite.role]}${invite.autoApprove ? (invite.kind === 'services' ? ' · page visible dès l\'inscription' : ' · boutique validée dès l\'inscription') : ''}${invite.expiresAt ? ' · lien valable jusqu\'au ' + new Date(invite.expiresAt).toLocaleDateString('fr-FR') : ''}</span></div></div>` : '';
     view.innerHTML = banner + `<div class="tabs"><button data-m="login" class="${mode === 'login' ? 'on' : ''}">Connexion</button><button data-m="register" class="${mode === 'register' ? 'on' : ''}">Créer un compte</button></div>
       <form class="card" id="f"></form>`;
     view.querySelector('.tabs').onclick = e => { const b = e.target.closest('[data-m]'); if (b) authView(b.dataset.m, role); };
@@ -134,7 +134,8 @@
         MG.$('#pfpOpt').textContent = sel.value === 'courier' ? '(recommandée : les clients vous reconnaissent)' : '(facultatif)';
       };
       sel.onchange = () => { sync(); lockNote(); }; sync(); lockNote();
-      const kind = MG.$('#kind'); if (MG.param('kind') === 'services') kind.value = 'services';
+      const kind = MG.$('#kind'); if (MG.param('kind') === 'services' || (invite && invite.kind === 'services')) kind.value = 'services';
+      if (invite && invite.kind === 'services') kind.disabled = true; // lien réservé aux prestataires
       const syncKind = () => { const svc = kind.value === 'services';
         MG.$('#category').innerHTML = (svc ? MG.config.service_categories : MG.config.categories).map(c => `<option value="${c[0]}">${MG.esc(c[1])}</option>`).join('');
         MG.$('#shopNameL').textContent = svc ? 'Nom de votre entreprise ou de votre activité' : 'Nom de la boutique';

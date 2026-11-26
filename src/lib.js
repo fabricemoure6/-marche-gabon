@@ -284,6 +284,7 @@ const MIGRATIONS = {
   couriers: [['pay_method', 'TEXT'], ['pay_number', 'TEXT'], ['pay_name', 'TEXT'], ['pay_code', 'TEXT'], ['pay_bank', 'TEXT']],
   order_items: [['unit', "TEXT NOT NULL DEFAULT 'piece'"]],
   service_requests: [['model_id', 'TEXT']],
+  invites: [['kind', 'TEXT']], // 'services' : lien réservé aux prestataires de services
   orders: [['pay_account', 'TEXT'], ['fee_account', 'TEXT'], ['pay_dispute', 'TEXT'], ['fee_dispute', 'TEXT'], ['pay_direct', 'INTEGER NOT NULL DEFAULT 0'], ['pay_ref', 'TEXT'], ['pay_submitted_at', 'TEXT'], ['fee_state', 'TEXT'], ['fee_ref', 'TEXT'], ['discount', 'INTEGER NOT NULL DEFAULT 0'], ['voucher_id', 'TEXT'], ['commission', 'INTEGER NOT NULL DEFAULT 0']]
 };
 async function migrate(db) {

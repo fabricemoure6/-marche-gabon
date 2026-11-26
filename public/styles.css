@@ -861,3 +861,8 @@ main[data-template="agence"] #products .tile.service .pbody{flex:1}
 /* Prestation ouverte depuis un lien partagé */
 .tile.flash{animation:mg-flash 1.6s ease 2;outline:3px solid var(--papaye);outline-offset:3px}
 @keyframes mg-flash{50%{outline-color:transparent}}
+
+/* Livreur : distances du trajet d'une course */
+.route-legs{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:.92rem}
+.route-legs span{background:var(--surface-100);border-radius:var(--radius-pill);padding:5px 12px}
+.route-legs .tot{background:var(--papaye-tint);color:var(--ink)}
