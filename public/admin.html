@@ -244,13 +244,14 @@
   async function invites() {
     const list = await MG.api('/api/admin/invites');
     const link = c => location.origin + '/compte.html?invite=' + c;
-    const RL = { customer: 'Client', seller: 'Gestionnaire de boutique', courier: 'Livreur' };
-    const msg = i => `Bonjour${i.label ? ' ' + i.label : ''} ! Vous êtes invité(e) à rejoindre ${MG.config.site_name} en tant que ${RL[i.role].toLowerCase()}. Créez votre compte ici : ${link(i.code)}`;
+    const RL = { customer: 'Client', seller: 'Gestionnaire de boutique', courier: 'Livreur', services: 'Prestataire de services' };
+    const rl = i => RL[i.kind === 'services' ? 'services' : i.role];
+    const msg = i => `Bonjour${i.label ? ' ' + i.label : ''} ! Vous êtes invité(e) à rejoindre ${MG.config.site_name} en tant que ${rl(i).toLowerCase()}${i.kind === 'services' ? ' : créez votre site, publiez vos prestations et recevez des demandes de devis' : ''}. Créez votre compte ici : ${link(i.code)}`;
     const STATE = { valide: 'active', expiré: 'cancelled', épuisé: 'pending', révoqué: 'cancelled' };
     pane.innerHTML = `<form class="card" id="inv" style="max-width:720px"><h2>Créer un lien d'inscription</h2>
         <p class="muted" style="margin-top:0">Envoyez le lien par WhatsApp, SMS ou e-mail : la personne crée son compte directement avec le bon rôle.</p>
         <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:0 var(--space-4)">
-          <div><label for="iRole">Type de compte</label><select id="iRole"><option value="seller">Gestionnaire de boutique</option><option value="courier">Livreur</option><option value="customer">Client</option></select></div>
+          <div><label for="iRole">Type de compte</label><select id="iRole"><option value="seller">Gestionnaire de boutique</option><option value="services">Prestataire de services (location, événementiel, BTP…)</option><option value="courier">Livreur</option><option value="customer">Client</option></select></div>
           <div><label for="iLabel">Pour qui ? (facultatif)</label><input id="iLabel" maxlength="80" placeholder="Ex. : Mama Rose, marché Mont-Bouët"></div>
           <div><label for="iUses">Nombre d'inscriptions</label><select id="iUses"><option value="1">1 personne</option><option value="5">5 personnes</option><option value="20">20 personnes</option><option value="">Sans limite</option></select></div>
           <div><label for="iDays">Valable</label><select id="iDays"><option value="7">7 jours</option><option value="30">30 jours</option><option value="90">90 jours</option><option value="">Sans date de fin</option></select></div>
@@ -260,18 +261,18 @@
       <div id="newLink"></div>
       <div class="card scroll"><h2>Liens créés</h2>${list.length ? `<table><thead><tr><th>Pour</th><th>Rôle</th><th>Inscriptions</th><th>Validité</th><th>État</th><th></th></tr></thead><tbody>${list.map(i => `<tr>
         <td><b>${MG.esc(i.label || '—')}</b>${i.people.length ? `<br><small class="muted">Inscrits : ${i.people.map(MG.esc).join(', ')}</small>` : ''}</td>
-        <td>${RL[i.role]}${i.autoApprove ? '<br><small class="muted">validation auto</small>' : ''}</td>
+        <td>${rl(i)}${i.autoApprove ? '<br><small class="muted">validation auto</small>' : ''}</td>
         <td>${i.uses}${i.maxUses != null ? ' / ' + i.maxUses : ''}</td>
         <td><small>${i.expiresAt ? 'jusqu\'au ' + new Date(i.expiresAt).toLocaleDateString('fr-FR') : 'sans fin'}</small></td>
         <td><span class="tag ${STATE[i.state]}">${i.state}</span></td>
         <td style="white-space:nowrap">${i.state === 'valide' ? `<button class="btn small alt" data-copy="${i.id}">Copier</button> <a class="btn small green" target="_blank" rel="noopener" href="https://wa.me/?text=${encodeURIComponent(msg(i))}">WhatsApp</a> <button class="btn small red" data-rev="${i.id}">Révoquer</button>` : ''}</td></tr>`).join('')}</tbody></table>`
         : '<p class="muted">Aucun lien pour le moment.</p>'}</div>`;
-    const syncAuto = () => (S('iAutoBox').hidden = S('iRole').value !== 'seller');
+    const syncAuto = () => (S('iAutoBox').hidden = !['seller', 'services'].includes(S('iRole').value));
     S('iRole').onchange = syncAuto; syncAuto();
     S('inv').onsubmit = async e => {
       e.preventDefault();
       try {
-        const r = await MG.api('/api/admin/invites', { method: 'POST', body: { role: S('iRole').value, label: S('iLabel').value, maxUses: S('iUses').value, days: S('iDays').value, autoApprove: S('iAuto').checked } });
+        const r = await MG.api('/api/admin/invites', { method: 'POST', body: { role: S('iRole').value === 'services' ? 'seller' : S('iRole').value, kind: S('iRole').value === 'services' ? 'services' : null, label: S('iLabel').value, maxUses: S('iUses').value, days: S('iDays').value, autoApprove: S('iAuto').checked } });
         await invites();
         S('newLink').innerHTML = `<div class="notice" style="background:var(--foret-tint)"><b>Lien prêt à envoyer</b>
           <div class="row" style="margin-top:.5rem"><input readonly id="nl" value="${MG.esc(location.origin + r.path)}"><button class="btn small" id="nlCopy">Copier</button></div></div>`;
