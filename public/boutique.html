@@ -59,7 +59,10 @@
       <div style="flex:1;min-width:220px"><h1 style="margin:0 0 .3rem">${MG.esc(shop.name)}</h1>
         <div class="stats"><span class="tag">${MG.esc(MG.catName(shop.category))}</span><span class="tag">${products.length} produit${products.length > 1 ? 's' : ''}</span>${promos.length ? `<span class="tag promo">${promos.length} en promo</span>` : ''}</div>
         ${shop.description ? `<p style="margin:.7rem 0 0">${MG.esc(shop.description)}</p>` : ''}
-        ${shop.address ? `<p class="muted" style="margin:.4rem 0 0">${MG.icon('pin', 18)} ${MG.esc(shop.address)}</p>` : ''}</div></section>`;
+        ${shop.address ? `<p class="muted" style="margin:.4rem 0 0">${MG.icon('pin', 18)} ${MG.esc(shop.address)}</p>` : ''}
+        <button type="button" class="btn small share-shop" id="shareShop">${MG.icon('share', 16)}Partager la boutique</button></div></section>`;
+  $('#shareShop').onclick = () => MG.share({ title: shop.name, url: location.origin + '/boutique/' + encodeURIComponent(shop.slug),
+    text: `${shop.name}${shop.address ? ' (' + shop.address + ')' : ''} : commandez en ligne, livré chez vous avec ${MG.config.site_name}` });
 
   // Carte de fidélité de la boutique
   const prog = shop.loyalty, mine = data.mine;
@@ -75,7 +78,7 @@
   if (promos.length && products.length > 6) { // grande boutique : les promos en vitrine ; sinon elles sont déjà en tête de la grille
     $('#promos').hidden = false;
     $('#promoTitle').textContent = promos.length > 1 ? `${promos.length} produits à prix réduit` : 'Un produit à prix réduit';
-    $('#promoRail').innerHTML = promos.map((p, i) => MG.productCard(p, { category: shop.category, alerts: (data.mine || {}).alerts, eager: i < 4 })).join('');
+    $('#promoRail').innerHTML = promos.map((p, i) => MG.productCard(p, { category: shop.category, slug: shop.slug, shopName: shop.name, alerts: (data.mine || {}).alerts, eager: i < 4 })).join('');
   }
 
   $('#toolbar').hidden = products.length < 4; // inutile pour une petite vitrine
@@ -88,7 +91,7 @@
     list = list.slice().sort((a, b) => (b.stock > 0) - (a.stock > 0) ||
       (s === 'asc' ? a.price - b.price : s === 'desc' ? b.price - a.price : s === 'new' ? String(b.created_at).localeCompare(String(a.created_at)) : order.indexOf(a.id) - order.indexOf(b.id)));
     $('#count').textContent = list.length !== products.length ? `${list.length} sur ${products.length}` : '';
-    $('#products').innerHTML = list.map((p, i) => MG.productCard(p, { desc: true, category: shop.category, alerts: (data.mine || {}).alerts, eager: i < 4 })).join('');
+    $('#products').innerHTML = list.map((p, i) => MG.productCard(p, { desc: true, category: shop.category, slug: shop.slug, shopName: shop.name, alerts: (data.mine || {}).alerts, eager: i < 4 })).join('');
     $('#empty').hidden = list.length > 0;
     if (!list.length && products.length) { $('#emptyTitle').textContent = 'Aucun produit ne correspond'; $('#emptyText').textContent = 'Essayez un autre mot ou retirez le filtre.'; }
   }
@@ -108,5 +111,8 @@
   $('#q').oninput = redraw; $('#sort').onchange = redraw;
   $('#onlyPromo').onclick = () => { onlyPromo = !onlyPromo; $('#onlyPromo').classList.toggle('on', onlyPromo); $('#onlyPromo').setAttribute('aria-pressed', onlyPromo); redraw(); };
   draw();
+  // Lien partagé vers un produit (?p=…) : la fiche s'ouvre directement
+  const pid = MG.param('p');
+  if (pid && MG._prod && MG._prod[pid]) MG.productSheet(MG._prod[pid]);
 })();
 </script></body></html>

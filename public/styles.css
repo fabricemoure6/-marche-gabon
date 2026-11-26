@@ -522,6 +522,8 @@ html.theme-anim *{transition:background-color .35s ease,color .35s ease,border-c
 .gal-thumbs img{width:100%;height:100%;object-fit:cover;display:block}
 .sheet-info{padding:var(--space-6) var(--space-5) var(--space-5);display:flex;flex-direction:column;gap:2px}
 .sheet-info h2{margin:.2rem 0 .3rem;font-size:1.6rem}
+.sheet-share{align-self:flex-start;margin-top:var(--space-3)}
+.shop-hero .share-shop{margin-top:.8rem}
 .sheet-buy{display:flex;align-items:center;justify-content:space-between;gap:var(--space-3);flex-wrap:wrap;margin-top:auto;padding-top:var(--space-5)}
 @media(max-width:720px){.sheet{grid-template-columns:1fr}.sheet-info{padding:var(--space-4)}.modal.sheet-modal{max-height:92vh;overflow:auto}}
 
@@ -704,3 +706,34 @@ label.consent input{width:20px;height:20px;min-height:0;flex:none;margin-top:2px
 .payno{display:flex;align-items:center;gap:.6rem;flex-wrap:wrap}.payno b{font-size:1.25rem;letter-spacing:.02em}
 .payamt{padding-top:.3rem;border-top:1px dashed var(--line)}
 .paycard{margin-top:var(--space-3)}
+
+/* ---------- Kit vendeur (onglet Partager) ---------- */
+.kit-row{display:flex;gap:var(--space-5);align-items:flex-start;flex-wrap:wrap}
+.kit-prev{flex:0 1 300px;min-width:200px;aspect-ratio:1240/1754;background:var(--surface-300);border-radius:var(--radius-m);display:grid;place-items:center;overflow:hidden;box-shadow:var(--shadow-2)}
+.kit-prev.tall{aspect-ratio:1080/1920;flex-basis:260px}
+.kit-prev img{width:100%;height:100%;object-fit:contain;display:block}
+.kit-actions{flex:1;min-width:220px;display:flex;flex-direction:column;gap:var(--space-3);align-items:flex-start}
+.kit-pick{display:flex;gap:var(--space-2);overflow-x:auto;padding:2px 2px var(--space-3);margin-bottom:var(--space-2)}
+.kit-pick button{flex:none;display:inline-flex;align-items:center;gap:6px;border:1.5px solid var(--line-strong);background:var(--surface-200);color:var(--ink);border-radius:var(--radius-pill);padding:8px 14px;font:600 .9rem var(--font-sans);cursor:pointer;white-space:nowrap;max-width:240px;overflow:hidden;text-overflow:ellipsis}
+.kit-pick button.on{background:var(--papaye);border-color:var(--papaye);color:var(--on-papaye)}
+.print-only{display:none}
+@media print{body.printing>*:not(.print-only){display:none!important}body.printing{background:#fff}body.printing .print-only{display:block;max-width:100%;max-height:98vh;margin:0 auto}}
+
+/* ---------- Admin : croissance ---------- */
+.growth{margin-bottom:var(--space-5)}
+.gr-head{display:flex;justify-content:space-between;gap:var(--space-4);flex-wrap:wrap;align-items:flex-start}
+.gr-big{display:flex;flex-direction:column;align-items:flex-end;text-align:right}
+.gr-big b{font:800 3rem/1 var(--font-display);color:var(--papaye-text)}
+.gr-big small.up{color:var(--foret);font-weight:700}.gr-big small.down{color:var(--danger);font-weight:700}
+.gr-chart{position:relative;display:grid;grid-template-columns:repeat(8,1fr);gap:var(--space-2);align-items:end;height:220px;margin:var(--space-5) 0 var(--space-4);padding-top:8px}
+.gr-bar{display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%;gap:4px;min-width:0}
+.gr-bar i{display:block;width:100%;max-width:56px;background:var(--chart-bar,var(--papaye));border-radius:8px 8px 3px 3px;max-height:78%}
+.gr-bar:first-child i,.gr-bar:not(:last-child) i{opacity:.55}
+.gr-bar:last-child i{opacity:1}
+.gr-n{font:700 .85rem var(--font-sans)}
+.gr-bar small{font-size:.72rem;color:var(--ink-muted);white-space:nowrap}
+.gr-goal{position:absolute;left:0;right:0;border-top:2px dashed var(--foret);pointer-events:none}
+.gr-goal span{position:absolute;right:0;top:-1.3rem;font:700 .72rem var(--font-sans);color:var(--foret)}
+.gr-tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:var(--space-3)}
+.gr-tile{background:var(--surface-100);border-radius:var(--radius-m);padding:var(--space-3) var(--space-4);display:flex;flex-direction:column;gap:2px}
+.gr-tile b{font:800 1.35rem var(--font-display)}.gr-tile span{font-weight:600;font-size:.9rem}.gr-tile small{font-size:.78rem}

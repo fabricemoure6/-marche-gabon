@@ -1088,6 +1088,39 @@ async function route(request, env) {
             revenue: await c(`SELECT COALESCE(SUM(total),0) AS n FROM orders WHERE status IN ('paid','preparing','ready','delivering','delivered')`)
           });
         }
+        // ----- Croissance : les chiffres de la stratégie, semaine par semaine -----
+        if (method === 'GET' && p === '/api/admin/growth') {
+          const one = async (q, ...a) => (await env.DB.prepare(q).bind(...a).first()) || {};
+          const all = async (q, ...a) => (await env.DB.prepare(q).bind(...a).all()).results;
+          // 8 périodes de 7 jours glissants (0 = les 7 derniers jours). Une commande livrée compte à sa date de livraison (dernière mise à jour).
+          const weeks = await all(`SELECT CAST((julianday('now') - julianday(updated_at)) / 7 AS INTEGER) AS w, COUNT(*) AS n, COALESCE(SUM(total),0) AS gmv
+            FROM orders WHERE status='delivered' AND julianday('now') - julianday(updated_at) < 56 GROUP BY w`);
+          const newCust = await all(`SELECT CAST((julianday('now') - julianday(created_at)) / 7 AS INTEGER) AS w, COUNT(*) AS n
+            FROM users WHERE role='customer' AND julianday('now') - julianday(created_at) < 56 GROUP BY w`);
+          const series = Array.from({ length: 8 }, (_, w) => ({ w, delivered: 0, gmv: 0, customers: 0 }));
+          for (const r of weeks) if (series[r.w]) { series[r.w].delivered = r.n; series[r.w].gmv = r.gmv; }
+          for (const r of newCust) if (series[r.w]) series[r.w].customers = r.n;
+          const shops = await one(`SELECT COUNT(*) AS active,
+              SUM(CASE WHEN (SELECT COUNT(*) FROM products p WHERE p.shop_id=s.id AND p.active=1) >= 10 THEN 1 ELSE 0 END) AS stocked,
+              SUM(CASE WHEN EXISTS (SELECT 1 FROM orders o WHERE o.shop_id=s.id AND o.status='delivered' AND julianday('now') - julianday(o.updated_at) < 30) THEN 1 ELSE 0 END) AS selling
+            FROM shops s WHERE s.status='active'`);
+          // Fidélité des clients : parmi ceux qui ont eu une 1re livraison entre 60 et 30 jours avant aujourd'hui (fenêtre de 30 jours terminée),
+          // combien ont été livrés une 2e fois dans les 30 jours qui ont suivi. Les clients plus récents sont « en attente », pas comptés.
+          const rep = await one(`WITH f AS (SELECT customer_id, MIN(updated_at) AS first FROM orders WHERE status='delivered' GROUP BY customer_id)
+            SELECT COUNT(*) AS cohort,
+              SUM(CASE WHEN EXISTS (SELECT 1 FROM orders o WHERE o.customer_id=f.customer_id AND o.status='delivered' AND o.updated_at > f.first
+                AND julianday(o.updated_at) - julianday(f.first) <= 30) THEN 1 ELSE 0 END) AS repeat
+            FROM f WHERE julianday('now') - julianday(f.first) BETWEEN 30 AND 60`);
+          const pending = await one(`SELECT COUNT(*) AS n FROM (SELECT customer_id, MIN(updated_at) AS first FROM orders WHERE status='delivered' GROUP BY customer_id) WHERE julianday('now') - julianday(first) < 30`);
+          const speed = await one(`SELECT AVG((julianday(updated_at) - julianday(created_at)) * 24) AS h, COUNT(*) AS n FROM orders WHERE status='delivered' AND julianday('now') - julianday(updated_at) < 30`);
+          const trouble = await one(`SELECT SUM(CASE WHEN status='cancelled' THEN 1 ELSE 0 END) AS cancelled,
+              SUM(CASE WHEN pay_dispute IS NOT NULL OR fee_dispute IS NOT NULL THEN 1 ELSE 0 END) AS disputes, COUNT(*) AS n
+            FROM orders WHERE julianday('now') - julianday(created_at) < 30`);
+          return json({ series, shops: { active: shops.active || 0, stocked: shops.stocked || 0, selling: shops.selling || 0 },
+            repeat: { cohort: rep.cohort || 0, repeat: rep.repeat || 0, pending: pending.n || 0 },
+            speed: { hours: speed.h == null ? null : Math.round(speed.h * 10) / 10, n: speed.n || 0 },
+            trouble: { cancelled: trouble.cancelled || 0, disputes: trouble.disputes || 0, orders: trouble.n || 0 }, goal: 50 });
+        }
         // ----- Sauvegardes de la base (R2) -----
         if (method === 'GET' && p === '/api/admin/backups') return json(await backupStatus(env));
         if (method === 'POST' && p === '/api/admin/backups/run') {

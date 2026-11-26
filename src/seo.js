@@ -113,7 +113,16 @@ async function shopPage(env, url, slug) {
   const description = cut(s.description && s.description.length >= 40 ? s.description
     : `${s.name}, boutique ${cat.toLowerCase()}${s.address ? ' à ' + s.address : ''}. ${products.length} produit${products.length > 1 ? 's' : ''}${names ? ' : ' + names : ''}. Commandez en ligne, livraison rapide.`, 158);
   const imgId = s.photo_id || (products.find(p => p.photo_id) || {}).photo_id;
-  const image = imgId ? origin + photo(imgId) : origin + '/img/partage.png';
+  let image = imgId ? origin + photo(imgId) : origin + '/img/partage.png';
+  // Lien partagé vers un produit (?p=…) : l'aperçu WhatsApp / Facebook montre ce produit, sa photo et son prix
+  const pid = url.searchParams.get('p'), prod = pid && products.find(p => p.id === pid);
+  let shareTitle = title, shareDesc = description, shareUrl = pageUrl;
+  if (prod) {
+    shareTitle = `${prod.name} · ${fcfa(prod.price)}${prod.old_price ? ' (au lieu de ' + fcfa(prod.old_price) + ')' : ''} | ${s.name}`;
+    shareDesc = cut(`${prod.description ? prod.description + ' ' : ''}Chez ${s.name}${s.address ? ', ' + s.address : ''}. Commandez en ligne, livraison rapide.`, 158);
+    shareUrl = `${pageUrl}?p=${encodeURIComponent(prod.id)}`;
+    if (prod.photo_id) image = origin + photo(prod.photo_id);
+  }
   const ld = [
     { '@context': 'https://schema.org', '@type': 'Store', name: s.name, url: pageUrl, image, description: cut(s.description || description, 300),
       address: { '@type': 'PostalAddress', streetAddress: s.address || undefined, addressLocality: 'Libreville', addressCountry: 'GA' },
@@ -139,8 +148,8 @@ async function shopPage(env, url, slug) {
   const boot = `<script>window.__SHOP__=${JSON.stringify({ shop: shopPub, products, mine: null }).replace(/</g, '\\u003c')};</script>`;
   const res = await page(env, url, '/boutique');
   return new HTMLRewriter()
-    .on('title', { element: e => e.setInnerContent(title) })
-    .on('head', { element: e => e.append(headTags({ title, description, url: pageUrl, image, imageAlt: s.name, site }) + ld.map(jsonLd).join('') + boot, { html: true }) })
+    .on('title', { element: e => e.setInnerContent(shareTitle) })
+    .on('head', { element: e => e.append(headTags({ title: shareTitle, description: shareDesc, url: shareUrl, image, imageAlt: prod ? prod.name : s.name, site }) + ld.map(jsonLd).join('') + boot, { html: true }) })
     .on('main', { element: e => { if (shopPub.look) e.setAttribute('data-look', shopPub.look); } }) // design choisi : présent dès le premier affichage
     .on('#head', { element: e => e.setInnerContent(hero, { html: true }) })
     .on('#products', { element: e => e.setInnerContent(products.map((p, i) => productCard(p, s.category, i < 4)).join(''), { html: true }) })

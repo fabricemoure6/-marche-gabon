@@ -152,7 +152,7 @@
 
   // ---------- Icônes (trait 2px, style Lucide) ----------
   const ICONS = {
-    plus: '<path d="M12 5v14M5 12h14"/>', check: '<path d="m5 12 5 5L20 7"/>', x: '<path d="M6 6l12 12M18 6 6 18"/>',
+    plus: '<path d="M12 5v14M5 12h14"/>', share: '<circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="m8.6 13.5 6.8 4M15.4 6.5l-6.8 4"/>', check: '<path d="m5 12 5 5L20 7"/>', x: '<path d="M6 6l12 12M18 6 6 18"/>',
     cart: '<circle cx="9" cy="20" r="1.5"/><circle cx="18" cy="20" r="1.5"/><path d="M2 3h3l2.4 11.2a2 2 0 0 0 2 1.6h7.7a2 2 0 0 0 2-1.5L21 7H6"/>',
     bell: '<path d="M6 8a6 6 0 1 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.9 1.9 0 0 0 3.4 0"/>',
     search: '<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>', send: '<path d="M4 12 20 4l-6 16-3-7z"/>',
@@ -188,6 +188,15 @@
   // Indication de stock lisible par tous : épuisé, plus que N, en stock
   MG.stockInfo = (n, unit) => n <= 0 ? '<span class="stock-info out">Épuisé</span>'
     : n <= MG.LOW_STOCK ? `<span class="stock-info low">Plus que ${MG.qty(n, unit)} en stock</span>` : '<span class="stock-info ok">En stock</span>';
+  // Partage : la feuille de partage du téléphone (WhatsApp, Facebook, SMS…) ou, à défaut, WhatsApp directement
+  MG.share = async ({ title, text, url }) => {
+    if (navigator.share) { try { await navigator.share({ title, text, url }); return; } catch (e) { if (e && e.name === 'AbortError') return; } }
+    window.open('https://wa.me/?text=' + encodeURIComponent(text + '\n' + url), '_blank', 'noopener');
+  };
+  MG.chez = name => (/^chez\s/i.test(name.trim()) ? 'chez' + name.trim().slice(4) : 'chez ' + name.trim()); // « Chez Mama Rose », pas « chez Chez Mama Rose »
+  MG.productLink = p => location.origin + '/boutique/' + encodeURIComponent(p.slug || decodeURIComponent((location.pathname.match(/^\/boutique\/([^/]+)/) || [])[1] || '')) + '?p=' + encodeURIComponent(p.id);
+  MG.shareProduct = p => MG.share({ title: p.name, url: MG.productLink(p),
+    text: `${p.name} à ${MG.fcfa(p.price)}${p.old_price ? ' au lieu de ' + MG.fcfa(p.old_price) : ''}${p.shop_name ? ' ' + MG.chez(p.shop_name) : ''}, livré chez vous avec ${MG.config.site_name} :` });
   MG.productCard = function (p, opts = {}) {
     const out = !(p.stock > 0);
     const watching = opts.alerts && opts.alerts.includes(p.id);
@@ -197,7 +206,7 @@
     const left = p.promo_until ? MG.timeLeft(p.promo_until) : '';
     const img = opts.img || MG.img(p.photo_id, p.category || opts.category);
     const nPics = (p.photos || []).length;
-    if (!opts.demo) { MG._prod = MG._prod || {}; MG._prod[p.id] = { ...p, category: p.category || opts.category, watching }; }
+    if (!opts.demo) { MG._prod = MG._prod || {}; MG._prod[p.id] = { ...p, category: p.category || opts.category, slug: p.slug || opts.slug, shop_name: p.shop_name || opts.shopName, watching }; }
     return `<article class="tile product${out ? ' out' : ''}${p.promo_pct ? ' is-promo' : ''}">
       <div class="pimg"${opts.demo ? '' : ` data-gal="${MG.esc(p.id)}" role="button" tabindex="0" aria-label="Voir ${MG.esc(p.name)}${nPics > 1 ? ' (' + nPics + ' photos)' : ''}"`}><img src="${img}" alt="${MG.esc(p.name)}" width="400" height="300"${opts.eager ? ' fetchpriority="high"' : ' loading="lazy"'}>${nPics > 1 ? `<span class="pcount" aria-hidden="true"><svg class="ico" viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>${nPics}</span>` : ''}<div class="pbadges" aria-hidden="true">${badge}</div>${left && !out ? `<span class="ptimer" aria-hidden="true">${left}</span>` : ''}</div>
       <div class="pbody">${shop}<h3 class="pname">${MG.esc(p.name)}</h3>${opts.desc && p.description ? `<p class="pdesc">${MG.esc(p.description)}</p>` : ''}${opts.demo ? '' : MG.stockInfo(p.stock, p.unit)}
@@ -220,7 +229,8 @@
         ${p.description ? `<p class="muted" style="margin:.6rem 0 0">${MG.esc(p.description)}</p>` : ''}
         <div class="sheet-buy"><div>${p.old_price ? `<span class="old">${MG.fcfa(p.old_price)}</span>` : ''}<span class="price" style="font-size:1.6rem">${MG.fcfa(p.price)}</span>${MG.per(p.unit)}</div>
         ${p.stock > 0 ? `<button class="btn" data-add="${MG.esc(p.id)}" data-step="${p.qty_step || 1}" data-unit="${p.unit || 'piece'}">${MG.icon('cart', 18)}Ajouter ${p.unit && p.unit !== 'piece' ? MG.qty(p.qty_step || 1, p.unit) : 'au panier'}${p.unit && p.unit !== 'piece' ? ' au panier' : ''}</button>`
-          : `<button class="btn ${p.watching ? 'green' : 'alt'}" data-alert="${MG.esc(p.id)}" data-on="${p.watching ? 1 : 0}">${MG.icon(p.watching ? 'check' : 'bell', 16)}${p.watching ? 'Alerte activée' : 'Me prévenir'}</button>`}</div></div></div>`, { wide: true });
+          : `<button class="btn ${p.watching ? 'green' : 'alt'}" data-alert="${MG.esc(p.id)}" data-on="${p.watching ? 1 : 0}">${MG.icon(p.watching ? 'check' : 'bell', 16)}${p.watching ? 'Alerte activée' : 'Me prévenir'}</button>`}</div>
+        <button type="button" class="btn small alt sheet-share" data-share>${MG.icon('share', 16)}Partager ce produit</button></div></div>`, { wide: true });
     const el = m.el; el.classList.add('sheet-modal');
     const show = k => {
       i = (k + urls.length) % urls.length; el.querySelector('#galImg').src = urls[i];
@@ -232,6 +242,7 @@
       if (e.target.closest('.next')) show(i + 1);
       const t = e.target.closest('[data-k]'); if (t) show(Number(t.dataset.k));
       if (e.target.closest('[data-add]')) setTimeout(() => m.close(), 900);
+      if (e.target.closest('[data-share]')) MG.shareProduct(p);
     });
     el.addEventListener('keydown', e => { if (e.key === 'ArrowLeft') show(i - 1); if (e.key === 'ArrowRight') show(i + 1); });
     let x0 = null; const main = el.querySelector('.gal-main');
