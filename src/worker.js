@@ -3,8 +3,8 @@ import {
   json, bad, rand, uid, now, sha256, safeEqual, hashPassword, createSession, clearCookie, currentUser, destroySession,
   CATEGORIES, ORDER_STATUS, ensureSchema, loadSettings, saveSettings, toBase64, fromBase64, sniffImage, sniffDocument, DOC_KINDS,
   withSecurityHeaders, recentCount, recordEvent, cached, clearCache, PUBLIC_TTL,
-  validCoord, distanceKm, slugify, EFFECTIVE_PRICE, promoActive, publicProduct, voucherDiscount, loyaltyProgram, LOW_STOCK, photoList, SOLD, EXPENSE_CATS, period, UNITS, r3, unitOf, stepOf, fmtQty, lineTotal, cleanAccount, METHOD_LABEL, lookOf, SERVICE_CATEGORIES, isServiceCat, docKindsFor } from './lib.js';
-import { serviceCustomerRoutes, serviceSellerRoutes, servicesOfShop } from './services.js';
+  validCoord, distanceKm, slugify, EFFECTIVE_PRICE, promoActive, publicProduct, voucherDiscount, loyaltyProgram, LOW_STOCK, photoList, SOLD, EXPENSE_CATS, period, UNITS, r3, unitOf, stepOf, fmtQty, lineTotal, cleanAccount, METHOD_LABEL, lookOf, SERVICE_CATEGORIES, isServiceCat, docKindsFor, SITE_TEMPLATES, templateOf, cleanSite, parseSite } from './lib.js';
+import { serviceCustomerRoutes, serviceSellerRoutes, servicesOfShop, itemsOfShop, verifiedDocs } from './services.js';
 import { backupStep, backupStatus, backupStream, backupWatch } from './backup.js';
 import { notify, confirmCheckout, rejectCheckout, cancelOrders, releaseVoucher, restock, createVoucher, awardLoyalty, startOnlinePayment, singpayVerify, singpayOn, singpayCall, sp } from './pay.js';
 import { botReply, searchProducts } from './bot.js';
@@ -148,8 +148,8 @@ async function register(request, env, secure) {
   if (role === 'seller') {
     const slug = slugify(shopName) + '-' + rand(2);
     const approved = !!(invite && invite.auto_approve);
-    await env.DB.prepare(`INSERT INTO shops (id,owner_id,name,slug,category,address,phone,status,created_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)`)
-      .bind(uid(), id, shopName, slug, category, address, phone, approved ? 'active' : 'pending', now()).run();
+    await env.DB.prepare(`INSERT INTO shops (id,owner_id,name,slug,category,address,phone,status,created_at,template) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)`)
+      .bind(uid(), id, shopName, slug, category, address, phone, approved ? 'active' : 'pending', now(), isServiceCat(category) ? templateOf(b.template, category) : null).run();
     const { results: admins } = await env.DB.prepare(`SELECT id FROM users WHERE role='admin'`).all();
     for (const a of admins) await notify(env, a.id, approved ? 'Nouvelle boutique (invitation)' : 'Nouvelle boutique à valider', `${shopName} (${name})`, '/admin.html');
   }
@@ -351,13 +351,15 @@ async function route(request, env) {
         return json(await searchProducts(env, { cat, q, limit }));
       }
       if (method === 'GET' && (m = p.match(/^\/api\/shops\/([a-z0-9-]{1,60})$/))) {
-        const shopRow = await cached('shop:' + m[1], PUBLIC_TTL, () => env.DB.prepare(`SELECT id,name,slug,category,description,address,photo_id,cover_photo,look,phone,loyalty_enabled,loyalty_every,loyalty_kind,loyalty_value,loyalty_min,loyalty_days
+        const shopRow = await cached('shop:' + m[1], PUBLIC_TTL, () => env.DB.prepare(`SELECT id,name,slug,category,description,address,photo_id,cover_photo,look,template,site,phone,loyalty_enabled,loyalty_every,loyalty_kind,loyalty_value,loyalty_min,loyalty_days
           FROM shops WHERE slug=?1 AND status='active'`).bind(m[1]).first());
         if (!shopRow) return bad('Boutique introuvable', 404);
         const s = { ...shopRow }; // copie : l'original reste intact dans la mémoire courte
+        if (!isServiceCat(s.category)) { delete s.template; delete s.site; }
         if (isServiceCat(s.category)) { // prestataire de services : ses prestations, pas de produits ni de fidélité
           for (const k of ['loyalty_enabled', 'loyalty_every', 'loyalty_kind', 'loyalty_value', 'loyalty_min', 'loyalty_days']) delete s[k];
-          return json({ shop: { ...s, kind: 'services' }, products: [], services: await cached('shop-services:' + s.id, PUBLIC_TTL, () => servicesOfShop(env, s.id)), mine: null });
+          return json({ shop: { ...s, kind: 'services', template: templateOf(s.template, s.category), site: parseSite(s.site), verified: await verifiedDocs(env, s.id) }, products: [], services: await cached('shop-services:' + s.id, PUBLIC_TTL, () => servicesOfShop(env, s.id)),
+            items: await cached('shop-items:' + s.id, PUBLIC_TTL, () => itemsOfShop(env, s.id)), mine: null });
         }
         const loyalty = loyaltyProgram(s);
         for (const k of ['loyalty_enabled', 'loyalty_every', 'loyalty_kind', 'loyalty_value', 'loyalty_min', 'loyalty_days']) delete s[k];
@@ -775,7 +777,7 @@ async function route(request, env) {
 
         const svcSeller = await serviceSellerRoutes(env, request, user, shop, p, method, { readJson, cleanText });
         if (svcSeller) return svcSeller;
-        if (method === 'GET' && p === '/api/seller/shop') return json({ shop: { ...shop, kind: isServiceCat(shop.category) ? 'services' : 'products' }, categories: isServiceCat(shop.category) ? SERVICE_CATEGORIES : CATEGORIES, pending_account: await pendingAccount(env, 'shop', shop.id) });
+        if (method === 'GET' && p === '/api/seller/shop') return json({ shop: { ...shop, kind: isServiceCat(shop.category) ? 'services' : 'products', template: isServiceCat(shop.category) ? templateOf(shop.template, shop.category) : null, site: parseSite(shop.site) }, categories: isServiceCat(shop.category) ? SERVICE_CATEGORIES : CATEGORIES, pending_account: await pendingAccount(env, 'shop', shop.id) });
         if (method === 'PUT' && p === '/api/seller/shop') {
           const b = await readJson(request);
           if (!b) return bad('Requête invalide');
@@ -805,9 +807,13 @@ async function route(request, env) {
             if (acc.error) return bad(acc.error);
             accState = await requestAccount(env, user, 'shop', shop.id, shop.name, { method: shop.payout_method, number: shop.payout_number, name: shop.payout_name, code: shop.payout_code, bank: shop.payout_bank }, acc);
           }
-          await env.DB.prepare('UPDATE shops SET name=?2,category=?3,description=?4,address=?5,phone=?6,whatsapp=?7,lat=?8,lng=?9,photo_id=?10,cover_photo=?11,look=?12 WHERE id=?1')
+          // Prestataires : modèle de site (liste fermée) et contenu du site
+          if (b.template !== undefined && !SITE_TEMPLATES.includes(b.template)) return bad('Modèle de site inconnu');
+          const template = isServiceCat(cat) ? (b.template !== undefined ? b.template : shop.template || templateOf(null, cat)) : shop.template;
+          const site = isServiceCat(cat) && b.site !== undefined ? JSON.stringify(cleanSite(b.site, cleanText)) : shop.site;
+          await env.DB.prepare('UPDATE shops SET name=?2,category=?3,description=?4,address=?5,phone=?6,whatsapp=?7,lat=?8,lng=?9,photo_id=?10,cover_photo=?11,look=?12,template=?13,site=?14 WHERE id=?1')
             .bind(shop.id, name, cat, cleanText(b.description, 600), cleanText(b.address, 200), cleanText(b.phone, 30), cleanText(b.whatsapp, 30),
-              pos ? lat : shop.lat, pos ? lng : shop.lng, photo, cover, look).run();
+              pos ? lat : shop.lat, pos ? lng : shop.lng, photo, cover, look, template, site).run();
           return json({ ok: true, account: accState });
         }
         if (method === 'GET' && p === '/api/seller/products') {

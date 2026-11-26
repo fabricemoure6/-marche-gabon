@@ -758,3 +758,102 @@ label.consent input{width:20px;height:20px;min-height:0;flex:none;margin-top:2px
 #services{margin-top:var(--space-6)}
 .rq-quote{margin-top:var(--space-3);padding-top:var(--space-3);border-top:1px solid var(--line)}
 @media (max-width:520px){.rq-quote>div{grid-template-columns:1fr!important}}
+
+/* ---------- Vitrine des prestataires ---------- */
+.svc-nav{display:flex;gap:var(--space-2);flex-wrap:wrap;margin:var(--space-4) 0 0}
+.svc-nav a{padding:8px 14px;border-radius:var(--radius-pill);background:var(--surface-200);border:1.5px solid var(--line);font:700 .9rem var(--font-sans);color:var(--ink);text-decoration:none}
+.svc-nav a:hover{border-color:var(--papaye)}
+#svcExtra section{scroll-margin-top:90px}
+.albums{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:var(--space-4)}
+.album{position:relative;display:block;padding:0;border:0;border-radius:var(--radius-l);overflow:hidden;aspect-ratio:4/3;cursor:pointer;background:var(--surface-300);box-shadow:var(--shadow-1)}
+.album img{width:100%;height:100%;object-fit:cover;display:block;transition:transform .3s}
+.album:hover img{transform:scale(1.04)}
+.album::after{content:"";position:absolute;inset:45% 0 0;background:linear-gradient(transparent,rgba(31,26,23,.78))}
+.album-t{position:absolute;left:14px;right:14px;bottom:12px;z-index:1;color:#fff;font:800 1rem/1.25 var(--font-display);text-align:left}
+.album-n{position:absolute;top:10px;right:10px;z-index:1;display:inline-flex;align-items:center;gap:4px;padding:3px 9px;border-radius:var(--radius-pill);background:rgba(31,26,23,.72);color:#fff;font:700 .75rem var(--font-sans)}
+.tile.model .pimg{position:relative;cursor:pointer}
+.tile.model .pimg img{aspect-ratio:4/3;object-fit:cover;width:100%}
+.vit-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:var(--space-3);margin-bottom:var(--space-5)}
+.vit-card{display:flex;flex-direction:column;background:var(--surface-200);border:1px solid var(--line);border-radius:var(--radius-m);overflow:hidden}
+.vit-img{position:relative;aspect-ratio:4/3;background:var(--surface-300)}.vit-img img{width:100%;height:100%;object-fit:cover;display:block}
+.vit-body{display:flex;flex-direction:column;gap:4px;padding:var(--space-3)}.vit-body .tag{align-self:flex-start}
+.vit-thumbs{display:flex;gap:6px;flex-wrap:wrap}.vit-thumbs img{width:64px;height:48px;object-fit:cover;border-radius:8px}
+.tile.model .pfoot{flex-direction:column;align-items:stretch;gap:var(--space-2)}
+.tile.model .pfoot .btn{width:100%;justify-content:center;white-space:nowrap}
+
+/* ---------- Modèles de site des prestataires ---------- */
+main[data-template]:not([data-ready]) #head{visibility:hidden}
+.tpl-back{display:inline-block;margin-bottom:var(--space-3)}
+.tpl-logo{width:92px;height:92px;border-radius:22px;object-fit:cover;background:var(--surface-200);border:4px solid var(--surface-200);box-shadow:var(--shadow-2);flex:none}
+.tpl-hero h1{margin:0 0 .3rem;font-size:clamp(1.7rem,4vw,2.6rem);line-height:1.1}
+.tpl-slogan{margin:0 0 .7rem;font-size:1.12rem;opacity:.92}
+.tpl-chips{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:var(--space-4)}
+.tpl-chips span{display:inline-flex;align-items:center;gap:4px;padding:4px 11px;border-radius:var(--radius-pill);background:rgba(255,255,255,.16);font:700 .8rem var(--font-sans)}
+.tpl-chips span.ok{background:var(--foret);color:#fff}
+.tpl-cta{gap:var(--space-2)}
+.tpl-slogan-c{margin:.1rem 0 .4rem;font-size:1.05rem;color:var(--papaye-text);font-weight:600}
+/* Agence : grande bannière photo */
+.tpl-hero.agence{position:relative;border-radius:var(--radius-l);overflow:hidden;min-height:340px;display:flex;align-items:flex-end;color:#fff;background:var(--nuit) var(--hero-img) center/cover no-repeat;box-shadow:var(--shadow-2)}
+.tpl-hero.agence::before{content:"";position:absolute;inset:0;background:linear-gradient(180deg,rgba(17,14,12,.05) 20%,rgba(17,14,12,.88) 100%)}
+.tpl-hero.agence .tpl-in{position:relative;display:flex;gap:var(--space-5);align-items:flex-end;padding:var(--space-6);flex-wrap:wrap}
+.tpl-hero .btn.alt{background:rgba(255,255,255,.14);color:#fff;box-shadow:inset 0 0 0 2px rgba(255,255,255,.7)}
+/* Entreprise : bloc sombre, chiffres clés, image à droite */
+.tpl-hero.entreprise{display:grid;grid-template-columns:1.1fr .9fr;gap:var(--space-5);align-items:center;padding:var(--space-6);border-radius:var(--radius-l);background:var(--nuit);color:#fff8ee;box-shadow:var(--shadow-2)}
+.tpl-hero.entreprise .tpl-logo{width:72px;height:72px;margin-bottom:var(--space-3);border-color:rgba(255,255,255,.15)}
+.tpl-hero.entreprise .tpl-img img{width:100%;aspect-ratio:4/3;object-fit:cover;border-radius:var(--radius-m);display:block}
+.tpl-nums{display:flex;gap:var(--space-5);flex-wrap:wrap;margin:var(--space-2) 0 var(--space-5)}
+.tpl-nums div{display:flex;flex-direction:column}.tpl-nums b{font:800 2.2rem/1 var(--font-display);color:var(--soleil)}.tpl-nums span{font-size:.85rem;opacity:.85;max-width:140px}
+.tpl-nums-c{background:var(--surface-200);border:1px solid var(--line);border-radius:var(--radius-l);padding:var(--space-4) var(--space-5);margin-top:var(--space-5)}
+.tpl-nums-c .tpl-nums{margin:0;justify-content:space-around}.tpl-nums-c .tpl-nums b{color:var(--papaye-text)}
+/* Galerie : mosaïque de photos + carte d'identité */
+.tpl-hero.galerie{position:relative}
+.tpl-mosaic{display:grid;gap:8px;height:380px;border-radius:var(--radius-l);overflow:hidden}
+.tpl-mosaic img{width:100%;height:100%;object-fit:cover;display:block}
+.tpl-mosaic.n2{grid-template-columns:2fr 1fr}.tpl-mosaic.n3{grid-template-columns:2fr 1fr;grid-template-rows:1fr 1fr}.tpl-mosaic.n3 img:first-child{grid-row:span 2}
+.tpl-hero.galerie .tpl-card{position:relative;margin:-90px var(--space-5) 0;display:flex;gap:var(--space-4);align-items:flex-end;flex-wrap:wrap;background:var(--surface-200);border-radius:var(--radius-l);padding:var(--space-5);box-shadow:var(--shadow-3)}
+.tpl-hero.galerie .tpl-chips span{background:var(--surface-300)}.tpl-hero.galerie .tpl-chips span.ok{background:var(--foret);color:#fff}
+.tpl-hero.galerie .btn.alt{background:var(--surface-200);color:var(--ink);box-shadow:inset 0 0 0 2px var(--ink)}
+.tpl-hero.galerie .tpl-slogan{color:var(--ink-muted)}
+/* Atouts, infos pratiques */
+.tpl-atouts{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:var(--space-3);margin:var(--space-5) 0 0}
+.tpl-atouts div{display:flex;gap:10px;align-items:center;background:var(--surface-200);border:1px solid var(--line);border-radius:var(--radius-m);padding:var(--space-3) var(--space-4);font-weight:700}
+.tpl-atouts .ic{display:grid;place-items:center;width:34px;height:34px;border-radius:50%;background:var(--papaye-tint);color:var(--papaye-text);flex:none}
+.tpl-infos{margin-top:var(--space-6)}.tpl-infos h2{margin-top:0}
+.tpl-info-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:var(--space-4)}
+.tpl-info-grid div{display:flex;flex-direction:column;gap:2px}
+.tpl-verified{margin-top:var(--space-4);display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+#svcExtra>section{scroll-margin-top:90px}
+#prestations .section-head{margin-top:var(--space-6)}
+/* Agence : prestations présentées comme une flotte (cartes horizontales) */
+main[data-template="agence"] #products{grid-template-columns:repeat(auto-fill,minmax(min(100%,460px),1fr))}
+main[data-template="agence"] #products .tile.service{flex-direction:row}
+main[data-template="agence"] #products .tile.service .pimg{flex:0 0 42%}
+main[data-template="agence"] #products .tile.service .pimg img{height:100%;object-fit:cover}
+main[data-template="agence"] #products .tile.service .pbody{flex:1}
+@media (max-width:720px){
+  .tpl-hero.entreprise{grid-template-columns:1fr;padding:var(--space-5)}
+  .tpl-hero.agence{min-height:300px}.tpl-hero.agence .tpl-in{padding:var(--space-5)}
+  .tpl-mosaic{height:260px}.tpl-hero.galerie .tpl-card{margin:-60px var(--space-3) 0;padding:var(--space-4)}
+  .tpl-logo{width:72px;height:72px}
+  main[data-template="agence"] #products .tile.service{flex-direction:column}
+}
+/* Sélecteur de modèle (inscription, Ma boutique) */
+.tpl-pick{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:var(--space-3);margin-bottom:var(--space-3)}
+.tpl-opt{position:relative;display:flex;flex-direction:column;gap:4px;margin:0;padding:8px;border-radius:var(--radius-m);border:2px solid var(--line);background:var(--surface-200);cursor:pointer;font-weight:400}
+.tpl-opt input{position:absolute;opacity:0;pointer-events:none}
+.tpl-opt:has(input:checked){border-color:var(--papaye);box-shadow:0 0 0 3px var(--papaye-tint)}
+.tpl-opt:has(input:focus-visible){outline:3px solid var(--focus)}
+.tpl-opt small{font-size:.78rem;line-height:1.3}
+.tpl-mini{display:grid;gap:4px;height:92px;padding:6px;border-radius:10px;background:var(--surface-100)}
+.tpl-mini i{display:block;border-radius:4px;background:var(--line)}
+.tpl-mini.classique{grid-template:"a a a" 30% "b c d" 1fr "e e e" 12% / 1fr 1fr 1fr}
+.tpl-mini.agence{grid-template:"a a a" 52% "b c d" 14% "e e e" 1fr / 1fr 1fr 1fr}
+.tpl-mini.entreprise{grid-template:"a a b" 55% "c d e" 1fr / 1fr 1fr 1fr}
+.tpl-mini.galerie{grid-template:"a a b" 1fr "a a c" 1fr "d d e" 34% / 1fr 1fr 1fr}
+.tpl-mini .a{grid-area:a}.tpl-mini .b{grid-area:b}.tpl-mini .c{grid-area:c}.tpl-mini .d{grid-area:d}.tpl-mini .e{grid-area:e}
+.tpl-mini.classique .a{background:var(--soleil-tint)}.tpl-mini.agence .a{background:var(--nuit)}.tpl-mini.agence .b,.tpl-mini.agence .c,.tpl-mini.agence .d{background:var(--papaye-tint)}
+.tpl-mini.entreprise .a{background:var(--nuit)}.tpl-mini.entreprise .b{background:var(--soleil)}
+.tpl-mini.galerie .a{background:var(--papaye)}.tpl-mini.galerie .b{background:var(--soleil)}.tpl-mini.galerie .c{background:var(--foret)}
+.site-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:var(--space-2) var(--space-3)}
+.site-grid.nums{grid-template-columns:repeat(auto-fit,minmax(260px,1fr))}
+@media (max-width:720px){.tpl-hero.agence::before{background:linear-gradient(180deg,rgba(17,14,12,.35) 0%,rgba(17,14,12,.92) 60%)}}

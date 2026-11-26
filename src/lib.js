@@ -135,6 +135,22 @@ export const SERVICE_CATEGORIES = [
 export const isServiceCat = c => SERVICE_CATEGORIES.some(x => x[0] === c);
 export const ALL_CATEGORIES = [...CATEGORIES, ...SERVICE_CATEGORIES];
 
+// Modèles de site des prestataires : même contenu (prestations, modèles, réalisations), mise en page différente
+export const SITE_TEMPLATES = ['classique', 'agence', 'entreprise', 'galerie'];
+export const templateOf = (v, category) => SITE_TEMPLATES.includes(v) ? v
+  : ({ location_voiture: 'agence', nettoyage: 'agence', reparation: 'agence', btp: 'entreprise', architecture: 'entreprise', evenementiel: 'galerie', beaute_domicile: 'galerie' })[category] || 'classique';
+// Contenu du site rempli par le prestataire : slogan, atouts, chiffres clés, horaires, zone d'intervention
+export function cleanSite(b, cleanText) {
+  const o = b && typeof b === 'object' ? b : {};
+  const list = (a, n, max) => (Array.isArray(a) ? a : []).map(x => cleanText(x, max)).filter(x => x.length >= 2).slice(0, n);
+  return {
+    slogan: cleanText(o.slogan, 120), horaires: cleanText(o.horaires, 120), zone: cleanText(o.zone, 120),
+    atouts: list(o.atouts, 4, 80),
+    chiffres: (Array.isArray(o.chiffres) ? o.chiffres : []).map(c => ({ v: cleanText(c && c.v, 12), l: cleanText(c && c.l, 40) })).filter(c => c.v && c.l).slice(0, 3)
+  };
+}
+export const parseSite = s => { try { const o = JSON.parse(s || '{}'); return o && typeof o === 'object' ? o : {}; } catch { return {}; } };
+
 export const ORDER_STATUS = {
   awaiting_payment: 'En attente de paiement', paid: 'Payée, en attente de la boutique', preparing: 'En préparation',
   ready: 'Prête, un livreur est recherché', delivering: 'En cours de livraison', delivered: 'Livrée', cancelled: 'Annulée'
@@ -244,6 +260,10 @@ const SCHEMA = [
      quote_amount INTEGER, quote_note TEXT, created_at TEXT, updated_at TEXT)`,
   `CREATE INDEX IF NOT EXISTS idx_service_requests_shop ON service_requests(shop_id, status)`,
   `CREATE INDEX IF NOT EXISTS idx_service_requests_customer ON service_requests(customer_id)`,
+  // Vitrine des prestataires : albums de réalisations et catalogue de modèles
+  `CREATE TABLE IF NOT EXISTS service_items (id TEXT PRIMARY KEY, shop_id TEXT NOT NULL, kind TEXT NOT NULL, title TEXT NOT NULL, description TEXT,
+     photos TEXT, service_id TEXT, price INTEGER, active INTEGER NOT NULL DEFAULT 1, created_at TEXT)`,
+  `CREATE INDEX IF NOT EXISTS idx_service_items_shop ON service_items(shop_id, active)`,
   // Paiements d'abonnement envoyés par les gestionnaires et livreurs, validés par l'administrateur
   `CREATE TABLE IF NOT EXISTS sub_payments (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, plan TEXT NOT NULL, months INTEGER NOT NULL, amount INTEGER NOT NULL,
      method TEXT, txn_ref TEXT, status TEXT NOT NULL DEFAULT 'pending', note TEXT, created_at TEXT, decided_at TEXT, decided_by TEXT)`,
@@ -259,10 +279,11 @@ const MIGRATIONS = {
   notifications: [['kind', 'TEXT']],
   products: [['unit', "TEXT NOT NULL DEFAULT 'piece'"], ['qty_step', 'REAL NOT NULL DEFAULT 1'], ['promo_price', 'INTEGER'], ['promo_until', 'INTEGER'], ['promo_start', 'INTEGER'], ['stock_updated_at', 'INTEGER'], ['photos', 'TEXT']],
   shops: [['loyalty_enabled', 'INTEGER NOT NULL DEFAULT 0'], ['loyalty_every', 'INTEGER'], ['loyalty_kind', 'TEXT'], ['loyalty_value', 'INTEGER'],
-    ['loyalty_min', 'INTEGER'], ['loyalty_days', 'INTEGER'], ['cover_photo', 'TEXT'], ['look', 'TEXT'], ['pro', 'INTEGER NOT NULL DEFAULT 0'],
+    ['loyalty_min', 'INTEGER'], ['loyalty_days', 'INTEGER'], ['cover_photo', 'TEXT'], ['look', 'TEXT'], ['pro', 'INTEGER NOT NULL DEFAULT 0'], ['template', 'TEXT'], ['site', 'TEXT'],
     ['payout_method', 'TEXT'], ['payout_number', 'TEXT'], ['payout_name', 'TEXT'], ['payout_code', 'TEXT'], ['payout_bank', 'TEXT']],
   couriers: [['pay_method', 'TEXT'], ['pay_number', 'TEXT'], ['pay_name', 'TEXT'], ['pay_code', 'TEXT'], ['pay_bank', 'TEXT']],
   order_items: [['unit', "TEXT NOT NULL DEFAULT 'piece'"]],
+  service_requests: [['model_id', 'TEXT']],
   orders: [['pay_account', 'TEXT'], ['fee_account', 'TEXT'], ['pay_dispute', 'TEXT'], ['fee_dispute', 'TEXT'], ['pay_direct', 'INTEGER NOT NULL DEFAULT 0'], ['pay_ref', 'TEXT'], ['pay_submitted_at', 'TEXT'], ['fee_state', 'TEXT'], ['fee_ref', 'TEXT'], ['discount', 'INTEGER NOT NULL DEFAULT 0'], ['voucher_id', 'TEXT'], ['commission', 'INTEGER NOT NULL DEFAULT 0']]
 };
 async function migrate(db) {

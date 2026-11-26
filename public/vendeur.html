@@ -11,7 +11,7 @@
 <body><header id="top"></header>
 <main>
   <div id="state"></div>
-  <div class="tabs" id="tabs"><button data-t="orders" class="on">Commandes</button><button data-t="products">Produits</button><button data-t="loyalty">Fidélité</button><button data-t="compta">Comptabilité</button><button data-t="shop">Ma boutique</button><button data-t="kit">Partager</button><button data-t="sub">Abonnement</button></div>
+  <div class="tabs" id="tabs"><button data-t="orders" class="on">Commandes</button><button data-t="products">Produits</button><button data-t="loyalty">Fidélité</button><button data-t="compta">Comptabilité</button><button data-t="vitrine" hidden>Vitrine</button><button data-t="shop">Ma boutique</button><button data-t="kit">Partager</button><button data-t="sub">Abonnement</button></div>
   <div id="pane"></div>
   <div id="detail"></div>
 </main>
@@ -25,7 +25,7 @@
     const d = await MG.api('/api/seller/shop'); shop = d.shop;
     if (shop.kind === 'services') { // prestataire : Demandes et Prestations à la place de Commandes et Produits ; pas de fidélité ni de comptabilité des ventes
       const t = k => S('tabs').querySelector(`[data-t="${k}"]`);
-      t('orders').textContent = 'Demandes'; t('products').textContent = 'Prestations'; t('loyalty').hidden = true; t('compta').hidden = true;
+      t('orders').textContent = 'Demandes'; t('products').textContent = 'Prestations'; t('loyalty').hidden = true; t('compta').hidden = true; t('vitrine').hidden = false;
       if (tab === 'loyalty' || tab === 'compta') openTab('orders');
     }
     const sub = await MG.api('/api/sub').catch(() => null);
@@ -39,13 +39,14 @@
   if (location.hash === '#boutique') { tab = 'shop'; [...S('tabs').children].forEach(x => x.classList.toggle('on', x.dataset.t === 'shop')); }
   const openTab = t => { tab = t; [...S('tabs').children].forEach(x => x.classList.toggle('on', x.dataset.t === t)); show(); };
   if (location.hash === '#demandes') { tab = 'orders'; }
+  if (location.hash === '#vitrine') { tab = 'vitrine'; [...S('tabs').children].forEach(x => x.classList.toggle('on', x.dataset.t === 'vitrine')); }
   if (location.hash === '#abonnement') { tab = 'sub'; [...S('tabs').children].forEach(x => x.classList.toggle('on', x.dataset.t === 'sub')); }
   if (location.hash === '#partager') { tab = 'kit'; [...S('tabs').children].forEach(x => x.classList.toggle('on', x.dataset.t === 'kit')); }
   if (location.hash === '#produits') { tab = 'products'; [...S('tabs').children].forEach(x => x.classList.toggle('on', x.dataset.t === 'products')); }
   function show() {
     clearInterval(timer); S('detail').innerHTML = ''; const svc = shop && shop.kind === 'services';
     if (svc && tab === 'orders') timer = setInterval(MG.ifVisible(svcRequests), 30000);
-    ({ orders: svc ? svcRequests : orders, products: svc ? svcList : products, loyalty, compta, shop: shopTab, kit, sub: () => MG.subPane(S('pane')) })[tab]();
+    ({ orders: svc ? svcRequests : orders, products: svc ? svcList : products, vitrine, loyalty, compta, shop: shopTab, kit, sub: () => MG.subPane(S('pane')) })[tab]();
   }
 
   async function orders() {
@@ -426,7 +427,7 @@
   async function svcRequests() {
     const list = await MG.api('/api/seller/requests');
     const d = s => (s ? s.split('-').reverse().join('/') : '—');
-    S('pane').innerHTML = list.length ? list.map(r => `<div class="card"><div class="split"><div><span class="tag ${RQ_TAG[r.status] || ''}">${MG.esc(r.status_label)}</span> <b>${MG.esc(r.ref)}</b> · ${MG.esc(r.service)}<br>
+    S('pane').innerHTML = list.length ? list.map(r => `<div class="card"><div class="split"><div><span class="tag ${RQ_TAG[r.status] || ''}">${MG.esc(r.status_label)}</span> <b>${MG.esc(r.ref)}</b> · ${MG.esc(r.service)}${r.model ? ` · modèle <b>« ${MG.esc(r.model)} »</b>` : ''}<br>
         <span class="muted">Le <b>${d(r.wanted_date)}</b> · ${MG.esc(r.place)} · demandé le ${MG.date(r.created_at)}</span></div>
         <div style="text-align:right"><b>${MG.esc(r.customer.name)}</b><br><a href="tel:${MG.esc(r.customer.phone)}">${MG.esc(r.customer.phone)}</a> · <a target="_blank" rel="noopener" href="${MG.waLink(r.customer.phone, 'Bonjour, au sujet de votre demande ' + r.ref + ' (' + r.service + ')')}">WhatsApp</a></div></div>
       <p style="margin:.6rem 0 0;white-space:pre-wrap">${MG.esc(r.details)}</p>
@@ -447,6 +448,60 @@
         if (rf) { const note = prompt('Motif (envoyé au client) :', 'Pas disponible à cette date'); if (note === null) return; await MG.api('/api/seller/requests/' + rf.dataset.refuse + '/refuse', { method: 'POST', body: { note } }); MG.toast('Le client est prévenu'); svcRequests(); }
         if (dn && confirm('Confirmer que la prestation a été réalisée ?')) { await MG.api('/api/seller/requests/' + dn.dataset.done + '/done', { method: 'POST', body: {} }); MG.toast('Prestation marquée réalisée'); svcRequests(); }
       } catch (er) { MG.fail(er); }
+    };
+  }
+
+  // ===== Vitrine du prestataire : réalisations (albums photos) et modèles (catalogue) =====
+  async function vitrine() {
+    const [items, svcs] = await Promise.all([MG.api('/api/seller/items'), MG.api('/api/seller/services')]);
+    const opt = (sel, none) => (none ? `<option value="">${none}</option>` : '') + svcs.map(sv => `<option value="${sv.id}"${sv.id === sel ? ' selected' : ''}>${MG.esc(sv.name)}</option>`).join('');
+    const form = (it = {}) => `<form class="card" id="vf"><h3 style="margin-top:0">${it.id ? 'Modifier' : 'Ajouter à ma vitrine'}</h3>
+      <p class="muted" style="margin:0 0 var(--space-3)">Une <b>réalisation</b> montre un travail déjà fait (photos avant/après, un événement, un chantier). Un <b>modèle</b> est une proposition que le client peut choisir telle quelle : il touche « Je veux ce modèle » et vous recevez sa demande de devis.</p>
+      <div class="kit-pick" id="vk" role="radiogroup" aria-label="Type"><button type="button" data-k="realisation" class="${(it.kind || 'realisation') === 'realisation' ? 'on' : ''}">Réalisation</button><button type="button" data-k="modele" class="${it.kind === 'modele' ? 'on' : ''}">Modèle</button></div>
+      <label for="vt">Titre</label><input id="vt" required maxlength="100" value="${MG.esc(it.title || '')}" placeholder="Ex. Mariage de Carine et Paul, décor or et blanc">
+      <label for="vs" id="vsl">Prestation concernée</label><select id="vs">${opt(it.service_id, 'Aucune en particulier')}</select>
+      <div id="vpw"><label for="vp">Prix « à partir de » (FCFA, facultatif)</label><input id="vp" type="number" min="100" step="50" value="${it.price || ''}"></div>
+      <label for="vd">Description</label><textarea id="vd" maxlength="1500" placeholder="Ce qui a été fait, matériaux, durée, lieu…">${MG.esc(it.description || '')}</textarea>
+      <label for="vph">Photos (jusqu'à 8)</label>
+      ${it.photos && it.photos.length ? `<div class="vit-thumbs">${it.photos.map(id => `<img src="${MG.photo(id)}" alt="">`).join('')}</div><p class="muted" style="font-size:.85rem;margin:.2rem 0 .4rem">Choisir de nouvelles photos remplace celles-ci.</p>` : ''}
+      <input id="vph" type="file" accept="image/*" multiple${it.id ? '' : ' required'}>
+      <p class="muted" id="vprog" style="font-size:.85rem;margin:.3rem 0 0"></p>
+      <p class="row"><button class="btn">${it.id ? 'Enregistrer' : 'Ajouter'}</button>${it.id ? '<button type="button" class="btn alt" id="vCancel">Annuler</button>' : ''}</p></form>`;
+    const card = it => `<article class="vit-card"><div class="vit-img"><img src="${MG.photo(it.photos[0])}" alt=""><span class="album-n">${MG.icon('camera', 14)}${it.photos.length} photo${it.photos.length > 1 ? 's' : ''}</span></div>
+      <div class="vit-body"><span class="tag ${it.kind === 'modele' ? 'promo' : ''}">${it.kind === 'modele' ? 'Modèle' : 'Réalisation'}</span><b>${MG.esc(it.title)}</b>
+      ${it.kind === 'modele' ? `<small class="muted">${MG.esc((svcs.find(s => s.id === it.service_id) || {}).name || '')}${it.price ? ' · à partir de ' + MG.fcfa(it.price) : ''}</small>` : ''}
+      <span class="row" style="gap:6px;margin-top:6px"><button class="btn small alt" data-ve="${it.id}">Modifier</button><button class="btn small red" data-vr="${it.id}">Retirer</button></span></div></article>`;
+    const draw = edit => {
+      const re = items.filter(i => i.kind === 'realisation'), mo = items.filter(i => i.kind === 'modele');
+      S('pane').innerHTML = form(edit) + `<h3>Mes modèles (${mo.length})</h3>${mo.length ? `<div class="vit-grid">${mo.map(card).join('')}</div>` : '<p class="muted">Aucun modèle pour le moment.</p>'}
+        <h3>Mes réalisations (${re.length})</h3>${re.length ? `<div class="vit-grid">${re.map(card).join('')}</div>` : '<p class="muted">Aucune réalisation pour le moment. Les photos de vos travaux sont ce qui rassure le plus vos futurs clients.</p>'}`;
+      let kind = (edit && edit.kind) || 'realisation';
+      const sync = () => {
+        [...S('vk').children].forEach(b => b.classList.toggle('on', b.dataset.k === kind));
+        const m = kind === 'modele'; S('vpw').hidden = !m;
+        S('vsl').textContent = m ? 'Prestation que le client réservera' : 'Prestation concernée (facultatif)';
+        S('vs').innerHTML = opt(S('vs').value || (edit && edit.service_id), m ? '' : 'Aucune en particulier');
+        S('vt').placeholder = m ? 'Ex. Décor « Jardin tropical » pour 150 invités' : 'Ex. Mariage de Carine et Paul, décor or et blanc';
+      };
+      S('vk').onclick = e => { const b = e.target.closest('[data-k]'); if (b) { kind = b.dataset.k; sync(); } }; sync();
+      if (S('vCancel')) S('vCancel').onclick = () => draw();
+      S('vf').onsubmit = async e => {
+        e.preventDefault();
+        if (kind === 'modele' && !svcs.length) return MG.toast('Ajoutez d\'abord une prestation (onglet Prestations) : le modèle s\'y rattache.', true);
+        try {
+          const body = { kind, title: S('vt').value, service_id: S('vs').value || null, price: kind === 'modele' ? S('vp').value : null, description: S('vd').value };
+          const files = [...S('vph').files].slice(0, 8);
+          if (files.length) { body.photos = []; for (const [k, f] of files.entries()) { S('vprog').textContent = `Envoi des photos : ${k + 1} / ${files.length}…`; body.photos.push(await MG.uploadPhoto(f)); } }
+          if (edit) await MG.api('/api/seller/items/' + edit.id, { method: 'PUT', body }); else await MG.api('/api/seller/items', { method: 'POST', body });
+          MG.toast(edit ? 'Vitrine mise à jour' : 'Ajouté à votre vitrine'); vitrine();
+        } catch (er) { S('vprog').textContent = ''; MG.fail(er); }
+      };
+    };
+    draw();
+    S('pane').onclick = async e => {
+      const ed = e.target.closest('[data-ve]'), rm = e.target.closest('[data-vr]');
+      if (ed) { draw(items.find(x => x.id === ed.dataset.ve)); S('vf').scrollIntoView({ behavior: 'smooth' }); }
+      if (rm && confirm('Retirer cet élément de votre vitrine ?')) { try { await MG.api('/api/seller/items/' + rm.dataset.vr, { method: 'DELETE' }); MG.toast('Retiré'); vitrine(); } catch (er) { MG.fail(er); } }
     };
   }
 
@@ -505,6 +560,19 @@
     ['gabon', 'Gabon', 'Vert, jaune, bleu du drapeau'], ['soleil', 'Soleil', 'Rayons de soleil, produits façon autocollant'], ['bonbon', 'Bonbon', 'Pois rose et menthe'],
     ['tropical', 'Tropical', 'Turquoise, feuilles et corail'], ['pop', 'Pop', 'Style bande dessinée'], ['crepuscule', 'Crépuscule', 'Violet, rose et orange'],
     ['fete', 'Fête', 'Confettis multicolores'], ['bogolan', 'Bogolan', 'Terre cuite et zigzags'], ['lagon', 'Lagon', 'Vagues turquoise et soleil'], ['agrumes', 'Agrumes', 'Orange et citron vert']];
+  // Site du prestataire : modèle de mise en page + contenu (slogan, atouts, chiffres clés, horaires, zone)
+  const siteEditor = s => { const site = s.site || {}, at = site.atouts || [], ch = site.chiffres || [];
+    return `<h3 style="margin:var(--space-5) 0 var(--space-2)">Mon site</h3>
+      <p class="muted" style="margin:0 0 var(--space-3)">Choisissez la mise en page de votre site, puis complétez-le. Vos prestations, modèles et réalisations s'y placent automatiquement.</p>
+      ${MG.tplPicker(s.template || 'classique', 'siteTpl')}
+      <label for="stSlogan">Slogan (une phrase qui vous résume)</label><input id="stSlogan" maxlength="120" value="${MG.esc(site.slogan || '')}" placeholder="Ex. Vos événements, notre passion depuis 2012">
+      <label>Vos atouts (jusqu'à 4)</label><div class="site-grid">${[0, 1, 2, 3].map(i => `<input data-atout maxlength="80" value="${MG.esc(at[i] || '')}" placeholder="${['Ex. Véhicules climatisés', 'Ex. Disponible 7 j/7', 'Ex. Devis gratuit en 24 h', 'Ex. Chauffeurs expérimentés'][i]}">`).join('')}</div>
+      <label>Chiffres clés (jusqu'à 3)</label><div class="site-grid nums">${[0, 1, 2].map(i => `<span class="row" style="gap:6px;flex-wrap:nowrap"><input data-cv maxlength="12" style="width:90px" value="${MG.esc((ch[i] || {}).v || '')}" placeholder="${['15', '120', '8'][i]}"><input data-cl maxlength="40" value="${MG.esc((ch[i] || {}).l || '')}" placeholder="${['ans d\'expérience', 'chantiers réalisés', 'ouvriers qualifiés'][i]}"></span>`).join('')}</div>
+      <div class="site-grid"><div><label for="stHours">Horaires</label><input id="stHours" maxlength="120" value="${MG.esc(site.horaires || '')}" placeholder="Ex. Lun.–sam. 8 h–18 h"></div>
+      <div><label for="stZone">Zone d'intervention</label><input id="stZone" maxlength="120" value="${MG.esc(site.zone || '')}" placeholder="Ex. Libreville, Akanda, Owendo"></div></div>`; };
+  const siteValue = () => ({ slogan: S('stSlogan').value, horaires: S('stHours').value, zone: S('stZone').value,
+    atouts: [...document.querySelectorAll('[data-atout]')].map(i => i.value),
+    chiffres: [...document.querySelectorAll('[data-cv]')].map((v, i) => ({ v: v.value, l: document.querySelectorAll('[data-cl]')[i].value })) });
   const lookPicker = s => `<h3 style="margin:var(--space-5) 0 var(--space-2)">Design de ma boutique</h3>
       <p class="muted" style="margin:0 0 var(--space-3)">Choisissez l'habillage que vos clients voient en entrant dans votre boutique : couleurs, motifs et style des produits. Le menu du marché, le panier et la disposition de la page ne changent pas. Si vous avez une photo de couverture, elle reste visible sous les couleurs du design.</p>
       <div class="look-grid" role="radiogroup" aria-label="Design de ma boutique">${LOOKS.map(([k, n, hint]) => `<label class="look-opt" title="${MG.esc(hint)}"><input type="radio" name="look" value="${k}"${(s.look || '') === k ? ' checked' : ''}>
@@ -520,10 +588,11 @@
       <label for="a">Adresse</label><input id="a" value="${MG.esc(s.address || '')}" maxlength="200">
       <label for="p">Téléphone</label><input id="p" value="${MG.esc(s.phone || '')}" maxlength="30">
       <label for="w">Numéro WhatsApp (avec l'indicatif, ex. 241…)</label><input id="w" value="${MG.esc(s.whatsapp || '')}" maxlength="30">
-      <label>Photo de la boutique</label>${s.photo_id ? `<img class="thumb" src="${MG.photo(s.photo_id)}" alt="">` : ''}<input id="ph" type="file" accept="image/*">
+      <label>${s.kind === 'services' ? 'Logo de votre entreprise (ou photo)' : 'Photo de la boutique'}</label>${s.photo_id ? `<img class="thumb" src="${MG.photo(s.photo_id)}" alt="">` : ''}<input id="ph" type="file" accept="image/*">
       <label>Photo de couverture (fond de la page de votre boutique)</label>
       ${s.cover_photo ? `<div id="cvBox"><img src="${MG.photo(s.cover_photo)}" alt="" style="width:100%;max-height:140px;object-fit:cover;border-radius:var(--radius-m);display:block"><label style="display:flex;gap:.4rem;align-items:center;margin:.4rem 0"><input type="checkbox" id="cvDel" style="width:auto"> Retirer la couverture</label></div>` : ''}
       <input id="cv" type="file" accept="image/*"><p class="muted" style="margin:.3rem 0 0;font-size:.85rem">Conseil : une photo large (paysage) de votre boutique ou de vos produits. Sans couverture, la page utilise une photo de vos produits.</p>
+      ${s.kind === 'services' ? siteEditor(s) : ''}
       ${lookPicker(s)}
       <h3 style="margin:var(--space-5) 0 var(--space-2)">Où vos clients vous paient</h3>
       <p class="muted" style="margin:0 0 var(--space-3)">Au moment de payer, le client voit ce compte et y envoie l'argent de ses achats. Vous confirmez ensuite la réception dans « Commandes ». Les autres personnes ne voient jamais ces informations. <b>Pour la sécurité de vos clients, ce compte doit être validé par l'équipe du marché</b> avant d'être montré. Ensuite, tout changement doit aussi être accepté (le compte actuel reste actif d'ici là). Tant qu'il n'est pas validé, vos clients paient via le marché.</p>
@@ -550,7 +619,7 @@
       e.preventDefault();
       try {
         const f = S('ph').files[0];
-        const body = { name: S('n').value, category: S('c').value, description: S('d').value, address: S('a').value, phone: S('p').value, whatsapp: S('w').value, payout_method: S('pm').value, payout_number: S('pn').value, payout_name: S('pnm').value, payout_code: S('pc').value, payout_bank: S('pb').value, look: lookVal(), lat: pos && pos.lat, lng: pos && pos.lng };
+        const body = { name: S('n').value, category: S('c').value, description: S('d').value, address: S('a').value, phone: S('p').value, whatsapp: S('w').value, payout_method: S('pm').value, payout_number: S('pn').value, payout_name: S('pnm').value, payout_code: S('pc').value, payout_bank: S('pb').value, look: lookVal(), ...(s.kind === 'services' ? { template: (S('sf').querySelector('input[name=siteTpl]:checked') || {}).value, site: siteValue() } : {}), lat: pos && pos.lat, lng: pos && pos.lng };
         if (f) body.photo_id = await MG.uploadPhoto(f);
         const cf = S('cv').files[0];
         if (cf) body.cover_photo = await MG.uploadPhoto(cf); else if (S('cvDel') && S('cvDel').checked) body.cover_photo = null;

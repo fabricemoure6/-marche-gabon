@@ -119,7 +119,7 @@
     const box = MG.$('#demandes'), rq = await MG.api('/api/my/requests');
     if (!rq.length) { box.innerHTML = ''; return; }
     const d = s => (s ? s.split('-').reverse().join('/') : '—');
-    box.innerHTML = `<h2 style="margin-top:var(--space-6)">Mes demandes de services</h2>` + rq.map(r => `<div class="card"><div class="split"><div><span class="tag ${RQ_TAG[r.status] || ''}">${MG.esc(r.status_label)}</span> <b>${MG.esc(r.service)}</b><br>
+    box.innerHTML = `<h2 style="margin-top:var(--space-6)">Mes demandes de services</h2>` + rq.map(r => `<div class="card"><div class="split"><div><span class="tag ${RQ_TAG[r.status] || ''}">${MG.esc(r.status_label)}</span> <b>${MG.esc(r.service)}</b>${r.model ? ` · modèle « ${MG.esc(r.model)} »` : ''}<br>
       <span class="muted"><a href="/boutique/${encodeURIComponent(r.shop.slug)}">${MG.esc(r.shop.name)}</a> · le ${d(r.wanted_date)} · ${MG.esc(r.place)} · réf. ${MG.esc(r.ref)}</span></div>
       ${r.quote_amount && r.status !== 'refused' ? `<div style="text-align:right"><span class="muted">Devis</span><br><b style="font-size:1.3rem">${MG.fcfa(r.quote_amount)}</b></div>` : ''}</div>
       ${r.quote_note ? `<p class="${r.status === 'refused' ? 'muted' : 'notice'}" style="margin:.7rem 0 0">${r.status === 'refused' ? 'Motif : ' : 'Ce que comprend le devis : '}${MG.esc(r.quote_note)}</p>` : ''}

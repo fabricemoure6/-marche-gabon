@@ -159,7 +159,7 @@
 
   // ---------- Icônes (trait 2px, style Lucide) ----------
   const ICONS = {
-    plus: '<path d="M12 5v14M5 12h14"/>', share: '<circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="m8.6 13.5 6.8 4M15.4 6.5l-6.8 4"/>', check: '<path d="m5 12 5 5L20 7"/>', x: '<path d="M6 6l12 12M18 6 6 18"/>',
+    plus: '<path d="M12 5v14M5 12h14"/>', camera: '<path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/>', share: '<circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="m8.6 13.5 6.8 4M15.4 6.5l-6.8 4"/>', check: '<path d="m5 12 5 5L20 7"/>', x: '<path d="M6 6l12 12M18 6 6 18"/>',
     cart: '<circle cx="9" cy="20" r="1.5"/><circle cx="18" cy="20" r="1.5"/><path d="M2 3h3l2.4 11.2a2 2 0 0 0 2 1.6h7.7a2 2 0 0 0 2-1.5L21 7H6"/>',
     bell: '<path d="M6 8a6 6 0 1 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.9 1.9 0 0 0 3.4 0"/>',
     search: '<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>', send: '<path d="M4 12 20 4l-6 16-3-7z"/>',
@@ -257,6 +257,38 @@
     main.addEventListener('touchstart', e => (x0 = e.touches[0].clientX), { passive: true });
     main.addEventListener('touchend', e => { if (x0 === null) return; const dx = e.changedTouches[0].clientX - x0; if (Math.abs(dx) > 40) show(i + (dx < 0 ? 1 : -1)); x0 = null; });
   };
+
+  // Vitrine d'un prestataire : album de réalisation ou modèle, en grand, avec ses photos.
+  // opts.want(item) : affiche « Je veux ce modèle » ; opts.service : nom de la prestation liée
+  MG.itemSheet = function (it, opts = {}) {
+    const urls = it.photos.map(MG.photo); let i = 0;
+    const m = MG.modal(`<div class="sheet"><button type="button" class="sheet-x" data-close aria-label="Fermer">${MG.icon('x', 20)}</button>
+      <div class="gal"><div class="gal-main"><img id="galImg" src="${urls[0]}" alt="${MG.esc(it.title)}">
+        ${urls.length > 1 ? `<button type="button" class="gal-nav prev" aria-label="Photo précédente">‹</button><button type="button" class="gal-nav next" aria-label="Photo suivante">›</button><span class="gal-n" id="galN">1 / ${urls.length}</span>` : ''}</div>
+        ${urls.length > 1 ? `<div class="gal-thumbs">${urls.map((u, k) => `<button type="button" data-k="${k}" class="${k ? '' : 'on'}" aria-label="Photo ${k + 1}"><img src="${u}" alt=""></button>`).join('')}</div>` : ''}</div>
+      <div class="sheet-info"><span class="pshop">${it.kind === 'modele' ? 'Modèle' : 'Réalisation'}${opts.service ? ' · ' + MG.esc(opts.service) : ''}</span><h2>${MG.esc(it.title)}</h2>
+        ${it.description ? `<p class="muted" style="margin:.4rem 0 0;white-space:pre-wrap">${MG.esc(it.description)}</p>` : ''}
+        ${opts.want ? `<div class="sheet-buy"><div>${it.price ? `<small class="muted">à partir de</small><br><span class="price" style="font-size:1.5rem">${MG.fcfa(it.price)}</span>` : '<span class="price">Sur devis</span>'}</div>
+          <button type="button" class="btn" data-want>Je veux ce modèle</button></div>` : ''}</div></div>`, { wide: true });
+    const el = m.el; el.classList.add('sheet-modal');
+    const show = k => { i = (k + urls.length) % urls.length; el.querySelector('#galImg').src = urls[i]; const n = el.querySelector('#galN'); if (n) n.textContent = `${i + 1} / ${urls.length}`; el.querySelectorAll('.gal-thumbs button').forEach((b, j) => b.classList.toggle('on', j === i)); };
+    el.addEventListener('click', e => {
+      if (e.target.closest('.prev')) show(i - 1); if (e.target.closest('.next')) show(i + 1);
+      const t = e.target.closest('[data-k]'); if (t) show(Number(t.dataset.k));
+      if (e.target.closest('[data-want]')) { m.close(); opts.want(it); }
+    });
+    el.addEventListener('keydown', e => { if (e.key === 'ArrowLeft') show(i - 1); if (e.key === 'ArrowRight') show(i + 1); });
+    let x0 = null; const main = el.querySelector('.gal-main');
+    main.addEventListener('touchstart', e => (x0 = e.touches[0].clientX), { passive: true });
+    main.addEventListener('touchend', e => { if (x0 === null) return; const dx = e.changedTouches[0].clientX - x0; if (Math.abs(dx) > 40) show(i + (dx < 0 ? 1 : -1)); x0 = null; });
+  };
+
+  // Modèles de site des prestataires (même liste que SITE_TEMPLATES côté serveur)
+  MG.SITE_TEMPLATES = [['classique', 'Classique', 'Présentation simple, puis vos prestations'], ['agence', 'Agence', 'Grande bannière, vos atouts, prestations en avant (location, nettoyage, dépannage)'],
+    ['entreprise', 'Entreprise', 'Chiffres clés, réalisations d\'abord, pièces vérifiées (BTP, architecture)'], ['galerie', 'Galerie', 'Vos plus belles photos en grand, modèles en avant (événementiel, beauté)']];
+  MG.TEMPLATE_FOR = { location_voiture: 'agence', nettoyage: 'agence', reparation: 'agence', btp: 'entreprise', architecture: 'entreprise', evenementiel: 'galerie', beaute_domicile: 'galerie' };
+  MG.tplPicker = (sel, name = 'tpl') => `<div class="tpl-pick" role="radiogroup" aria-label="Modèle de site">${MG.SITE_TEMPLATES.map(([k, n, d]) => `<label class="tpl-opt"><input type="radio" name="${name}" value="${k}"${k === sel ? ' checked' : ''}>
+    <span class="tpl-mini ${k}"><i class="a"></i><i class="b"></i><i class="c"></i><i class="d"></i><i class="e"></i></span><b>${n}</b><small class="muted">${MG.esc(d)}</small></label>`).join('')}</div>`;
 
   // Tuile boutique. s = {name, slug, category, address, photo_id, cover_id?, products, promos?, best_pct?}
   MG.shopCard = function (s, opts = {}) {
