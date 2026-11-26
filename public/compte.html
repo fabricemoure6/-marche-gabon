@@ -103,15 +103,16 @@
       };
     } else {
       f.innerHTML = `<label for="role">Je suis</label>
-        <select id="role"><option value="customer">Client (j'achète)</option><option value="seller">Gestionnaire de boutique (je vends)</option><option value="courier">Livreur</option></select>
+        <select id="role"><option value="customer">Client (j'achète)</option><option value="seller">Gestionnaire de boutique ou prestataire de services</option><option value="courier">Livreur</option></select>
         <div id="pfpWrap"><label>Photo de profil <span class="muted" style="font-weight:500" id="pfpOpt">(facultatif)</span></label><div id="pfpReg"></div></div>
         <label for="name">Nom complet</label><input id="name" required maxlength="80" autocomplete="name">
         <label for="email">E-mail</label><input id="email" type="email" required autocomplete="username">
         <label for="phone">Téléphone (WhatsApp si possible)</label><input id="phone" type="tel" required maxlength="30" autocomplete="tel">
         <div id="sellerBox" hidden>
-          <label for="shopName">Nom de la boutique</label><input id="shopName" maxlength="80">
-          <label for="category">Catégorie</label><select id="category">${MG.config.categories.map(c => `<option value="${c[0]}">${MG.esc(c[1])}</option>`).join('')}</select>
-          <label for="address">Adresse de la boutique</label><input id="address" maxlength="200">
+          <label for="kind">Mon activité</label><select id="kind"><option value="products">Je vends des produits (boutique)</option><option value="services">Je propose des services (location, événementiel, nettoyage, travaux…)</option></select>
+          <label for="shopName" id="shopNameL">Nom de la boutique</label><input id="shopName" maxlength="80">
+          <label for="category" id="categoryL">Catégorie</label><select id="category"></select>
+          <label for="address" id="addressL">Adresse de la boutique</label><input id="address" maxlength="200">
           <p class="muted">${invite && invite.autoApprove ? 'Votre boutique sera visible dès la création du compte.' : 'Votre boutique sera visible après validation par l\'administrateur.'}</p>
         </div>
         <label for="pw">Mot de passe (8 caractères minimum)</label><input id="pw" type="password" required minlength="8" autocomplete="new-password">
@@ -132,6 +133,13 @@
         MG.$('#pfpOpt').textContent = sel.value === 'courier' ? '(recommandée : les clients vous reconnaissent)' : '(facultatif)';
       };
       sel.onchange = () => { sync(); lockNote(); }; sync(); lockNote();
+      const kind = MG.$('#kind'); if (MG.param('kind') === 'services') kind.value = 'services';
+      const syncKind = () => { const svc = kind.value === 'services';
+        MG.$('#category').innerHTML = (svc ? MG.config.service_categories : MG.config.categories).map(c => `<option value="${c[0]}">${MG.esc(c[1])}</option>`).join('');
+        MG.$('#shopNameL').textContent = svc ? 'Nom de votre entreprise ou de votre activité' : 'Nom de la boutique';
+        MG.$('#categoryL').textContent = svc ? 'Type de service' : 'Catégorie';
+        MG.$('#addressL').textContent = svc ? 'Adresse ou zone d\'intervention' : 'Adresse de la boutique'; };
+      kind.onchange = syncKind; syncKind();
       f.onsubmit = async e => {
         e.preventDefault();
         const body = { role: sel.value, name: MG.$('#name').value, email: MG.$('#email').value, phone: MG.$('#phone').value, password: MG.$('#pw').value,

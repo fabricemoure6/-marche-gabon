@@ -751,3 +751,10 @@ label.consent input{width:20px;height:20px;min-height:0;flex:none;margin-top:2px
 .sp-price{font:800 1.6rem var(--font-display);color:var(--papaye-text)}.sp-price small{font:600 .9rem var(--font-sans);color:var(--ink-muted)}
 .sub-plan ul{margin:.4rem 0 0;padding-left:1.1rem;color:var(--ink-muted);font-size:.92rem}
 .sub-howto{background:var(--surface-100);border-radius:var(--radius-m);padding:0 var(--space-4);margin-top:var(--space-3)}
+
+/* ---------- Univers Services ---------- */
+.tile.service .pfoot{flex-wrap:wrap;gap:var(--space-2)}
+.tile.service .pfoot .btn{white-space:nowrap}
+#services{margin-top:var(--space-6)}
+.rq-quote{margin-top:var(--space-3);padding-top:var(--space-3);border-top:1px solid var(--line)}
+@media (max-width:520px){.rq-quote>div{grid-template-columns:1fr!important}}

@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 300" width="400" height="300"><rect width="400" height="300" fill="#FFF1C2"/><circle cx="320" cy="64" r="56" fill="#FFE08A"/><ellipse cx="200" cy="268" rx="160" ry="12" fill="#EBD58F"/>
+<g fill="#C2571A" stroke="#1F1A17" stroke-width="4"><rect x="70" y="210" width="60" height="28"/><rect x="130" y="210" width="60" height="28"/><rect x="190" y="210" width="60" height="28"/><rect x="100" y="182" width="60" height="28"/><rect x="160" y="182" width="60" height="28"/><rect x="130" y="154" width="60" height="28"/><rect x="70" y="238" width="60" height="26"/><rect x="130" y="238" width="60" height="26"/><rect x="190" y="238" width="60" height="26"/></g>
+<path d="M260 150 q0-56 56-56 q56 0 56 56 z" fill="#FFC53D" stroke="#1F1A17" stroke-width="5"/>
+<rect x="248" y="146" width="136" height="16" rx="6" fill="#FFC53D" stroke="#1F1A17" stroke-width="5"/>
+<path d="M316 94 v52" stroke="#1F1A17" stroke-width="4"/>
+<path d="M300 240 l50-50 l14 14 l-50 50 z" fill="#8C7F72" stroke="#1F1A17" stroke-width="4"/><path d="M286 256 l20-20 l10 10 l-20 20 z" fill="#8A5A00" stroke="#1F1A17" stroke-width="4"/></svg>

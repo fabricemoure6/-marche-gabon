@@ -3,7 +3,8 @@ import {
   json, bad, rand, uid, now, sha256, safeEqual, hashPassword, createSession, clearCookie, currentUser, destroySession,
   CATEGORIES, ORDER_STATUS, ensureSchema, loadSettings, saveSettings, toBase64, fromBase64, sniffImage, sniffDocument, DOC_KINDS,
   withSecurityHeaders, recentCount, recordEvent, cached, clearCache, PUBLIC_TTL,
-  validCoord, distanceKm, slugify, EFFECTIVE_PRICE, promoActive, publicProduct, voucherDiscount, loyaltyProgram, LOW_STOCK, photoList, SOLD, EXPENSE_CATS, period, UNITS, r3, unitOf, stepOf, fmtQty, lineTotal, cleanAccount, METHOD_LABEL, lookOf } from './lib.js';
+  validCoord, distanceKm, slugify, EFFECTIVE_PRICE, promoActive, publicProduct, voucherDiscount, loyaltyProgram, LOW_STOCK, photoList, SOLD, EXPENSE_CATS, period, UNITS, r3, unitOf, stepOf, fmtQty, lineTotal, cleanAccount, METHOD_LABEL, lookOf, SERVICE_CATEGORIES, isServiceCat, docKindsFor } from './lib.js';
+import { serviceCustomerRoutes, serviceSellerRoutes, servicesOfShop } from './services.js';
 import { backupStep, backupStatus, backupStream, backupWatch } from './backup.js';
 import { notify, confirmCheckout, rejectCheckout, cancelOrders, releaseVoucher, restock, createVoucher, awardLoyalty, startOnlinePayment, singpayVerify, singpayOn, singpayCall, sp } from './pay.js';
 import { botReply, searchProducts } from './bot.js';
@@ -131,7 +132,7 @@ async function register(request, env, secure) {
   if (role === 'seller') {
     shopName = cleanText(b.shopName, 80); category = String(b.category || ''); address = cleanText(b.address, 200);
     if (shopName.length < 2) return bad('Indiquez le nom de votre boutique');
-    if (!CATEGORIES.some(c => c[0] === category)) return bad('Choisissez la catégorie de la boutique');
+    if (!CATEGORIES.some(c => c[0] === category) && !isServiceCat(category)) return bad('Choisissez la catégorie de la boutique');
   }
   if (await env.DB.prepare('SELECT 1 FROM users WHERE email=?1').bind(email).first()) return bad('Un compte existe déjà avec cet e-mail', 409);
   if (invite) {
@@ -313,7 +314,7 @@ async function route(request, env) {
       if (method === 'GET' && p === '/api/config') {
         const s = await loadSettings(env);
         return json({
-          site_name: s.site_name, tagline: s.tagline, categories: CATEGORIES, delivery_base: s.delivery_base,
+          site_name: s.site_name, tagline: s.tagline, categories: CATEGORIES, service_categories: SERVICE_CATEGORIES, delivery_base: s.delivery_base,
           delivery_per_km: s.delivery_per_km, online_payment: singpayOn(env), invite_required: s.invite_required,
           promo_max_pct: s.promo_max_pct, promo_max_days: s.promo_max_days, loyalty_max_pct: s.loyalty_max_pct ?? 30
         });
@@ -326,7 +327,7 @@ async function route(request, env) {
                   (SELECT COUNT(*) FROM products p WHERE p.shop_id=s.id AND p.active=1 AND p.stock>0 AND ${EFFECTIVE_PRICE} < p.price) AS promos,
                   (SELECT MAX(ROUND(100 - 100.0 * p.promo_price / p.price)) FROM products p WHERE p.shop_id=s.id AND p.active=1 AND p.stock>0 AND ${EFFECTIVE_PRICE} < p.price) AS best_pct,
                   COALESCE(s.cover_photo, (SELECT p.photo_id FROM products p WHERE p.shop_id=s.id AND p.active=1 AND p.photo_id IS NOT NULL ORDER BY p.created_at DESC LIMIT 1)) AS cover_id,
-                  s.loyalty_enabled, s.pro
+                  s.loyalty_enabled, s.pro, (SELECT COUNT(*) FROM services sv WHERE sv.shop_id=s.id AND sv.active=1) AS services
            FROM shops s WHERE s.status='active' ORDER BY s.pro DESC, promos > 0 DESC, s.name`).all()).results);
         return json(results.filter(s => (!cat || s.category === cat) && (!q || (s.name + ' ' + (s.description || '')).toLowerCase().includes(q))));
       }
@@ -354,6 +355,10 @@ async function route(request, env) {
           FROM shops WHERE slug=?1 AND status='active'`).bind(m[1]).first());
         if (!shopRow) return bad('Boutique introuvable', 404);
         const s = { ...shopRow }; // copie : l'original reste intact dans la mémoire courte
+        if (isServiceCat(s.category)) { // prestataire de services : ses prestations, pas de produits ni de fidélité
+          for (const k of ['loyalty_enabled', 'loyalty_every', 'loyalty_kind', 'loyalty_value', 'loyalty_min', 'loyalty_days']) delete s[k];
+          return json({ shop: { ...s, kind: 'services' }, products: [], services: await cached('shop-services:' + s.id, PUBLIC_TTL, () => servicesOfShop(env, s.id)), mine: null });
+        }
         const loyalty = loyaltyProgram(s);
         for (const k of ['loyalty_enabled', 'loyalty_every', 'loyalty_kind', 'loyalty_value', 'loyalty_min', 'loyalty_days']) delete s[k];
         let mine = null;
@@ -428,6 +433,8 @@ async function route(request, env) {
       if (!user) return bad('Connexion requise', 401);
       const subRes = await subRoutes(env, request, user, p, method, { readJson, cleanText });
       if (subRes) return subRes;
+      const svcRes = await serviceCustomerRoutes(env, request, user, p, method, { readJson, cleanText });
+      if (svcRes) return svcRes;
 
       if (method === 'GET' && p === '/api/notifications') {
         const { results } = await env.DB.prepare('SELECT id,title,body,url,read,created_at,kind FROM notifications WHERE user_id=?1 ORDER BY created_at DESC LIMIT 30').bind(user.id).all();
@@ -457,11 +464,13 @@ async function route(request, env) {
       // ----- Pièces justificatives (privées : propriétaire et administrateur uniquement) -----
       if (method === 'GET' && p === '/api/me/documents') {
         const { results } = await env.DB.prepare('SELECT id,kind,status,note,size,mime,created_at FROM documents WHERE user_id=?1').bind(user.id).all();
-        const kinds = Object.entries(DOC_KINDS).filter(([, k]) => k.roles.includes(user.role)).map(([id, k]) => ({ id, label: k.label }));
+        const myShop = user.role === 'seller' ? await env.DB.prepare('SELECT category FROM shops WHERE owner_id=?1').bind(user.id).first() : null;
+        const kinds = docKindsFor(user.role, myShop && myShop.category).map(([id, k]) => ({ id, label: k.label }));
         return json({ kinds, documents: results.map(d => ({ ...d, label: (DOC_KINDS[d.kind] || {}).label || d.kind })) });
       }
-      if (method === 'POST' && (m = p.match(/^\/api\/me\/documents\/(cni|permis|passeport|autorisation)$/))) {
-        if (!DOC_KINDS[m[1]].roles.includes(user.role)) return bad('Cette pièce ne concerne pas votre type de compte', 403);
+      if (method === 'POST' && (m = p.match(/^\/api\/me\/documents\/([a-z_]{2,30})$/)) && DOC_KINDS[m[1]]) {
+        const myShop = user.role === 'seller' ? await env.DB.prepare('SELECT category FROM shops WHERE owner_id=?1').bind(user.id).first() : null;
+        if (!docKindsFor(user.role, myShop && myShop.category).some(([id]) => id === m[1])) return bad('Cette pièce ne concerne pas votre type de compte', 403);
         const buf = await request.arrayBuffer();
         if (!buf.byteLength || buf.byteLength > 1024 * 1024) return bad('Fichier trop lourd (1 Mo maximum)');
         const mime = sniffDocument(buf);
@@ -764,13 +773,17 @@ async function route(request, env) {
         const shop = await env.DB.prepare('SELECT * FROM shops WHERE owner_id=?1').bind(user.id).first();
         if (!shop) return bad('Boutique introuvable', 404);
 
-        if (method === 'GET' && p === '/api/seller/shop') return json({ shop, categories: CATEGORIES, pending_account: await pendingAccount(env, 'shop', shop.id) });
+        const svcSeller = await serviceSellerRoutes(env, request, user, shop, p, method, { readJson, cleanText });
+        if (svcSeller) return svcSeller;
+        if (method === 'GET' && p === '/api/seller/shop') return json({ shop: { ...shop, kind: isServiceCat(shop.category) ? 'services' : 'products' }, categories: isServiceCat(shop.category) ? SERVICE_CATEGORIES : CATEGORIES, pending_account: await pendingAccount(env, 'shop', shop.id) });
         if (method === 'PUT' && p === '/api/seller/shop') {
           const b = await readJson(request);
           if (!b) return bad('Requête invalide');
           const name = cleanText(b.name, 80);
           if (name.length < 2) return bad('Indiquez le nom de la boutique');
-          const cat = CATEGORIES.some(c => c[0] === b.category) ? b.category : shop.category;
+          // On reste dans le même univers (produits ou services) : les prestations et les produits ne se mélangent pas
+          const sameKind = isServiceCat(b.category) === isServiceCat(shop.category);
+          const cat = sameKind && (CATEGORIES.some(c => c[0] === b.category) || isServiceCat(b.category)) ? b.category : shop.category;
           const lat = num(b.lat), lng = num(b.lng), pos = validCoord(lat, lng);
           let photo = shop.photo_id;
           if (b.photo_id !== undefined) {

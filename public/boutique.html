@@ -42,6 +42,7 @@
   }
   catch { $('#head').innerHTML = '<div class="card empty-state"><h2>Boutique introuvable</h2><p class="muted">Elle a peut-être changé d\'adresse ou n\'est plus en ligne.</p><a class="btn" href="/">Retour au marché</a></div>'; $('#prodTitle').parentElement.hidden = true; return; }
   const { shop, products } = data;
+  const isSvc = shop.kind === 'services' || MG.isServiceCat(shop.category), services = data.services || [];
   // Design choisi par la boutique (déjà posé par le serveur) ; ?look=… sert à l'aperçu depuis « Ma boutique »
   const look = MG.param('look') || shop.look, main = document.querySelector('main');
   if (look && /^(wax|chic|frais|lagune|douceur|gabon|soleil|bonbon|tropical|pop|crepuscule|fete|bogolan|lagon|agrumes)$/.test(look)) main.dataset.look = look;
@@ -50,19 +51,66 @@
   const promos = products.filter(p => p.promo_pct && p.stock > 0);
   // Photo de couverture : celle choisie par la boutique, sinon une photo de produit, sinon un motif coloré
   const okId = v => (v && /^[\w-]+$/.test(String(v)) ? v : null);
-  const coverId = okId(shop.cover_photo) || (products.find(p => p.photo_id && /^[\w-]+$/.test(String(p.photo_id))) || {}).photo_id || null;
+  const coverId = okId(shop.cover_photo) || ((isSvc ? services : products).find(p => p.photo_id && /^[\w-]+$/.test(String(p.photo_id))) || {}).photo_id || null;
   const order = products.map(p => p.id); // ordre du serveur : promotions puis nouveautés
 
   $('#head').innerHTML = `<a href="/?cat=${encodeURIComponent(shop.category)}" style="display:inline-block;margin-bottom:var(--space-3)">← ${MG.esc(MG.catName(shop.category))}</a>
     <section class="card shop-hero${coverId ? ' has-cover' : ''}"${coverId ? ` style="--cover-img:url('${MG.photo(coverId)}')"` : ''}>
       <span class="av"><img class="avatar-xl" src="${MG.img(shop.photo_id, shop.category)}" alt=""></span>
       <div style="flex:1;min-width:220px"><h1 style="margin:0 0 .3rem">${MG.esc(shop.name)}</h1>
-        <div class="stats"><span class="tag">${MG.esc(MG.catName(shop.category))}</span><span class="tag">${products.length} produit${products.length > 1 ? 's' : ''}</span>${promos.length ? `<span class="tag promo">${promos.length} en promo</span>` : ''}</div>
+        <div class="stats"><span class="tag">${MG.esc(MG.catName(shop.category))}</span><span class="tag">${isSvc ? `${services.length} prestation${services.length > 1 ? 's' : ''}` : `${products.length} produit${products.length > 1 ? 's' : ''}`}</span>${promos.length ? `<span class="tag promo">${promos.length} en promo</span>` : ''}</div>
         ${shop.description ? `<p style="margin:.7rem 0 0">${MG.esc(shop.description)}</p>` : ''}
         ${shop.address ? `<p class="muted" style="margin:.4rem 0 0">${MG.icon('pin', 18)} ${MG.esc(shop.address)}</p>` : ''}
         <button type="button" class="btn small share-shop" id="shareShop">${MG.icon('share', 16)}Partager la boutique</button></div></section>`;
   $('#shareShop').onclick = () => MG.share({ title: shop.name, url: location.origin + '/boutique/' + encodeURIComponent(shop.slug),
-    text: `${shop.name}${shop.address ? ' (' + shop.address + ')' : ''} : commandez en ligne, livré chez vous avec ${MG.config.site_name}` });
+    text: `${shop.name}${shop.address ? ' (' + shop.address + ')' : ''} : ${isSvc ? 'demandez un devis en ligne' : 'commandez en ligne, livré chez vous'} avec ${MG.config.site_name}` });
+  if (isSvc) { showServices(); return; }
+
+  // ----- Prestataire de services : prestations + demande de devis / réservation -----
+  function showServices() {
+    $('#prodTitle').textContent = 'Les prestations';
+    $('#toolbar').hidden = services.length < 4; $('#onlyPromo').hidden = true; $('#sort').hidden = true;
+    $('#q').placeholder = 'Chercher une prestation…';
+    const norm = s => String(s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    const drawSvc = () => {
+      const q = norm($('#q').value.trim()), list = services.filter(sv => !q || norm(sv.name + ' ' + (sv.description || '')).includes(q));
+      $('#products').innerHTML = list.map(sv => MG.serviceCard(sv, { category: shop.category })).join('');
+      $('#count').textContent = list.length !== services.length ? `${list.length} sur ${services.length}` : '';
+      $('#empty').hidden = list.length > 0;
+      $('#emptyTitle').textContent = services.length ? 'Aucune prestation ne correspond' : 'Ce prestataire n\'a pas encore publié de prestation';
+      $('#emptyText').textContent = services.length ? 'Essayez un autre mot.' : 'Revenez bientôt !';
+    };
+    $('#q').oninput = drawSvc; drawSvc();
+    $('#products').onclick = e => { const b = e.target.closest('[data-svc]'); if (b) ask(services.find(x => x.id === b.dataset.svc)); };
+    const want = MG.param('svc'); if (want && services.some(x => x.id === want)) ask(services.find(x => x.id === want));
+  }
+  function ask(sv) {
+    if (!sv) return;
+    const HINT = { location_voiture: 'Type de véhicule, nombre de jours, avec ou sans chauffeur, lieu de remise du véhicule…', evenementiel: 'Type d\'événement, nombre d\'invités, horaires, matériel souhaité…',
+      nettoyage: 'Type de lieu, surface ou nombre de pièces, fréquence…', reparation: 'Ce qui ne marche pas, marque de l\'appareil, urgence…',
+      btp: 'Nature des travaux, dimensions, plans ou photos disponibles…', architecture: 'Type de projet, surface du terrain, budget indicatif…',
+      beaute_domicile: 'Prestation souhaitée, nombre de personnes, heure…', cours: 'Matière, niveau, nombre d\'heures par semaine…' };
+    if (!MG.user) { location.href = '/compte.html?next=' + encodeURIComponent(location.pathname + '?svc=' + sv.id); return; }
+    if (MG.user.role !== 'customer') { MG.toast('Les demandes se font avec un compte client', true); return; }
+    const today = new Date().toISOString().slice(0, 10);
+    const m = MG.modal(`<form id="rq"><h2 style="margin-top:0">${sv.price_type === 'devis' ? 'Demander un devis' : 'Réserver'}</h2>
+      <p class="muted" style="margin-top:0">${MG.esc(sv.name)} · ${MG.esc(shop.name)}<br>${MG.servicePrice(sv)}</p>
+      <label for="rqDate">Date souhaitée</label><input id="rqDate" type="date" min="${today}" required>
+      <label for="rqPlace">Lieu de la prestation</label><input id="rqPlace" required maxlength="200" placeholder="Quartier, ville">
+      <label for="rqDet">Votre besoin</label><textarea id="rqDet" required minlength="5" maxlength="1000" placeholder="${MG.esc(HINT[shop.category] || 'Décrivez ce dont vous avez besoin')}"></textarea>
+      <label for="rqTel">Téléphone où vous joindre</label><input id="rqTel" type="tel" required maxlength="30" value="${MG.esc(MG.user.phone || '')}">
+      <p class="muted" style="font-size:.88rem">Le prestataire vous répond avec un prix ferme. Vous l'acceptez ou le refusez ensuite : rien n'est payé ni engagé avant.</p>
+      <p class="err" id="rqErr"></p><div class="row"><button class="btn">Envoyer la demande</button><button type="button" class="btn alt" data-close>Annuler</button></div></form>`);
+    m.el.querySelector('#rq').onsubmit = async e => {
+      e.preventDefault();
+      try {
+        const r = await MG.api('/api/services/' + sv.id + '/request', { method: 'POST', body: { wanted_date: m.el.querySelector('#rqDate').value, place: m.el.querySelector('#rqPlace').value, details: m.el.querySelector('#rqDet').value, phone: m.el.querySelector('#rqTel').value } });
+        m.el.innerHTML = `<div style="text-align:center"><h2>Demande envoyée</h2><p>Référence <b>${MG.esc(r.ref)}</b>. ${MG.esc(shop.name)} va vous répondre avec un devis : vous serez prévenu ici et dans « Mes achats ».</p>
+          <p class="row" style="justify-content:center"><a class="btn" href="/commandes.html#demandes">Suivre ma demande</a><button class="btn alt" type="button" id="rqOk">Fermer</button></p></div>`;
+        m.el.querySelector('#rqOk').onclick = m.close;
+      } catch (er) { m.el.querySelector('#rqErr').textContent = er.message; }
+    };
+  }
 
   // Carte de fidélité de la boutique
   const prog = shop.loyalty, mine = data.mine;
