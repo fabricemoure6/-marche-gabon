@@ -280,8 +280,65 @@
     };
   }
 
+  // ---------- 5) Courses disponibles (livreur, avant acceptation) ----------
+  var COLORS = ['#e8590c', '#2563eb', '#16a34a', '#9c36b5', '#c2255c', '#0c8599', '#8a5a00', '#495057'];
+  function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+  function numIcon(n, color) {
+    return L.divIcon({ className: 'gm-icon', iconSize: [40, 40], iconAnchor: [20, 20],
+      html: '<div style="position:relative;width:40px;height:40px;border-radius:50%;background:' + color + ';border:3px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,.4);display:flex;align-items:center;justify-content:center;font-size:19px">🏪' +
+        '<span style="position:absolute;top:-6px;right:-6px;min-width:20px;height:20px;border-radius:10px;background:#1f1a17;color:#fff;font:700 12px/20px sans-serif;text-align:center;padding:0 4px">' + n + '</span></div>' });
+  }
+  /**
+   * Vue d'ensemble : chaque course = boutique (point de récupération) reliée à la zone de livraison.
+   * opts: { me:[lat,lng]|null, jobs:[{ ref, shop:[lat,lng]|null, zone:{center,r}|null, title, sub }], onPick(ref) }
+   */
+  function jobsMap(el, opts) {
+    var map = makeMap(el, opts.me || DEFAULT_CENTER, 13), pts = [];
+    if (opts.me) { L.marker(opts.me, { icon: ICONS.driver(), zIndexOffset: 1000 }).addTo(map).bindTooltip('Vous'); pts.push(opts.me); }
+    var line = function (j, i) { return '<b>' + (i + 1) + '. ' + esc(j.title) + '</b><br>' + esc(j.sub) + '<br><button type="button" data-pick="' + esc(j.ref) + '" style="margin:6px 0 2px;padding:6px 12px;border-radius:20px;border:0;background:#f76707;color:#1f1a17;font-weight:700;cursor:pointer">Voir le trajet</button>'; };
+    // Une boutique peut avoir plusieurs courses : un seul repère, avec tous les numéros et toutes les courses dans la bulle
+    var groups = {};
+    opts.jobs.forEach(function (j, i) { if (j.shop) { var k = j.shop.join(','); (groups[k] = groups[k] || []).push(i); } });
+    Object.keys(groups).forEach(function (k) {
+      var idx = groups[k], j0 = opts.jobs[idx[0]];
+      L.marker(j0.shop, { icon: numIcon(idx.map(function (i) { return i + 1; }).join(','), COLORS[idx[0] % COLORS.length]) }).addTo(map)
+        .bindPopup(idx.map(function (i) { return line(opts.jobs[i], i); }).join('<hr style="margin:6px 0">'));
+      pts.push(j0.shop);
+    });
+    opts.jobs.forEach(function (j, i) {
+      var color = COLORS[i % COLORS.length], pop = line(j, i);
+      if (j.zone) {
+        L.circle(j.zone.center, { radius: j.zone.r, color: color, weight: 2, fillColor: color, fillOpacity: 0.15 }).addTo(map).bindPopup(pop);
+        L.marker(j.zone.center, { icon: L.divIcon({ className: 'gm-icon', iconSize: [26, 26], iconAnchor: [13, 13], html: '<div style="width:26px;height:26px;border-radius:50%;background:#fff;border:3px solid ' + color + ';font:700 12px/20px sans-serif;text-align:center;color:#1f1a17">' + (i + 1) + '</div>' }) }).addTo(map).bindPopup(pop);
+        pts.push(j.zone.center);
+        if (j.shop) L.polyline([j.shop, j.zone.center], { color: color, weight: 3, dashArray: '8 8' }).addTo(map);
+      }
+    });
+    if (pts.length > 1) map.fitBounds(pts, { padding: [40, 40], maxZoom: 15 }); else if (pts.length) map.setView(pts[0], 14);
+    map.on('popupopen', function (e) { [].forEach.call(e.popup.getElement().querySelectorAll('[data-pick]'), function (b) { if (opts.onPick) b.onclick = function () { opts.onPick(b.getAttribute('data-pick')); }; }); });
+    return { map: map, stop: function () { map.remove(); } };
+  }
+  /**
+   * Trajet d'une course : moi → boutique (itinéraire), puis boutique → zone du client (itinéraire approximatif).
+   * opts: { me, shop, zone:{center,r} } ; renvoie { map, done: Promise<{ toShop, trip }> }
+   */
+  function jobRoute(el, opts) {
+    var map = makeMap(el, opts.shop || opts.me || DEFAULT_CENTER, 14), pts = [];
+    var tip = function (m, t) { m.bindTooltip(t, { permanent: true, direction: 'top', offset: [0, -16] }); };
+    if (opts.me) { tip(L.marker(opts.me, { icon: ICONS.driver(), zIndexOffset: 1000 }).addTo(map), 'Vous'); pts.push(opts.me); }
+    if (opts.shop) { tip(L.marker(opts.shop, { icon: ICONS.shop() }).addTo(map), 'Récupération'); pts.push(opts.shop); }
+    if (opts.zone) {
+      L.circle(opts.zone.center, { radius: opts.zone.r, color: '#16a34a', weight: 2, fillOpacity: 0.15 }).addTo(map);
+      tip(L.marker(opts.zone.center, { icon: ICONS.dest() }).addTo(map), 'Livraison (zone)'); pts.push(opts.zone.center);
+    }
+    if (pts.length > 1) map.fitBounds(pts, { padding: [50, 50], maxZoom: 16 });
+    var a = opts.me && opts.shop ? route(opts.me, opts.shop).then(function (r) { L.polyline(r.coords, { color: '#2563eb', weight: 5, opacity: 0.85 }).addTo(map); return r; }) : Promise.resolve(null);
+    var b = opts.shop && opts.zone ? route(opts.shop, opts.zone.center).then(function (r) { L.polyline(r.coords, { color: '#16a34a', weight: 5, opacity: 0.85, dashArray: '10 8' }).addTo(map); return r; }) : Promise.resolve(null);
+    return { map: map, done: Promise.all([a, b]).then(function (x) { return { toShop: x[0], trip: x[1] }; }), stop: function () { map.remove(); } };
+  }
+
   global.GabonMap = {
-    load: load,
+    load: load, jobsMap: jobsMap, jobRoute: jobRoute,
     DEFAULT_CENTER: DEFAULT_CENTER, pickLocation: pickLocation, track: track, broadcast: broadcast,
     simulateDriver: simulateDriver, route: route, search: search, reverse: reverse,
     haversine: haversine, fmtDist: fmtDist, fmtTime: fmtTime

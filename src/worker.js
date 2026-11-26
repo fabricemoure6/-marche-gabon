@@ -1064,14 +1064,17 @@ async function route(request, env) {
         if (method === 'GET' && p === '/api/courier/jobs') {
           const settings = await loadSettings(env);
           const { results } = await env.DB.prepare(
-            `SELECT o.ref,o.total,o.delivery_fee,o.address,o.distance_km,s.name AS shop_name,s.address AS shop_address,s.lat AS slat,s.lng AS slng,o.status,o.created_at,
+            `SELECT o.ref,o.total,o.delivery_fee,o.address,o.distance_km,o.lat AS dlat,o.lng AS dlng,s.name AS shop_name,s.address AS shop_address,s.lat AS slat,s.lng AS slng,o.status,o.created_at,
                (SELECT COALESCE(SUM(qty),0) FROM order_items WHERE order_id=o.id) AS items
              FROM orders o JOIN shops s ON s.id=o.shop_id WHERE o.status IN ('paid','preparing','ready') AND o.courier_id IS NULL ORDER BY o.created_at`).all();
+          // Destination avant acceptation : le centre d'une case d'environ 650 m, jamais le point exact du client
+          const G = 0.006, snap = v => Math.round(Math.round(v / G) * G * 1e4) / 1e4;
           const jobs = results.map(j => {
             const d = validCoord(me.lat, me.lng) && validCoord(j.slat, j.slng) ? Math.round(distanceKm(me.lat, me.lng, j.slat, j.slng) * 10) / 10 : null;
             // Avant acceptation, le livreur ne voit que la zone (le quartier), jamais l'adresse précise du client
             return { ref: j.ref, shop: j.shop_name, shopAddress: j.shop_address, zone: zoneOf(j.address), fee: j.delivery_fee, tripKm: j.distance_km, toShopKm: d,
               status: j.status, statusLabel: { paid: 'Commande reçue', preparing: 'En préparation', ready: 'Prête à récupérer' }[j.status], items: j.items, slat: j.slat, slng: j.slng,
+              dest: validCoord(j.dlat, j.dlng) ? { lat: snap(j.dlat), lng: snap(j.dlng), r: 700 } : null,
               far: d !== null && d > settings.courier_radius_km };
           }).sort((a, b) => (b.status === 'ready') - (a.status === 'ready') || (a.toShopKm ?? 1e9) - (b.toShopKm ?? 1e9));
           return json({ jobs, available: !!me.available, hasPosition: validCoord(me.lat, me.lng), sub: courierSub });
