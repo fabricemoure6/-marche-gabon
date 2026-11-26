@@ -560,6 +560,19 @@
     ['gabon', 'Gabon', 'Vert, jaune, bleu du drapeau'], ['soleil', 'Soleil', 'Rayons de soleil, produits façon autocollant'], ['bonbon', 'Bonbon', 'Pois rose et menthe'],
     ['tropical', 'Tropical', 'Turquoise, feuilles et corail'], ['pop', 'Pop', 'Style bande dessinée'], ['crepuscule', 'Crépuscule', 'Violet, rose et orange'],
     ['fete', 'Fête', 'Confettis multicolores'], ['bogolan', 'Bogolan', 'Terre cuite et zigzags'], ['lagon', 'Lagon', 'Vagues turquoise et soleil'], ['agrumes', 'Agrumes', 'Orange et citron vert']];
+  // Site du prestataire : modèle de mise en page + contenu (slogan, atouts, chiffres clés, horaires, zone)
+  const siteEditor = s => { const site = s.site || {}, at = site.atouts || [], ch = site.chiffres || [];
+    return `<h3 style="margin:var(--space-5) 0 var(--space-2)">Mon site</h3>
+      <p class="muted" style="margin:0 0 var(--space-3)">Choisissez la mise en page de votre site, puis complétez-le. Vos prestations, modèles et réalisations s'y placent automatiquement.</p>
+      ${MG.tplPicker(s.template || 'classique', 'siteTpl')}
+      <label for="stSlogan">Slogan (une phrase qui vous résume)</label><input id="stSlogan" maxlength="120" value="${MG.esc(site.slogan || '')}" placeholder="Ex. Vos événements, notre passion depuis 2012">
+      <label>Vos atouts (jusqu'à 4)</label><div class="site-grid">${[0, 1, 2, 3].map(i => `<input data-atout maxlength="80" value="${MG.esc(at[i] || '')}" placeholder="${['Ex. Véhicules climatisés', 'Ex. Disponible 7 j/7', 'Ex. Devis gratuit en 24 h', 'Ex. Chauffeurs expérimentés'][i]}">`).join('')}</div>
+      <label>Chiffres clés (jusqu'à 3)</label><div class="site-grid nums">${[0, 1, 2].map(i => `<span class="row" style="gap:6px;flex-wrap:nowrap"><input data-cv maxlength="12" style="width:90px" value="${MG.esc((ch[i] || {}).v || '')}" placeholder="${['15', '120', '8'][i]}"><input data-cl maxlength="40" value="${MG.esc((ch[i] || {}).l || '')}" placeholder="${['ans d\'expérience', 'chantiers réalisés', 'ouvriers qualifiés'][i]}"></span>`).join('')}</div>
+      <div class="site-grid"><div><label for="stHours">Horaires</label><input id="stHours" maxlength="120" value="${MG.esc(site.horaires || '')}" placeholder="Ex. Lun.–sam. 8 h–18 h"></div>
+      <div><label for="stZone">Zone d'intervention</label><input id="stZone" maxlength="120" value="${MG.esc(site.zone || '')}" placeholder="Ex. Libreville, Akanda, Owendo"></div></div>`; };
+  const siteValue = () => ({ slogan: S('stSlogan').value, horaires: S('stHours').value, zone: S('stZone').value,
+    atouts: [...document.querySelectorAll('[data-atout]')].map(i => i.value),
+    chiffres: [...document.querySelectorAll('[data-cv]')].map((v, i) => ({ v: v.value, l: document.querySelectorAll('[data-cl]')[i].value })) });
   const lookPicker = s => `<h3 style="margin:var(--space-5) 0 var(--space-2)">Design de ma boutique</h3>
       <p class="muted" style="margin:0 0 var(--space-3)">Choisissez l'habillage que vos clients voient en entrant dans votre boutique : couleurs, motifs et style des produits. Le menu du marché, le panier et la disposition de la page ne changent pas. Si vous avez une photo de couverture, elle reste visible sous les couleurs du design.</p>
       <div class="look-grid" role="radiogroup" aria-label="Design de ma boutique">${LOOKS.map(([k, n, hint]) => `<label class="look-opt" title="${MG.esc(hint)}"><input type="radio" name="look" value="${k}"${(s.look || '') === k ? ' checked' : ''}>
@@ -575,10 +588,11 @@
       <label for="a">Adresse</label><input id="a" value="${MG.esc(s.address || '')}" maxlength="200">
       <label for="p">Téléphone</label><input id="p" value="${MG.esc(s.phone || '')}" maxlength="30">
       <label for="w">Numéro WhatsApp (avec l'indicatif, ex. 241…)</label><input id="w" value="${MG.esc(s.whatsapp || '')}" maxlength="30">
-      <label>Photo de la boutique</label>${s.photo_id ? `<img class="thumb" src="${MG.photo(s.photo_id)}" alt="">` : ''}<input id="ph" type="file" accept="image/*">
+      <label>${s.kind === 'services' ? 'Logo de votre entreprise (ou photo)' : 'Photo de la boutique'}</label>${s.photo_id ? `<img class="thumb" src="${MG.photo(s.photo_id)}" alt="">` : ''}<input id="ph" type="file" accept="image/*">
       <label>Photo de couverture (fond de la page de votre boutique)</label>
       ${s.cover_photo ? `<div id="cvBox"><img src="${MG.photo(s.cover_photo)}" alt="" style="width:100%;max-height:140px;object-fit:cover;border-radius:var(--radius-m);display:block"><label style="display:flex;gap:.4rem;align-items:center;margin:.4rem 0"><input type="checkbox" id="cvDel" style="width:auto"> Retirer la couverture</label></div>` : ''}
       <input id="cv" type="file" accept="image/*"><p class="muted" style="margin:.3rem 0 0;font-size:.85rem">Conseil : une photo large (paysage) de votre boutique ou de vos produits. Sans couverture, la page utilise une photo de vos produits.</p>
+      ${s.kind === 'services' ? siteEditor(s) : ''}
       ${lookPicker(s)}
       <h3 style="margin:var(--space-5) 0 var(--space-2)">Où vos clients vous paient</h3>
       <p class="muted" style="margin:0 0 var(--space-3)">Au moment de payer, le client voit ce compte et y envoie l'argent de ses achats. Vous confirmez ensuite la réception dans « Commandes ». Les autres personnes ne voient jamais ces informations. <b>Pour la sécurité de vos clients, ce compte doit être validé par l'équipe du marché</b> avant d'être montré. Ensuite, tout changement doit aussi être accepté (le compte actuel reste actif d'ici là). Tant qu'il n'est pas validé, vos clients paient via le marché.</p>
@@ -605,7 +619,7 @@
       e.preventDefault();
       try {
         const f = S('ph').files[0];
-        const body = { name: S('n').value, category: S('c').value, description: S('d').value, address: S('a').value, phone: S('p').value, whatsapp: S('w').value, payout_method: S('pm').value, payout_number: S('pn').value, payout_name: S('pnm').value, payout_code: S('pc').value, payout_bank: S('pb').value, look: lookVal(), lat: pos && pos.lat, lng: pos && pos.lng };
+        const body = { name: S('n').value, category: S('c').value, description: S('d').value, address: S('a').value, phone: S('p').value, whatsapp: S('w').value, payout_method: S('pm').value, payout_number: S('pn').value, payout_name: S('pnm').value, payout_code: S('pc').value, payout_bank: S('pb').value, look: lookVal(), ...(s.kind === 'services' ? { template: (S('sf').querySelector('input[name=siteTpl]:checked') || {}).value, site: siteValue() } : {}), lat: pos && pos.lat, lng: pos && pos.lng };
         if (f) body.photo_id = await MG.uploadPhoto(f);
         const cf = S('cv').files[0];
         if (cf) body.cover_photo = await MG.uploadPhoto(cf); else if (S('cvDel') && S('cvDel').checked) body.cover_photo = null;

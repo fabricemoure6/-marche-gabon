@@ -113,6 +113,7 @@
           <label for="shopName" id="shopNameL">Nom de la boutique</label><input id="shopName" maxlength="80">
           <label for="category" id="categoryL">Catégorie</label><select id="category"></select>
           <label for="address" id="addressL">Adresse de la boutique</label><input id="address" maxlength="200">
+          <div id="tplBox" hidden><label>Modèle de votre site</label><p class="muted" style="margin:0 0 .4rem;font-size:.9rem">Vous le remplirez ensuite avec votre logo, vos photos et vos prestations. Vous pourrez en changer à tout moment.</p><div id="tplPick"></div></div>
           <p class="muted">${invite && invite.autoApprove ? 'Votre boutique sera visible dès la création du compte.' : 'Votre boutique sera visible après validation par l\'administrateur.'}</p>
         </div>
         <label for="pw">Mot de passe (8 caractères minimum)</label><input id="pw" type="password" required minlength="8" autocomplete="new-password">
@@ -138,12 +139,18 @@
         MG.$('#category').innerHTML = (svc ? MG.config.service_categories : MG.config.categories).map(c => `<option value="${c[0]}">${MG.esc(c[1])}</option>`).join('');
         MG.$('#shopNameL').textContent = svc ? 'Nom de votre entreprise ou de votre activité' : 'Nom de la boutique';
         MG.$('#categoryL').textContent = svc ? 'Type de service' : 'Catégorie';
-        MG.$('#addressL').textContent = svc ? 'Adresse ou zone d\'intervention' : 'Adresse de la boutique'; };
+        MG.$('#addressL').textContent = svc ? 'Adresse ou zone d\'intervention' : 'Adresse de la boutique';
+        MG.$('#tplBox').hidden = !svc; if (svc && !tplTouched) pickTpl(); };
+      let tplTouched = false;
+      const pickTpl = () => { MG.$('#tplPick').innerHTML = MG.tplPicker(MG.TEMPLATE_FOR[MG.$('#category').value] || 'classique', 'regTpl'); };
+      MG.$('#tplPick').onchange = () => { tplTouched = true; };
+      MG.$('#category').addEventListener('change', () => { if (kind.value === 'services' && !tplTouched) pickTpl(); });
       kind.onchange = syncKind; syncKind();
       f.onsubmit = async e => {
         e.preventDefault();
         const body = { role: sel.value, name: MG.$('#name').value, email: MG.$('#email').value, phone: MG.$('#phone').value, password: MG.$('#pw').value,
-          shopName: MG.$('#shopName').value, category: MG.$('#category').value, address: MG.$('#address').value, invite: invite ? invite.code : undefined };
+          shopName: MG.$('#shopName').value, category: MG.$('#category').value, address: MG.$('#address').value,
+          template: (f.querySelector('input[name=regTpl]:checked') || {}).value, invite: invite ? invite.code : undefined };
         try {
           await MG.api('/api/auth/register', { method: 'POST', body });
           const pf = body.role !== 'seller' && regPick.file();

@@ -1,7 +1,7 @@
 // Référencement : pages rendues côté serveur (contenu, titres, aperçus de partage, données structurées),
 // sitemap.xml et robots.txt. Le JavaScript du navigateur reprend ensuite la main sur les mêmes éléments.
-import { isServiceCat, ALL_CATEGORIES, SERVICE_CATEGORIES } from './lib.js';
-import { servicesOfShop, itemsOfShop, PRICE_TYPES } from './services.js';
+import { isServiceCat, ALL_CATEGORIES, SERVICE_CATEGORIES, templateOf, parseSite } from './lib.js';
+import { servicesOfShop, itemsOfShop, verifiedDocs, PRICE_TYPES } from './services.js';
 import { CATEGORIES, loadSettings, publicProduct, EFFECTIVE_PRICE, LOW_STOCK, UNITS, fmtQty, cached, PUBLIC_TTL, lookOf } from './lib.js';
 
 const ILLU = { habits: 'pagne-wax', parfumerie: 'parfum', alimentation: 'bananes-plantain', quincaillerie: 'sac-riz', electronique: 'smartphone', maison: 'marmite', autres: 'panier-tresse',
@@ -114,7 +114,7 @@ async function homePage(env, url) {
 
 async function shopPage(env, url, slug) {
   const st = await loadSettings(env);
-  const s = await cached('seo-shop:' + slug, PUBLIC_TTL, () => env.DB.prepare(`SELECT id,name,slug,category,description,address,photo_id,cover_photo,look,phone,created_at,loyalty_enabled,loyalty_every,loyalty_kind,loyalty_value,loyalty_min FROM shops WHERE slug=?1 AND status='active'`).bind(slug).first());
+  const s = await cached('seo-shop:' + slug, PUBLIC_TTL, () => env.DB.prepare(`SELECT id,name,slug,category,description,address,photo_id,cover_photo,look,template,site,phone,created_at,loyalty_enabled,loyalty_every,loyalty_kind,loyalty_value,loyalty_min FROM shops WHERE slug=?1 AND status='active'`).bind(slug).first());
   if (!s) return null;
   const svc = isServiceCat(s.category) ? await cached('shop-services:' + s.id, PUBLIC_TTL, () => servicesOfShop(env, s.id)) : null; // prestataire de services
   const items = svc ? await cached('shop-items:' + s.id, PUBLIC_TTL, () => itemsOfShop(env, s.id)) : null;
@@ -160,13 +160,13 @@ async function shopPage(env, url, slug) {
   // Données pour le navigateur : évite un second appel réseau au chargement
   const loyalty = !svc && s.loyalty_enabled ? { every: s.loyalty_every, kind: s.loyalty_kind, value: s.loyalty_value, min: s.loyalty_min || 0 } : null;
   const shopPub = { id: s.id, name: s.name, slug: s.slug, category: s.category, description: s.description, address: s.address, photo_id: s.photo_id, cover_photo: s.cover_photo, look: lookOf(s.look), phone: s.phone, loyalty };
-  if (svc) shopPub.kind = 'services';
+  if (svc) Object.assign(shopPub, { kind: 'services', template: templateOf(s.template, s.category), site: parseSite(s.site), verified: await verifiedDocs(env, s.id) });
   const boot = `<script>window.__SHOP__=${JSON.stringify({ shop: shopPub, products, ...(svc ? { services: svc, items } : {}), mine: null }).replace(/</g, '\\u003c')};</script>`;
   const res = await page(env, url, '/boutique');
   return new HTMLRewriter()
     .on('title', { element: e => e.setInnerContent(shareTitle) })
     .on('head', { element: e => e.append(headTags({ title: shareTitle, description: shareDesc, url: shareUrl, image, imageAlt: prod ? prod.name : s.name, site }) + ld.map(jsonLd).join('') + boot, { html: true }) })
-    .on('main', { element: e => { if (shopPub.look) e.setAttribute('data-look', shopPub.look); } }) // design choisi : présent dès le premier affichage
+    .on('main', { element: e => { if (shopPub.look) e.setAttribute('data-look', shopPub.look); if (shopPub.template && shopPub.template !== 'classique') e.setAttribute('data-template', shopPub.template); } }) // design choisi : présent dès le premier affichage
     .on('#head', { element: e => e.setInnerContent(hero, { html: true }) })
     .on('#products', { element: e => e.setInnerContent(svc ? svc.map(sv => serviceCard(sv, s.category)).join('') : products.map((p, i) => productCard(p, s.category, i < 4)).join(''), { html: true }) })
     .on('#prodTitle', { element: e => { if (svc) e.setInnerContent('Les prestations'); } })

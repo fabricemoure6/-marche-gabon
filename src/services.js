@@ -2,7 +2,7 @@
 // Un prestataire est un gestionnaire dont la boutique est rangée dans un rayon de services.
 // Étape 1 : prestations (prix fixe, à l'heure, à la journée ou sur devis), demandes des clients, devis du prestataire,
 // acceptation par le client, prestation réalisée. Les acomptes en ligne viendront ensuite.
-import { json, bad, uid, now, rand, recentCount, recordEvent, photoList, SERVICE_CATEGORIES, isServiceCat, loadSettings } from './lib.js';
+import { json, bad, uid, now, rand, recentCount, recordEvent, photoList, SERVICE_CATEGORIES, isServiceCat, loadSettings, DOC_KINDS, cached, PUBLIC_TTL } from './lib.js';
 import { notify } from './pay.js';
 
 export const PRICE_TYPES = { fixe: 'Prix fixe', heure: 'par heure', jour: 'par jour', devis: 'Sur devis' };
@@ -230,3 +230,12 @@ export async function serviceSellerRoutes(env, request, user, shop, p, method, {
   return bad('Introuvable', 404);
 }
 export { SERVICE_CATEGORIES };
+
+// Pièces vérifiées par l'équipe du marché : seuls les intitulés sont publics (jamais les fichiers)
+export async function verifiedDocs(env, shopId) {
+  return cached('shop-verified:' + shopId, PUBLIC_TTL, async () => {
+    const { results } = await env.DB.prepare(`SELECT d.kind FROM documents d JOIN shops s ON s.owner_id=d.user_id WHERE s.id=?1 AND d.status='verified'`).bind(shopId).all();
+    return results.map(r => (DOC_KINDS[r.kind] || {}).label).filter(Boolean).map(l => l.replace(/ \(.*\)$/, ''));
+  });
+}
+

@@ -283,6 +283,13 @@
     main.addEventListener('touchend', e => { if (x0 === null) return; const dx = e.changedTouches[0].clientX - x0; if (Math.abs(dx) > 40) show(i + (dx < 0 ? 1 : -1)); x0 = null; });
   };
 
+  // Modèles de site des prestataires (même liste que SITE_TEMPLATES côté serveur)
+  MG.SITE_TEMPLATES = [['classique', 'Classique', 'Présentation simple, puis vos prestations'], ['agence', 'Agence', 'Grande bannière, vos atouts, prestations en avant (location, nettoyage, dépannage)'],
+    ['entreprise', 'Entreprise', 'Chiffres clés, réalisations d\'abord, pièces vérifiées (BTP, architecture)'], ['galerie', 'Galerie', 'Vos plus belles photos en grand, modèles en avant (événementiel, beauté)']];
+  MG.TEMPLATE_FOR = { location_voiture: 'agence', nettoyage: 'agence', reparation: 'agence', btp: 'entreprise', architecture: 'entreprise', evenementiel: 'galerie', beaute_domicile: 'galerie' };
+  MG.tplPicker = (sel, name = 'tpl') => `<div class="tpl-pick" role="radiogroup" aria-label="Modèle de site">${MG.SITE_TEMPLATES.map(([k, n, d]) => `<label class="tpl-opt"><input type="radio" name="${name}" value="${k}"${k === sel ? ' checked' : ''}>
+    <span class="tpl-mini ${k}"><i class="a"></i><i class="b"></i><i class="c"></i><i class="d"></i><i class="e"></i></span><b>${n}</b><small class="muted">${MG.esc(d)}</small></label>`).join('')}</div>`;
+
   // Tuile boutique. s = {name, slug, category, address, photo_id, cover_id?, products, promos?, best_pct?}
   MG.shopCard = function (s, opts = {}) {
     const cover = opts.cover || (s.cover_id ? MG.photo(s.cover_id) : MG.img(s.photo_id, s.category));

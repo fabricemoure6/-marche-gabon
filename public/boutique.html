@@ -102,6 +102,46 @@
     };
     $('#svcExtra').onkeydown = e => { const v = e.target.closest('.pimg[data-item]'); if (v && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); v.click(); } };
     const want = MG.param('svc'); if (want && services.some(x => x.id === want)) ask(services.find(x => x.id === want), items.modeles.find(x => x.id === MG.param('model')));
+    applyTemplate(items);
+  }
+  function applyTemplate(items) {
+    const tpl = shop.template || 'classique', site = shop.site || {}, verified = shop.verified || [];
+    const main = document.querySelector('main'), share = $('#shareShop').onclick;
+    // Les prestations deviennent une section déplaçable comme les autres
+    const pre = document.createElement('section'); pre.id = 'prestations';
+    [$('#prodTitle').parentElement, $('#toolbar'), $('#products'), $('#empty')].forEach(el => pre.appendChild(el));
+    const extra = $('#svcExtra'), mod = $('#modeles'), rea = $('#realisations');
+    const pics = [...(items.realisations || []), ...(items.modeles || [])].flatMap(i => i.photos).concat(services.filter(s => s.photo_id).map(s => s.photo_id));
+    const coverUrl = shop.cover_photo ? MG.photo(shop.cover_photo) : pics[0] ? MG.photo(pics[0]) : MG.illu(shop.category);
+    const logo = `<img class="tpl-logo" src="${MG.img(shop.photo_id, shop.category)}" alt="Logo ${MG.esc(shop.name)}">`;
+    const slogan = site.slogan || shop.description || '';
+    const chips = `<div class="tpl-chips"><span>${MG.esc(MG.catName(shop.category))}</span>${site.zone ? `<span>${MG.icon('pin', 14)} ${MG.esc(site.zone)}</span>` : shop.address ? `<span>${MG.icon('pin', 14)} ${MG.esc(shop.address)}</span>` : ''}${verified.length ? `<span class="ok">${MG.icon('check', 14)} Pièces vérifiées</span>` : ''}</div>`;
+    const cta = `<div class="row tpl-cta"><a class="btn" href="#prestations">${tpl === 'galerie' && items.modeles.length ? 'Voir nos modèles' : 'Demander un devis'}</a><button type="button" class="btn alt" id="shareShop">${MG.icon('share', 16)}Partager</button></div>`;
+    const back = `<a class="tpl-back" href="/?cat=${encodeURIComponent(shop.category)}">← ${MG.esc(MG.catName(shop.category))}</a>`;
+    const nums = (site.chiffres || []).length ? `<div class="tpl-nums">${site.chiffres.map(c => `<div><b>${MG.esc(c.v)}</b><span>${MG.esc(c.l)}</span></div>`).join('')}</div>` : '';
+    const atouts = (site.atouts || []).length ? `<section class="tpl-atouts" id="atouts">${site.atouts.map(a => `<div><span class="ic">${MG.icon('check', 20)}</span>${MG.esc(a)}</div>`).join('')}</section>` : null;
+    const infoRows = [site.horaires && ['Horaires', site.horaires], site.zone && ['Zone d\'intervention', site.zone], shop.address && ['Adresse', shop.address]].filter(Boolean);
+    const infos = infoRows.length || verified.length ? `<section class="card tpl-infos" id="infos"><h2>Infos pratiques</h2><div class="tpl-info-grid">${infoRows.map(([k, v]) => `<div><span class="muted">${k}</span><b>${MG.esc(v)}</b></div>`).join('')}</div>
+      ${verified.length ? `<div class="tpl-verified"><span class="muted">Vérifiées par l'équipe du marché :</span> ${verified.map(v => `<span class="tag active">${MG.icon('check', 12)} ${MG.esc(v)}</span>`).join(' ')}</div>` : ''}</section>` : null;
+    const hero = {
+      agence: () => `${back}<section class="tpl-hero agence" style="--hero-img:url('${coverUrl}')"><div class="tpl-in">${logo}<div><h1>${MG.esc(shop.name)}</h1>${slogan ? `<p class="tpl-slogan">${MG.esc(slogan)}</p>` : ''}${chips}${cta}</div></div></section>`,
+      entreprise: () => `${back}<section class="tpl-hero entreprise"><div class="tpl-txt">${logo}<h1>${MG.esc(shop.name)}</h1>${slogan ? `<p class="tpl-slogan">${MG.esc(slogan)}</p>` : ''}${chips}${nums}${cta}</div><div class="tpl-img"><img src="${coverUrl}" alt=""></div></section>`,
+      galerie: () => { const g = (pics.length ? pics.slice(0, 3).map(MG.photo) : [coverUrl]);
+        return `${back}<section class="tpl-hero galerie"><div class="tpl-mosaic n${g.length}">${g.map(u => `<img src="${u}" alt="">`).join('')}</div><div class="tpl-card">${logo}<div><h1>${MG.esc(shop.name)}</h1>${slogan ? `<p class="tpl-slogan">${MG.esc(slogan)}</p>` : ''}${chips}${cta}</div></div></section>`; }
+    }[tpl];
+    if (hero) $('#head').innerHTML = hero();
+    else if (site.slogan) $('#head').querySelector('h1').insertAdjacentHTML('afterend', `<p class="tpl-slogan-c">${MG.esc(site.slogan)}</p>`);
+    $('#shareShop').onclick = share;
+    // Ordre des sections selon le modèle
+    const order = { classique: [atouts, pre, mod, rea, infos], agence: [atouts, pre, mod, rea, infos], entreprise: [rea, pre, mod, atouts, infos], galerie: [mod, rea, pre, atouts, infos] }[tpl] || [pre, mod, rea, infos];
+    extra.replaceChildren(...order.filter(Boolean).map(x => typeof x === 'string' ? Object.assign(document.createElement('div'), { innerHTML: x }).firstElementChild : x));
+    if (tpl !== 'entreprise' && nums) extra.insertAdjacentHTML('afterbegin', `<section class="tpl-nums-c">${nums}</section>`);
+    // Menu de la page, dans l'ordre affiché
+    const L = { prestations: `Prestations (${services.length})`, modeles: `Modèles (${items.modeles.length})`, realisations: `Réalisations (${items.realisations.length})`, infos: 'Infos pratiques' };
+    const links = [...extra.children].filter(s => L[s.id]).map(s => `<a href="#${s.id}">${L[s.id]}</a>`);
+    $('#fid').innerHTML = links.length > 1 ? `<div class="svc-nav" role="navigation" aria-label="Sur cette page">${links.join('')}</div>` : '';
+    if (tpl !== 'classique') main.dataset.template = tpl; else delete main.dataset.template;
+    main.dataset.ready = '1';
   }
   function ask(sv, model) {
     if (!sv) return;
