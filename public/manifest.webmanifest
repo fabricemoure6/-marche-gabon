@@ -1,14 +1,25 @@
 {
+  "id": "/",
   "name": "Marché Gabon",
   "short_name": "Marché Gabon",
-  "description": "Toutes vos boutiques au même endroit, livrées chez vous.",
+  "description": "Toutes vos boutiques et vos services au même endroit, livrés chez vous à Libreville.",
   "lang": "fr",
-  "start_url": "/",
+  "dir": "ltr",
+  "start_url": "/?source=application",
+  "scope": "/",
   "display": "standalone",
   "background_color": "#fff8ee",
   "theme_color": "#1f1a17",
+  "categories": ["shopping", "food", "lifestyle"],
   "icons": [
-    { "src": "/img/icon-192.png", "sizes": "192x192", "type": "image/png" },
-    { "src": "/img/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+    { "src": "/img/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/img/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/img/icon-maskable-192.png", "sizes": "192x192", "type": "image/png", "purpose": "maskable" },
+    { "src": "/img/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "Mes commandes", "url": "/commandes.html", "icons": [{ "src": "/img/icon-192.png", "sizes": "192x192" }] },
+    { "name": "Mon panier", "url": "/panier.html", "icons": [{ "src": "/img/icon-192.png", "sizes": "192x192" }] },
+    { "name": "Ma boutique", "url": "/vendeur.html", "icons": [{ "src": "/img/icon-192.png", "sizes": "192x192" }] }
   ]
 }

@@ -866,3 +866,22 @@ main[data-template="agence"] #products .tile.service .pbody{flex:1}
 .route-legs{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:.92rem}
 .route-legs span{background:var(--surface-100);border-radius:var(--radius-pill);padding:5px 12px}
 .route-legs .tot{background:var(--papaye-tint);color:var(--ink)}
+
+/* ---------- Application installable ---------- */
+.nav-app{gap:6px}
+.app-cta{display:flex;gap:var(--space-4);align-items:center;flex-wrap:wrap;margin-top:var(--space-6)}
+.app-cta img{border-radius:16px;flex:none}.app-cta>div{flex:1;min-width:220px}.app-cta h2{margin:0 0 4px}
+.app-hero{display:flex;gap:var(--space-5);align-items:center;flex-wrap:wrap;margin:var(--space-5) 0}
+.app-ico{width:120px;height:120px;border-radius:28px;box-shadow:var(--shadow-2);flex:none}
+.app-hero h1{margin:0 0 6px}.app-lead{font-size:1.1rem;margin:0 0 10px}
+.app-pros{margin:0;padding-left:1.2rem;color:var(--ink-muted);columns:2 220px}
+.app-cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:var(--space-4);margin:var(--space-5) 0}
+.app-card{margin:0}.app-card.here{border:2px solid var(--papaye);box-shadow:0 0 0 4px var(--papaye-tint)}
+.app-card-head{display:flex;align-items:center;gap:10px;margin-bottom:var(--space-3)}.app-card-head h2{margin:0;font-size:1.25rem}
+.app-os{font-size:1.8rem;line-height:1}.app-install{width:100%;margin-bottom:var(--space-3)}
+.app-card ol{margin:0;padding-left:1.3rem}.app-card li{margin-bottom:6px}.app-note{font-size:.88rem;margin:var(--space-3) 0 0}
+.app-key{display:inline-block;padding:0 6px;border:1px solid var(--line-strong);border-radius:6px;font-size:.85em}
+.app-qr{display:flex;gap:var(--space-5);align-items:center;flex-wrap:wrap}.app-qr canvas{border-radius:12px;background:#fff;flex:none}.app-qr h2{margin-top:0}
+.app-faq{margin:var(--space-6) 0}.app-faq details{background:var(--surface-200);border:1px solid var(--line);border-radius:var(--radius-m);padding:var(--space-3) var(--space-4);margin-bottom:var(--space-2)}
+.app-faq summary{cursor:pointer;font-weight:700}.app-faq details p{margin:.6rem 0 0}
+.site-foot a + a{margin-left:var(--space-4)}

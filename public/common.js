@@ -159,7 +159,7 @@
 
   // ---------- Icônes (trait 2px, style Lucide) ----------
   const ICONS = {
-    plus: '<path d="M12 5v14M5 12h14"/>', camera: '<path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/>', share: '<circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="m8.6 13.5 6.8 4M15.4 6.5l-6.8 4"/>', check: '<path d="m5 12 5 5L20 7"/>', x: '<path d="M6 6l12 12M18 6 6 18"/>',
+    plus: '<path d="M12 5v14M5 12h14"/>', download: '<path d="M12 4v11M7 10l5 5 5-5M5 20h14"/>', camera: '<path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/>', share: '<circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="m8.6 13.5 6.8 4M15.4 6.5l-6.8 4"/>', check: '<path d="m5 12 5 5L20 7"/>', x: '<path d="M6 6l12 12M18 6 6 18"/>',
     cart: '<circle cx="9" cy="20" r="1.5"/><circle cx="18" cy="20" r="1.5"/><path d="M2 3h3l2.4 11.2a2 2 0 0 0 2 1.6h7.7a2 2 0 0 0 2-1.5L21 7H6"/>',
     bell: '<path d="M6 8a6 6 0 1 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.9 1.9 0 0 0 3.4 0"/>',
     search: '<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>', send: '<path d="M4 12 20 4l-6 16-3-7z"/>',
@@ -487,6 +487,7 @@
     h.innerHTML = `<div class="bar"><a class="brand" href="/">${MG.esc(MG.config.site_name)}</a>
       <nav id="nav">
         <a href="/">Boutiques</a>
+        ${MG.isStandalone() ? '' : '<a href="/application.html" class="nav-app">' + MG.icon('download', 18) + 'Application</a>'}
         ${u ? '<a href="/commandes.html">' + (u.role === 'customer' ? 'Mes commandes' : 'Mes achats') + '</a>' : ''}
         ${role ? `<a href="${role[0]}">${role[1]}</a>` : ''}
         ${u ? '<button id="bell" class="bell" aria-label="Notifications">' + MG.icon('bell') + '<span class="badge" id="bellBadge" hidden>0</span></button>' : ''}
@@ -745,12 +746,30 @@
     load();
   };
 
+  // ----- Application installable (PWA) -----
+  MG.isStandalone = () => matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+  let installEvt = null;
+  addEventListener('beforeinstallprompt', e => { e.preventDefault(); installEvt = e; dispatchEvent(new Event('mg-install-ready')); });
+  addEventListener('appinstalled', () => { installEvt = null; });
+  MG.canInstall = () => !!installEvt;
+  MG.install = async () => { if (!installEvt) return false; installEvt.prompt(); const r = await installEvt.userChoice.catch(() => null); installEvt = null; return !!r && r.outcome === 'accepted'; };
+  if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {
+    addEventListener('load', () => { navigator.serviceWorker.register('/sw.js').catch(() => { /* navigateur sans service worker : le site marche quand même */ }); });
+  }
+
   MG.ready = (async function () {
     try {
       const [config, me] = await Promise.all([MG.api('/api/config'), MG.api('/api/me')]);
       MG.config = config; MG.user = me.user;
     } catch (e) {
-      document.body.innerHTML = '<p style="padding:2rem">Le site est momentanément indisponible. Réessayez dans un instant.</p>';
+      // Pas de réseau (coupure, données mobiles épuisées) : on le dit clairement, et on recharge dès que la connexion revient
+      if (!navigator.onLine || (e instanceof TypeError && !e.status)) {
+        document.body.innerHTML = `<main style="min-height:80vh;display:grid;place-items:center;text-align:center;padding:24px"><div>
+          <img src="/img/icon-192.png" alt="Marché Gabon" width="96" height="96" style="border-radius:24px"><h1>Pas de connexion</h1>
+          <p class="muted">Votre téléphone n'a pas accès à Internet pour le moment (réseau faible ou coupure).<br>La page se rechargera toute seule au retour de la connexion.</p>
+          <p><button class="btn" type="button" onclick="location.reload()">Réessayer</button></p></div></main>`;
+        addEventListener('online', () => location.reload(), { once: true });
+      } else document.body.innerHTML = '<p style="padding:2rem">Le site est momentanément indisponible. Réessayez dans un instant.</p>';
       throw e;
     }
     await renderHeader();
@@ -789,7 +808,7 @@
   MG.ready.then(() => {
     if (!document.querySelector('.site-foot')) {
       const f = document.createElement('footer'); f.className = 'site-foot noprint';
-      f.innerHTML = `<a href="/confidentialite.html">Confidentialité et cookies</a><span>© ${new Date().getFullYear()} ${MG.esc(MG.config.site_name)}</span>`;
+      f.innerHTML = `<a href="/application.html">Télécharger l'application</a><a href="/confidentialite.html">Confidentialité et cookies</a><span>© ${new Date().getFullYear()} ${MG.esc(MG.config.site_name)}</span>`;
       document.body.appendChild(f);
     }
     try { if (localStorage.getItem('mg-info-ok') === '1' || /confidentialite/.test(location.pathname)) return; } catch (e) { /* stockage indisponible : on affiche */ }
