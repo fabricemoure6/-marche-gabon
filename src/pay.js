@@ -1,5 +1,6 @@
 // Paiement : SingPay (page hébergée) avec repli manuel Airtel Money, confirmation des commandes, notifications.
 import { uid, now, rand } from './lib.js';
+import { markPush } from './push.js';
 
 // Rend un bon d'achat utilisable si sa commande est annulée
 export async function releaseVoucher(env, orderId) {
@@ -54,6 +55,7 @@ export function notifKind(title, body = '') {
 export async function notify(env, userId, title, body, url, kind) {
   await env.DB.prepare('INSERT INTO notifications (id,user_id,title,body,url,created_at,kind) VALUES (?1,?2,?3,?4,?5,?6,?7)')
     .bind(uid(), userId, String(title).slice(0, 120), String(body || '').slice(0, 300), url || null, now(), kind || notifKind(title, body)).run();
+  markPush(); // envoyée sur le téléphone juste après la réponse (flushPush)
 }
 
 // Quand un paiement est confirmé : commandes payées, boutiques et client prévenus

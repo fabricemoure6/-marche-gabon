@@ -4,7 +4,8 @@
    - Photos des produits (/api/photos/…) : gardées en copie (elles ne changent jamais pour un même identifiant).
    - Toutes les autres données (/api/…) : jamais gardées, pour ne rien laisser de personnel sur le téléphone.
    Cloudflare redirige « /page.html » vers « /page » : une réponse redirigée ne peut pas servir une page hors connexion,
-   on en garde donc une copie « propre », rangée sous les deux adresses. */
+   on en garde donc une copie « propre », rangée sous les deux adresses.
+   Notifications push : affichées comme celles d'une application, même site fermé ; un toucher ouvre la bonne page. */
 const VERSION = 'mg-v1';
 const STATIC = VERSION + '-site', PAGES = VERSION + '-pages', PHOTOS = VERSION + '-photos';
 const CORE_PAGES = ['/', '/offline.html'];
@@ -33,6 +34,48 @@ self.addEventListener('install', e => {
 });
 self.addEventListener('activate', e => {
   e.waitUntil(caches.keys().then(keys => Promise.all(keys.filter(k => !k.startsWith(VERSION)).map(k => caches.delete(k)))).then(() => self.clients.claim()));
+});
+
+// ---------- Notifications push ----------
+const URGENT = ['order', 'courier', 'payment'];
+// iPhone, iPad et Mac (Safari) exigent une notification visible à chaque message, sinon ils coupent l'abonnement
+const SAFARI = /iPhone|iPad|iPod|Macintosh/.test(navigator.userAgent) && !/Chrome|Chromium|Edg|Firefox|Android/.test(navigator.userAgent);
+self.addEventListener('push', e => {
+  let n = {};
+  try { n = e.data ? e.data.json() : {}; } catch { n = { body: e.data ? e.data.text() : '' }; }
+  e.waitUntil((async () => {
+    const wins = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+    for (const w of wins) w.postMessage({ type: 'mg-push', n }); // site ouvert : il joue tout de suite le son fort choisi
+    // Site au premier plan : le son et le message du site suffisent (Safari exige quand même une notification)
+    if (!SAFARI && wins.some(w => w.focused && w.visibilityState === 'visible')) return;
+    const urgent = URGENT.includes(n.kind);
+    await self.registration.showNotification(n.title || 'Marché Gabon', {
+      body: n.body || '', icon: '/img/icon-192.png', badge: '/img/badge-96.png', lang: 'fr', dir: 'ltr',
+      tag: n.id || undefined, renotify: !!n.id, silent: false, requireInteraction: urgent, timestamp: Date.now(),
+      vibrate: urgent ? [600, 200, 600, 200, 600, 200, 1000] : [300, 120, 300],
+      data: { url: n.url || '/' }
+    });
+  })());
+});
+self.addEventListener('notificationclick', e => {
+  e.notification.close();
+  const url = new URL((e.notification.data && e.notification.data.url) || '/', location.origin);
+  const target = url.origin === location.origin ? url.href : location.origin + '/';
+  e.waitUntil((async () => {
+    const wins = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+    const w = wins.find(c => new URL(c.url).origin === location.origin);
+    if (w) { await w.focus(); try { await w.navigate(target); } catch { /* page non contrôlée */ } return; }
+    await self.clients.openWindow(target);
+  })());
+});
+// Le navigateur a renouvelé l'abonnement : on prévient le serveur
+self.addEventListener('pushsubscriptionchange', e => {
+  e.waitUntil((async () => {
+    const old = e.oldSubscription, key = old && old.options && old.options.applicationServerKey;
+    if (!key) return;
+    const sub = e.newSubscription || await self.registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: key });
+    await fetch('/api/push/subscribe', { method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json', 'x-csrf': '1' }, body: JSON.stringify(sub) });
+  })());
 });
 
 self.addEventListener('fetch', e => {

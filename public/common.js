@@ -424,11 +424,12 @@
     tamtam: { label: 'Tam-tam', play: (c, o) => [0, .18, .36, .62].forEach((at, i) => { tone(c, o, { f: i === 3 ? 110 : 160, f2: 60, at, dur: .32, vol: .9 }); noise(c, o, { at, dur: .05, vol: .25, freq: 600 }); }) },
     klaxon: { label: 'Klaxon de moto', play: (c, o) => [0, .3].forEach(at => { tone(c, o, { f: 440, type: 'square', at, dur: .22, vol: .32, attack: .01 }); tone(c, o, { f: 554, type: 'square', at, dur: .22, vol: .26, attack: .01 }); }) },
     sifflet: { label: 'Sifflet', play: (c, o) => { tone(c, o, { f: 1800, f2: 2600, dur: .18, vol: .5 }); tone(c, o, { f: 2600, f2: 1900, at: .2, dur: .28, vol: .5 }); } },
+    alarme: { label: 'Alarme (très forte)', play: (c, o) => [0, .24, .48, .72].forEach((at, i) => { tone(c, o, { f: i % 2 ? 740 : 988, type: 'square', at, dur: .22, vol: .6, attack: .004 }); tone(c, o, { f: i % 2 ? 1480 : 1976, type: 'square', at, dur: .22, vol: .18, attack: .004 }); }) },
     bip: { label: 'Bip discret', play: (c, o) => { tone(c, o, { f: 880, dur: .16, vol: .55 }); tone(c, o, { f: 1320, at: .02, dur: .1, vol: .12 }); } },
     aucun: { label: 'Silencieux', play: () => {} }
   };
   const EVENTS = {
-    order: ['Nouvelle commande', 'balafon'], payment: ['Paiement', 'carillon'], courier: ['Livreur et courses', 'klaxon'],
+    order: ['Nouvelle commande', 'alarme'], payment: ['Paiement', 'carillon'], courier: ['Livreur et courses', 'alarme'],
     delivered: ['Commande livrée', 'tamtam'], message: ['Nouveau message', 'clochette'], loyalty: ['Bonnes nouvelles (bons d\'achat, retour en stock)', 'sifflet'],
     stock: ['Alerte de stock', 'bip'], info: ['Autres notifications', 'bip']
   };
@@ -437,20 +438,34 @@
   MG.soundPrefs = () => {
     let p = {}; try { p = JSON.parse(localStorage.getItem('mg-sounds') || '{}'); } catch { /* défaut */ }
     const map = {}; for (const k in EVENTS) map[k] = (p.map && SOUNDS[p.map[k]]) ? p.map[k] : EVENTS[k][1];
-    return { enabled: p.enabled !== false, volume: typeof p.volume === 'number' ? p.volume : .8, system: !!p.system, map };
+    return { enabled: p.enabled !== false, volume: typeof p.volume === 'number' ? p.volume : 1, loud: p.loud !== false, system: !!p.system, map };
   };
   const savePrefs = p => { try { localStorage.setItem('mg-sounds', JSON.stringify(p)); } catch { /* non mémorisé */ } };
-  MG.playSound = (name, force) => {
+  // Son fort : le signal est amplifié puis « écrêté en douceur » (le plus fort possible sans grésiller), et répété pour les événements importants
+  let shaper = null;
+  const loudOut = c => {
+    if (shaper && shaper.context === c) return shaper;
+    shaper = c.createWaveShaper(); const n = 2048, curve = new Float32Array(n);
+    for (let i = 0; i < n; i++) curve[i] = Math.tanh((i / (n - 1)) * 2 - 1) / Math.tanh(1) * .98; // limiteur doux
+    shaper.curve = curve; shaper.oversample = '2x'; shaper.connect(c.destination); return shaper;
+  };
+  MG.playSound = (name, force, times = 1) => {
     const p = MG.soundPrefs(); if (!force && !p.enabled) return;
     const snd = SOUNDS[name]; if (!snd) return;
-    try { const c = ac(), g = c.createGain(); g.gain.value = p.volume; g.connect(c.destination); snd.play(c, g); } catch { /* son impossible */ }
+    try {
+      const c = ac(), g = c.createGain(); g.gain.value = p.volume * (p.loud ? 3 : 1); g.connect(p.loud ? loudOut(c) : c.destination);
+      for (let i = 0; i < times; i++) setTimeout(() => snd.play(c, g), i * 1300);
+      MG._lastPlay = { name, loud: p.loud, times, gain: g.gain.value };
+    } catch { /* son impossible */ }
   };
   let lastSound = { kind: '', at: 0 };
   MG.notifySound = kind => {
     const k = EVENTS[kind] ? kind : 'info';
     if (lastSound.kind === k && Date.now() - lastSound.at < 20000) return; // pas deux fois le même son en 20 s
     lastSound = { kind: k, at: Date.now() };
-    MG.playSound(MG.soundPrefs().map[k]);
+    const p = MG.soundPrefs();
+    MG.playSound(p.map[k], false, p.loud && ['order', 'courier', 'payment'].includes(k) ? 3 : 1); // commande, course, paiement : 3 fois
+    if (p.loud && navigator.vibrate) try { navigator.vibrate([500, 200, 500, 200, 800]); } catch { /* pas de vibreur */ }
   };
   // Panneau de réglage des sons (profil). box = conteneur.
   MG.soundSettings = function (box) {
@@ -462,20 +477,108 @@
         <select data-ev="${k}" aria-label="Sonnerie : ${MG.esc(EVENTS[k][0])}">${opts(p.map[k])}</select>
         <button class="btn small alt" type="button" data-try="${k}" aria-label="Écouter">${MG.icon('bell', 16)}Écouter</button></div>`).join('')}</div>
       <div class="sound-foot"><label class="vol">Volume <input type="range" id="sndVol" min="0" max="1" step="0.05" value="${p.volume}"></label>
-        ${'Notification' in window ? `<label class="switch"><input type="checkbox" id="sndSys"${p.system && Notification.permission === 'granted' ? ' checked' : ''}><span></span> Aussi dans les notifications du téléphone</label>` : ''}</div></div>`;
-    const read = () => { const q = MG.soundPrefs(); q.enabled = box.querySelector('#sndOn').checked; q.volume = Number(box.querySelector('#sndVol').value);
-      box.querySelectorAll('[data-ev]').forEach(sel => (q.map[sel.dataset.ev] = sel.value)); const sys = box.querySelector('#sndSys'); q.system = !!(sys && sys.checked); savePrefs(q); return q; };
+        <label class="switch"><input type="checkbox" id="sndLoud"${p.loud ? ' checked' : ''}><span></span> Son fort (amplifié, répété 3 fois pour les commandes et les courses)</label></div>
+      <div class="push-box" id="pushBox"></div></div>`;
+    const read = () => { const q = MG.soundPrefs(); q.enabled = box.querySelector('#sndOn').checked; q.volume = Number(box.querySelector('#sndVol').value); q.loud = box.querySelector('#sndLoud').checked;
+      box.querySelectorAll('[data-ev]').forEach(sel => (q.map[sel.dataset.ev] = sel.value)); savePrefs(q); return q; };
+    MG.push.panel(box.querySelector('#pushBox'));
     box.onchange = async e => {
-      if (e.target.id === 'sndSys' && e.target.checked && Notification.permission !== 'granted') {
-        const r = await Notification.requestPermission(); if (r !== 'granted') { e.target.checked = false; MG.toast('Autorisation refusée par le navigateur', true); }
-      }
+      if (!e.target.closest('#sndRows,.sound-foot,.split')) return;
       const q = read();
+      if (e.target.id === 'sndLoud') { MG.toast(q.loud ? 'Son fort activé' : 'Son normal'); MG.playSound(q.map[kinds[0]], true); }
       if (e.target.dataset.ev) MG.playSound(e.target.value, true);
       if (e.target.id === 'sndOn') MG.toast(q.enabled ? 'Sons activés' : 'Sons coupés');
     };
     box.querySelector('#sndVol').oninput = () => read();
     box.onclick = e => { const b = e.target.closest('[data-try]'); if (b) MG.playSound(box.querySelector(`[data-ev="${b.dataset.try}"]`).value, true); };
   };
+
+  // ---------- Notifications push : arrivent même application fermée, comme une vraie application ----------
+  MG.push = (() => {
+    const okEnv = 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window && (location.protocol === 'https:' || location.hostname === 'localhost');
+    const key = () => 'mg-push-' + ((MG.user || {}).id || '');
+    const b64 = s => { const b = atob(s.replace(/-/g, '+').replace(/_/g, '/') + '==='.slice((s.length + 3) % 4)); return Uint8Array.from(b, ch => ch.charCodeAt(0)); };
+    const reg = () => Promise.race([navigator.serviceWorker.ready, new Promise((_, no) => setTimeout(() => no(new Error('service worker absent')), 10000))]);
+    const P = {
+      supported: () => okEnv,
+      permission: () => (okEnv ? Notification.permission : 'unsupported'),
+      // Pourquoi c'est impossible ici, en clair
+      why: () => (MG.device() === 'ios' && !MG.isStandalone() ? 'ios' : !okEnv ? 'browser' : ''),
+      async current() { if (!okEnv) return null; try { return await (await reg()).pushManager.getSubscription(); } catch { return null; } },
+      async send(sub) { await MG.api('/api/push/subscribe', { method: 'POST', body: sub.toJSON() }); try { localStorage.setItem(key(), JSON.stringify({ ep: sub.endpoint, at: Date.now() })); } catch { /* rien */ } },
+      // À appeler depuis un toucher (exigé par les navigateurs)
+      async enable() {
+        if (!okEnv) throw new Error(P.why() === 'ios' ? 'Sur iPhone, installez d\'abord l\'application puis ouvrez-la depuis l\'écran d\'accueil' : 'Ce navigateur ne permet pas les notifications : utilisez Chrome');
+        const perm = await Notification.requestPermission();
+        if (perm !== 'granted') throw new Error(perm === 'denied' ? 'Notifications bloquées par le navigateur' : 'Notifications non autorisées');
+        const r = await reg();
+        let sub = await r.pushManager.getSubscription();
+        if (!sub) { const { key: k } = await MG.api('/api/push/key'); sub = await r.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64(k) }); }
+        await P.send(sub);
+        const s = MG.soundPrefs(); s.system = true; savePrefs(s);
+        return true;
+      },
+      // serverOnly : à la déconnexion, le téléphone ne reçoit plus rien pour ce compte (il se réabonnera au prochain compte connecté)
+      async disable(serverOnly) {
+        const sub = await P.current();
+        if (sub) { try { await MG.api('/api/push/unsubscribe', { method: 'POST', body: { endpoint: sub.endpoint } }); } catch { /* hors ligne */ } if (!serverOnly) await sub.unsubscribe(); }
+        try { localStorage.removeItem(key()); } catch { /* rien */ }
+        if (!serverOnly) { const s = MG.soundPrefs(); s.system = false; savePrefs(s); }
+      },
+      // À chaque visite : si l'autorisation est donnée, on vérifie (au plus une fois par jour) que le serveur connaît bien ce téléphone
+      async sync() {
+        if (!okEnv || !MG.user || Notification.permission !== 'granted') return false;
+        let sub = await P.current();
+        if (!sub) { if (!MG.soundPrefs().system) return false; try { const { key: k } = await MG.api('/api/push/key'); sub = await (await reg()).pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64(k) }); } catch { return false; } }
+        let st = {}; try { st = JSON.parse(localStorage.getItem(key()) || '{}'); } catch { /* rien */ }
+        if (st.ep !== sub.endpoint || Date.now() - (st.at || 0) > 864e5) try { await P.send(sub); } catch { return false; }
+        return (MG._push = true);
+      },
+      // Bloc « Notifications du téléphone » dans les réglages
+      async panel(box) {
+        if (!box) return;
+        const sub = await P.current(), perm = P.permission(), on = !!sub && perm === 'granted';
+        const help = '<p class="muted small" style="margin:var(--space-2) 0 0">Application fermée, le son est celui des notifications du téléphone : montez le volume des notifications, et dans <b>Paramètres → Notifications → Marché Gabon</b> (ou Chrome), choisissez <b>Son</b> et <b>Priorité haute</b>.</p>';
+        box.innerHTML = `<div class="push-row"><div><b>${MG.icon('bell', 18)} Notifications du téléphone</b><p class="muted" style="margin:0">${
+          on ? '<span class="push-on">Activées sur cet appareil</span> : vous êtes prévenu même quand l\'application est fermée.'
+          : P.why() === 'ios' ? 'Sur iPhone, installez d\'abord l\'application (<a class="link" href="/application.html">voir comment</a>), puis ouvrez-la depuis l\'écran d\'accueil pour activer les notifications.'
+          : P.why() ? 'Ce navigateur ne permet pas les notifications : ouvrez le site dans <b>Chrome</b>.'
+          : perm === 'denied' ? 'Bloquées par le navigateur. Touchez le <b>cadenas 🔒</b> à côté de l\'adresse (ou ⋮ → Infos sur l\'application) → <b>Notifications</b> → <b>Autoriser</b>, puis revenez ici.'
+          : 'Recevez chaque commande, course ou message avec un son, même application fermée.'}</p></div>
+          <div class="row" style="gap:.5rem;flex-wrap:wrap">${on ? '<button type="button" class="btn small" id="pushTest">Tester</button><button type="button" class="btn small alt" id="pushOff">Désactiver</button>'
+          : !P.why() && perm !== 'denied' ? '<button type="button" class="btn small" id="pushOn">Activer les notifications</button>' : ''}</div></div>${on || !P.why() ? help : ''}`;
+        const $b = s => box.querySelector(s);
+        if ($b('#pushOn')) $b('#pushOn').onclick = async () => { try { await P.enable(); MG.toast('Notifications activées'); } catch (e) { MG.toast(e.message, true); } P.panel(box); };
+        if ($b('#pushOff')) $b('#pushOff').onclick = async () => { await P.disable(); MG.toast('Notifications désactivées sur cet appareil'); P.panel(box); };
+        if ($b('#pushTest')) $b('#pushTest').onclick = async e => { e.target.disabled = true; try { await MG.api('/api/push/test', { method: 'POST', body: {} }); MG.toast('Notification envoyée : elle arrive dans quelques secondes'); } catch (er) { MG.fail(er); } e.target.disabled = false; };
+      },
+      // Bandeau « Activer les notifications » pour les comptes connectés qui ne les ont pas encore
+      banner() {
+        if (!okEnv || !MG.user || Notification.permission !== 'default' || document.getElementById('appBanner') || document.getElementById('pushBanner')) return;
+        try { const t = +localStorage.getItem('mg-push-later') || 0; if (Date.now() - t < 3 * 864e5) return; } catch { /* rien */ }
+        const what = { seller: 'chaque nouvelle commande', courier: 'chaque course disponible près de vous', admin: 'chaque paiement ou boutique à vérifier' }[MG.user.role] || 'chaque étape de vos commandes';
+        const b = document.createElement('div'); b.id = 'pushBanner'; b.setAttribute('role', 'dialog'); b.setAttribute('aria-label', 'Activer les notifications');
+        b.innerHTML = `<span class="pb-bell" aria-hidden="true">${MG.icon('bell', 28)}</span><div class="ab-txt"><b>Activer les notifications</b><span>Soyez prévenu avec un son fort à ${what}, même application fermée.</span></div>
+          <button type="button" class="btn small" id="pbGo">Activer</button><button type="button" class="ab-x" id="pbX" aria-label="Plus tard">${MG.icon('x', 18)}</button>`;
+        document.body.appendChild(b); document.body.classList.add('has-app-banner');
+        const close = later => { b.remove(); document.body.classList.remove('has-app-banner'); if (later) try { localStorage.setItem('mg-push-later', String(Date.now())); } catch { /* rien */ } };
+        b.querySelector('#pbX').onclick = () => close(true);
+        b.querySelector('#pbGo').onclick = async () => {
+          try { await P.enable(); close(false); MG.toast('Notifications activées : vous serez prévenu même application fermée'); MG.playSound(MG.soundPrefs().map[{ seller: 'order', courier: 'courier' }[MG.user.role] || 'info'], true); }
+          catch (e) { close(true); MG.toast(e.message, true); }
+        };
+      }
+    };
+    // Notification reçue pendant que le site est ouvert : son fort tout de suite, sans attendre la vérification suivante
+    if (okEnv) navigator.serviceWorker.addEventListener('message', e => {
+      const d = e.data || {}; if (d.type !== 'mg-push' || !d.n) return;
+      const n = d.n; if (MG._seenNotifs && n.id) MG._seenNotifs.add(n.id);
+      if (n.id && !String(n.id).startsWith('test-')) MG.toast('Nouvelle notification : ' + n.title);
+      MG.notifySound(n.kind);
+      if (typeof MG._poll === 'function') MG._poll();
+    });
+    return P;
+  })();
 
   const ROLE_HOME = { seller: ['/vendeur.html', 'Ma boutique'], courier: ['/livreur.html', 'Mes livraisons'], admin: ['/admin.html', 'Administration'] };
 
@@ -514,6 +617,8 @@
       const next = () => { clearTimeout(nt); if (!document.hidden) nt = setTimeout(async () => { delay = (await pollNotifs()) ? 15000 : Math.min(delay * 2, 60000); next(); }, delay); };
       document.addEventListener('visibilitychange', () => { if (document.hidden) clearTimeout(nt); else { delay = 15000; pollNotifs().then(next); } });
       pollNotifs().then(next);
+      MG._poll = () => { delay = 15000; pollNotifs().then(next); };
+      MG.push.sync().then(on => { if (!on) setTimeout(MG.push.banner, 6000); });
     }
     if (!u || u.role === 'customer') refreshCartBadge();
   }
@@ -631,7 +736,7 @@
           MG.toast('Nouvelle notification : ' + n.title);
           MG.notifySound(n.kind);
           const p = MG.soundPrefs();
-          if (p.system && 'Notification' in window && Notification.permission === 'granted' && document.visibilityState !== 'visible') {
+          if (!MG._push && p.system && 'Notification' in window && Notification.permission === 'granted' && document.visibilityState !== 'visible') {
             try { const sn = new Notification(n.title, { body: n.body || '', tag: n.id, icon: '/img/produits/panier-tresse.svg' }); sn.onclick = () => { focus(); if (n.url) location.href = n.url; }; } catch { /* non pris en charge */ }
           }
         }
@@ -759,7 +864,7 @@
 
   // Bandeau « Installer Marché Gabon » : un toucher sur Android et ordinateur, le geste exact sur iPhone
   function installBanner() {
-    if (MG.isStandalone() || /\/application(\.html)?$/.test(location.pathname) || document.getElementById('appBanner')) return;
+    if (MG.isStandalone() || /\/application(\.html)?$/.test(location.pathname) || document.getElementById('appBanner') || document.getElementById('pushBanner')) return;
     try { const t = +localStorage.getItem('mg-app-later') || 0; if (Date.now() - t < 7 * 864e5) return; } catch { /* stockage indisponible */ }
     const ios = MG.device() === 'ios';
     if (!ios && !MG.canInstall()) return; // le navigateur ne propose pas l'installation (déjà installée, navigateur trop ancien…)

@@ -213,6 +213,10 @@ const SCHEMA = [
   `CREATE INDEX IF NOT EXISTS idx_items_order ON order_items(order_id)`,
   `CREATE TABLE IF NOT EXISTS notifications (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, title TEXT NOT NULL, body TEXT, url TEXT, read INTEGER NOT NULL DEFAULT 0, created_at TEXT)`,
   `CREATE INDEX IF NOT EXISTS idx_notif_user ON notifications(user_id, created_at)`,
+  `CREATE INDEX IF NOT EXISTS idx_notif_created ON notifications(created_at)`,
+  // Téléphones et ordinateurs abonnés aux notifications push (un par appareil, rattaché au compte connecté dessus)
+  `CREATE TABLE IF NOT EXISTS push_subs (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, endpoint TEXT NOT NULL UNIQUE, p256dh TEXT NOT NULL, auth TEXT NOT NULL, created_at TEXT)`,
+  `CREATE INDEX IF NOT EXISTS idx_push_user ON push_subs(user_id)`,
   `CREATE TABLE IF NOT EXISTS chat_messages (id TEXT PRIMARY KEY, order_id TEXT NOT NULL, sender_id TEXT NOT NULL, sender_name TEXT, sender_role TEXT, body TEXT NOT NULL, created_at TEXT)`,
   `CREATE INDEX IF NOT EXISTS idx_chat_order ON chat_messages(order_id, created_at)`,
   `CREATE TABLE IF NOT EXISTS couriers (user_id TEXT PRIMARY KEY, available INTEGER NOT NULL DEFAULT 0, lat REAL, lng REAL, vehicle TEXT, updated_at INTEGER)`,
@@ -276,7 +280,7 @@ const SCHEMA = [
 // Colonnes ajoutées après la première version : créées sur les bases existantes
 const MIGRATIONS = {
   users: [['avatar_id', 'TEXT'], ['sub_plan', 'TEXT'], ['sub_until', 'INTEGER'], ['sub_trial', 'INTEGER NOT NULL DEFAULT 0'], ['sub_notice', 'TEXT']],
-  notifications: [['kind', 'TEXT']],
+  notifications: [['kind', 'TEXT'], ['pushed', 'INTEGER NOT NULL DEFAULT 0']],
   products: [['unit', "TEXT NOT NULL DEFAULT 'piece'"], ['qty_step', 'REAL NOT NULL DEFAULT 1'], ['promo_price', 'INTEGER'], ['promo_until', 'INTEGER'], ['promo_start', 'INTEGER'], ['stock_updated_at', 'INTEGER'], ['photos', 'TEXT']],
   shops: [['loyalty_enabled', 'INTEGER NOT NULL DEFAULT 0'], ['loyalty_every', 'INTEGER'], ['loyalty_kind', 'TEXT'], ['loyalty_value', 'INTEGER'],
     ['loyalty_min', 'INTEGER'], ['loyalty_days', 'INTEGER'], ['cover_photo', 'TEXT'], ['look', 'TEXT'], ['pro', 'INTEGER NOT NULL DEFAULT 0'], ['template', 'TEXT'], ['site', 'TEXT'],

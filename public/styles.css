@@ -887,14 +887,14 @@ main[data-template="agence"] #products .tile.service .pbody{flex:1}
 .site-foot a + a{margin-left:var(--space-4)}
 
 /* Bandeau d'installation (toutes les pages) */
-#appBanner{position:fixed;left:12px;right:12px;bottom:16px;margin:0 auto;max-width:520px;z-index:40;display:flex;align-items:center;gap:12px;
+:is(#appBanner,#pushBanner){position:fixed;left:12px;right:12px;bottom:16px;margin:0 auto;max-width:520px;z-index:40;display:flex;align-items:center;gap:12px;
   padding:12px 12px 12px 14px;background:var(--surface-200);color:var(--ink);border:1px solid var(--line);border-radius:var(--radius-l);box-shadow:var(--shadow-3);animation:pop .35s var(--bounce) both}
-#appBanner img{border-radius:14px;flex:none}
-#appBanner .ab-txt{flex:1;display:flex;flex-direction:column;gap:2px;font-size:.9rem;line-height:1.35}
-#appBanner .ab-txt>b{font:800 1rem var(--font-display)}
-#appBanner .ab-key{display:inline-block;padding:0 6px;border:1px solid var(--line-strong);border-radius:6px}
-#appBanner .ab-x{flex:none;display:grid;place-items:center;width:36px;height:36px;border:0;border-radius:50%;background:var(--surface-300);color:var(--ink);cursor:pointer}
-#appBanner .ab-arrow{position:absolute;left:50%;bottom:-34px;transform:translateX(-50%);font-size:26px;color:var(--papaye);animation:ab-bounce 1.2s ease-in-out infinite}
+:is(#appBanner,#pushBanner) img{border-radius:14px;flex:none}
+:is(#appBanner,#pushBanner) .ab-txt{flex:1;display:flex;flex-direction:column;gap:2px;font-size:.9rem;line-height:1.35}
+:is(#appBanner,#pushBanner) .ab-txt>b{font:800 1rem var(--font-display)}
+:is(#appBanner,#pushBanner) .ab-key{display:inline-block;padding:0 6px;border:1px solid var(--line-strong);border-radius:6px}
+:is(#appBanner,#pushBanner) .ab-x{flex:none;display:grid;place-items:center;width:36px;height:36px;border:0;border-radius:50%;background:var(--surface-300);color:var(--ink);cursor:pointer}
+:is(#appBanner,#pushBanner) .ab-arrow{position:absolute;left:50%;bottom:-34px;transform:translateX(-50%);font-size:26px;color:var(--papaye);animation:ab-bounce 1.2s ease-in-out infinite}
 @keyframes ab-bounce{50%{transform:translate(-50%,6px)}}
 body.has-app-banner #bot,body.has-app-banner #cartFab{display:none}
 /* Page de téléchargement : bloc principal */
@@ -904,4 +904,14 @@ body.has-app-banner #bot,body.has-app-banner #cartFab{display:none}
 .app-ios{display:flex;flex-direction:column;gap:var(--space-3);align-items:flex-start;max-width:360px;margin:0 auto;text-align:left;font-size:1.05rem}
 .app-step{display:inline-grid;place-items:center;width:30px;height:30px;margin-right:10px;border-radius:50%;background:var(--papaye);color:var(--on-papaye);font-weight:800}
 .app-others{margin:var(--space-5) 0}.app-others>summary{cursor:pointer;font-weight:700;color:var(--papaye-text);padding:var(--space-2) 0}
-#appBanner.ios{bottom:58px} /* place pour la flèche vers le bouton Partager de Safari */
+:is(#appBanner,#pushBanner).ios{bottom:58px} /* place pour la flèche vers le bouton Partager de Safari */
+
+/* Bandeau « Activer les notifications » et bloc des réglages */
+#pushBanner .pb-bell{flex:none;display:grid;place-items:center;width:52px;height:52px;border-radius:14px;background:var(--papaye);color:var(--on-papaye)}
+#pushBanner .pb-bell svg{transform-origin:50% 10%;animation:pb-ring 1.6s ease-in-out infinite}
+@keyframes pb-ring{0%,60%,100%{transform:rotate(0)}10%,30%{transform:rotate(-16deg)}20%,40%{transform:rotate(16deg)}}
+@media (prefers-reduced-motion:reduce){#pushBanner .pb-bell svg{animation:none}}
+.push-box{margin-top:var(--space-4);padding-top:var(--space-4);border-top:1px solid var(--line)}
+.push-row{display:flex;gap:var(--space-3);align-items:center;justify-content:space-between;flex-wrap:wrap}
+.push-row b{display:inline-flex;align-items:center;gap:6px}
+.push-on{color:var(--green-text, #1d7a46);font-weight:700}
