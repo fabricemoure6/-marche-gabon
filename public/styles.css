@@ -885,3 +885,23 @@ main[data-template="agence"] #products .tile.service .pbody{flex:1}
 .app-faq{margin:var(--space-6) 0}.app-faq details{background:var(--surface-200);border:1px solid var(--line);border-radius:var(--radius-m);padding:var(--space-3) var(--space-4);margin-bottom:var(--space-2)}
 .app-faq summary{cursor:pointer;font-weight:700}.app-faq details p{margin:.6rem 0 0}
 .site-foot a + a{margin-left:var(--space-4)}
+
+/* Bandeau d'installation (toutes les pages) */
+#appBanner{position:fixed;left:12px;right:12px;bottom:16px;margin:0 auto;max-width:520px;z-index:40;display:flex;align-items:center;gap:12px;
+  padding:12px 12px 12px 14px;background:var(--surface-200);color:var(--ink);border:1px solid var(--line);border-radius:var(--radius-l);box-shadow:var(--shadow-3);animation:pop .35s var(--bounce) both}
+#appBanner img{border-radius:14px;flex:none}
+#appBanner .ab-txt{flex:1;display:flex;flex-direction:column;gap:2px;font-size:.9rem;line-height:1.35}
+#appBanner .ab-txt>b{font:800 1rem var(--font-display)}
+#appBanner .ab-key{display:inline-block;padding:0 6px;border:1px solid var(--line-strong);border-radius:6px}
+#appBanner .ab-x{flex:none;display:grid;place-items:center;width:36px;height:36px;border:0;border-radius:50%;background:var(--surface-300);color:var(--ink);cursor:pointer}
+#appBanner .ab-arrow{position:absolute;left:50%;bottom:-34px;transform:translateX(-50%);font-size:26px;color:var(--papaye);animation:ab-bounce 1.2s ease-in-out infinite}
+@keyframes ab-bounce{50%{transform:translate(-50%,6px)}}
+body.has-app-banner #bot,body.has-app-banner #cartFab{display:none}
+/* Page de téléchargement : bloc principal */
+.app-main{text-align:center;padding:var(--space-6) var(--space-5);border:2px solid var(--papaye);box-shadow:0 0 0 4px var(--papaye-tint)}
+.app-main h2{margin-top:0}
+.app-big{font-size:1.15rem;min-height:60px;padding:0 var(--space-6)}
+.app-ios{display:flex;flex-direction:column;gap:var(--space-3);align-items:flex-start;max-width:360px;margin:0 auto;text-align:left;font-size:1.05rem}
+.app-step{display:inline-grid;place-items:center;width:30px;height:30px;margin-right:10px;border-radius:50%;background:var(--papaye);color:var(--on-papaye);font-weight:800}
+.app-others{margin:var(--space-5) 0}.app-others>summary{cursor:pointer;font-weight:700;color:var(--papaye-text);padding:var(--space-2) 0}
+#appBanner.ios{bottom:58px} /* place pour la flèche vers le bouton Partager de Safari */
