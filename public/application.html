@@ -23,8 +23,19 @@
       </ul>
     </div>
   </section>
+  <section class="card app-main" id="main">
+    <h2 id="mainTitle">Installer sur cet appareil</h2>
+    <button type="button" class="btn app-big" id="bigInstall" hidden>📲 Installer Marché Gabon</button>
+    <div id="iosSteps" class="app-ios" hidden>
+      <div><span class="app-step">1</span>Touchez <span class="app-key">⬆︎</span> <b>Partager</b>, en bas de l'écran</div>
+      <div><span class="app-step">2</span>Touchez <b>Sur l'écran d'accueil</b></div>
+      <div><span class="app-step">3</span>Touchez <b>Ajouter</b></div>
+    </div>
+    <p class="muted" id="mainHelp" style="margin:var(--space-3) 0 0"></p>
+  </section>
   <div id="installed" class="notice" hidden>✅ <b>L'application est déjà installée sur cet appareil.</b> Vous pouvez l'ouvrir depuis votre écran d'accueil.</div>
 
+  <details class="app-others" id="others"><summary>Installer sur un autre appareil, ou si le bouton n'apparaît pas</summary>
   <div class="app-cards" id="cards">
     <section class="card app-card" id="android" data-os="android">
       <div class="app-card-head"><span class="app-os">🤖</span><h2>Android</h2><span class="tag ready" data-here hidden>Votre appareil</span></div>
@@ -59,6 +70,8 @@
     </section>
   </div>
 
+  </details>
+
   <section class="card app-qr" id="qrBox" hidden>
     <canvas id="qr" width="180" height="180" aria-label="QR code vers cette page"></canvas>
     <div><h2>Installer sur votre téléphone</h2><p class="muted">Scannez ce code avec l'appareil photo de votre téléphone : cette page s'ouvre, et vous suivez les étapes de votre appareil.</p></div>
@@ -81,7 +94,20 @@
   // L'appareil de la personne passe en premier
   const mine = document.querySelector(`[data-os="${os}"]`);
   $('#cards').prepend(mine); mine.classList.add('here'); mine.querySelector('[data-here]').hidden = false;
-  if (MG.isStandalone()) $('#installed').hidden = false;
+  if (MG.isStandalone()) { $('#installed').hidden = false; $('#main').hidden = true; }
+  // Bloc principal : le geste le plus simple pour cet appareil
+  const main = () => {
+    const can = MG.canInstall() && !MG.isStandalone();
+    $('#bigInstall').hidden = !can;
+    $('#iosSteps').hidden = os !== 'ios' || !MG.iosSafari();
+    $('#mainTitle').textContent = os === 'ios' ? 'Installer sur votre iPhone' : os === 'android' ? 'Installer sur votre téléphone' : 'Installer sur votre ordinateur';
+    $('#mainHelp').innerHTML = can ? 'Un toucher, et l\'icône Marché Gabon apparaît sur votre écran d\'accueil.'
+      : os === 'ios' ? (MG.iosSafari() ? '3 touchers, et l\'icône Marché Gabon apparaît sur votre écran d\'accueil.' : 'Ouvrez d\'abord cette page dans <b>Safari</b> (menu ⋯ → <b>Ouvrir dans Safari</b>), puis suivez les 3 étapes.')
+      : os === 'android' ? 'Si le bouton n\'apparaît pas : ouvrez cette page dans <b>Chrome</b>, puis menu <b>⋮</b> → <b>Installer l\'application</b>.'
+      : 'Si le bouton n\'apparaît pas : ouvrez cette page dans <b>Chrome</b> ou <b>Edge</b>, puis cliquez sur l\'icône d\'installation ⊕ dans la barre d\'adresse.';
+  };
+  main(); addEventListener('mg-install-ready', main);
+  $('#bigInstall').onclick = async () => { const ok = await MG.install(); if (ok) { MG.toast('Marché Gabon s\'installe sur votre écran d\'accueil'); $('#installed').hidden = false; } main(); };
   // Bouton « Installer » quand le navigateur le permet (Chrome, Edge, Samsung Internet…)
   const syncInstall = () => document.querySelectorAll('[data-install]').forEach(b => { b.hidden = !MG.canInstall() || MG.isStandalone(); });
   syncInstall(); addEventListener('mg-install-ready', syncInstall); addEventListener('appinstalled', () => { syncInstall(); $('#installed').hidden = false; });

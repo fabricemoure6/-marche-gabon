@@ -752,6 +752,30 @@
   addEventListener('beforeinstallprompt', e => { e.preventDefault(); installEvt = e; dispatchEvent(new Event('mg-install-ready')); });
   addEventListener('appinstalled', () => { installEvt = null; });
   MG.canInstall = () => !!installEvt;
+  const UA = navigator.userAgent;
+  MG.device = () => (/iPhone|iPad|iPod/.test(UA) || (/Macintosh/.test(UA) && navigator.maxTouchPoints > 1) ? 'ios' : /Android/.test(UA) ? 'android' : 'desktop');
+  // Sur iPhone, seul Safari sait ajouter à l'écran d'accueil (pas les navigateurs intégrés de WhatsApp, Facebook…)
+  MG.iosSafari = () => MG.device() === 'ios' && /Safari/.test(UA) && !/CriOS|FxiOS|EdgiOS|FBAN|FBAV|Instagram|Line|GSA/.test(UA);
+
+  // Bandeau « Installer Marché Gabon » : un toucher sur Android et ordinateur, le geste exact sur iPhone
+  function installBanner() {
+    if (MG.isStandalone() || /\/application(\.html)?$/.test(location.pathname) || document.getElementById('appBanner')) return;
+    try { const t = +localStorage.getItem('mg-app-later') || 0; if (Date.now() - t < 7 * 864e5) return; } catch { /* stockage indisponible */ }
+    const ios = MG.device() === 'ios';
+    if (!ios && !MG.canInstall()) return; // le navigateur ne propose pas l'installation (déjà installée, navigateur trop ancien…)
+    const b = document.createElement('div'); b.id = 'appBanner'; if (ios && MG.iosSafari()) b.className = 'ios'; b.setAttribute('role', 'dialog'); b.setAttribute('aria-label', 'Installer l\'application');
+    b.innerHTML = `<img src="/img/icon-192.png" alt="" width="52" height="52"><div class="ab-txt"><b>Installer Marché Gabon</b>
+      <span>${!ios ? 'L\'application sur votre écran d\'accueil, en un toucher.' : MG.iosSafari() ? 'Touchez <span class="ab-key" aria-label="Partager">⬆︎</span> en bas de l\'écran, puis <b>« Sur l\'écran d\'accueil »</b>.' : 'Ouvrez cette page dans <b>Safari</b> pour l\'installer.'}</span></div>
+      ${!ios ? '<button type="button" class="btn small" id="abGo">Installer</button>' : ''}<button type="button" class="ab-x" id="abX" aria-label="Plus tard">${MG.icon('x', 18)}</button>
+      ${ios && MG.iosSafari() ? '<span class="ab-arrow" aria-hidden="true">⬇</span>' : ''}`;
+    document.body.appendChild(b); document.body.classList.add('has-app-banner');
+    const close = later => { b.remove(); document.body.classList.remove('has-app-banner'); if (later) try { localStorage.setItem('mg-app-later', String(Date.now())); } catch { /* rien */ } };
+    b.querySelector('#abX').onclick = () => close(true);
+    const go = b.querySelector('#abGo'); if (go) go.onclick = async () => { const ok = await MG.install(); close(!ok); if (ok) MG.toast('Marché Gabon s\'installe sur votre écran d\'accueil'); };
+  }
+  MG.installBanner = installBanner;
+  addEventListener('mg-install-ready', () => setTimeout(installBanner, 4000));
+  addEventListener('appinstalled', () => { const b = document.getElementById('appBanner'); if (b) b.remove(); document.body.classList.remove('has-app-banner'); });
   MG.install = async () => { if (!installEvt) return false; installEvt.prompt(); const r = await installEvt.userChoice.catch(() => null); installEvt = null; return !!r && r.outcome === 'accepted'; };
   if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {
     addEventListener('load', () => { navigator.serviceWorker.register('/sw.js').catch(() => { /* navigateur sans service worker : le site marche quand même */ }); });
@@ -774,6 +798,11 @@
     }
     await renderHeader();
     botWidget();
+    if (MG.device() === 'ios') setTimeout(installBanner, 4000);
+    document.addEventListener('click', async e => {
+      const a = e.target.closest('a[href="/application.html"]');
+      if (a && MG.canInstall()) { e.preventDefault(); const ok = await MG.install(); if (ok) MG.toast('Marché Gabon s\'installe sur votre écran d\'accueil'); } // un toucher, sans passer par la page
+    });
   })();
 
 
