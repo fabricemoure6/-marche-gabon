@@ -10,6 +10,7 @@ import { notify, confirmCheckout, rejectCheckout, cancelOrders, releaseVoucher, 
 import { botReply, searchProducts } from './bot.js';
 import { seoRoute } from './seo.js';
 import { subSweep, subRoutes, subAdminRoutes, subState, isBlocked } from './subs.js';
+import { pushRoutes, flushPush } from './push.js';
 
 const cleanText = (v, max) => String(v ?? '').replace(/[\u0000-\u001f\u007f]/g, ' ').trim().slice(0, max);
 const validEmail = e => /^[^\s@]{1,64}@[^\s@]{1,190}\.[^\s@]{2,}$/.test(e) && e.length <= 254;
@@ -281,7 +282,7 @@ export default {
   // Déclencheur planifié (toutes les 15 min) : fait avancer la sauvegarde du jour puis surveille qu'elle ne prend pas de retard
   async scheduled(event, env, ctx) {
     ctx.waitUntil((async () => {
-      try { await ensureSchema(env.DB); await subSweep(env, true); } catch (e) { console.error('abonnements', e && e.message); }
+      try { await ensureSchema(env.DB); await subSweep(env, true); await flushPush(env, null, true); } catch (e) { console.error('abonnements', e && e.message); }
       try { if (!env.BACKUPS) return; await backupStep(env); await backupWatch(env); }
       catch (e) { console.error('sauvegarde', e && e.message); }
     })());
@@ -290,7 +291,9 @@ export default {
     const res = await route(request, env);
     if (!['GET', 'HEAD'].includes(request.method)) clearCache(); // une écriture : la mémoire courte repart de zéro
     // Abonnements : échéances, rappels et boutiques à masquer, vérifiés au plus toutes les 10 minutes, après la réponse
-    if (ctx && ctx.waitUntil) ctx.waitUntil(ensureSchema(env.DB).then(() => subSweep(env)).catch(e => console.error('abonnements', e && e.message)));
+    // Puis les notifications nouvelles partent sur les téléphones abonnés (notifications push)
+    if (ctx && ctx.waitUntil) ctx.waitUntil(ensureSchema(env.DB).then(() => subSweep(env)).catch(e => console.error('abonnements', e && e.message))
+      .then(() => flushPush(env, new URL(request.url).origin)).catch(e => console.error('push', e && e.message)));
     return withSecurityHeaders(res);
   }
 };
@@ -438,6 +441,8 @@ async function route(request, env) {
       if (subRes) return subRes;
       const svcRes = await serviceCustomerRoutes(env, request, user, p, method, { readJson, cleanText });
       if (svcRes) return svcRes;
+      const pushRes = await pushRoutes(env, request, user, p, method, { readJson });
+      if (pushRes) return pushRes;
 
       if (method === 'GET' && p === '/api/notifications') {
         const { results } = await env.DB.prepare('SELECT id,title,body,url,read,created_at,kind FROM notifications WHERE user_id=?1 ORDER BY created_at DESC LIMIT 30').bind(user.id).all();
